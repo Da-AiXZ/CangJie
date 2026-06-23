@@ -135,9 +135,9 @@ struct LLMProfile: Codable, Identifiable, Equatable {
 /// LLM 控制配置，对应后端 LLMControlConfig
 struct LLMControlConfig: Codable, Equatable {
     let version: Int
-    let activeProfileId: String?
+    var activeProfileId: String?
     let endpointMode: String
-    let profiles: [LLMProfile]
+    var profiles: [LLMProfile]
 
     enum CodingKeys: String, CodingKey {
         case version
