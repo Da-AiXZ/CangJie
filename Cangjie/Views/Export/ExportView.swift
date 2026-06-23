@@ -17,8 +17,6 @@ struct ExportView: View {
     @State private var includeCover = true
     @State private var includeTOC = true
     @State private var exportAllChapters = true
-    @State private var chapterStart: Double = 1
-    @State private var chapterEnd: Double = 100
 
     var body: some View {
         ScrollView {
@@ -100,25 +98,11 @@ struct ExportView: View {
             Text("章节范围").font(Theme.headlineFont())
 
             Toggle("导出全部章节", isOn: $exportAllChapters)
+                .disabled(true)
 
-            if !exportAllChapters {
-                VStack(spacing: 8) {
-                    Text("第 \(Int(chapterStart)) ~ \(Int(chapterEnd)) 章")
-                        .font(.system(size: 12, design: .monospaced))
-                    HStack {
-                        Text("起").font(.caption)
-                        Slider(value: $chapterStart, in: 1...200, step: 1) { editing in
-                            if !editing, chapterStart > chapterEnd { chapterEnd = chapterStart }
-                        }
-                    }
-                    HStack {
-                        Text("止").font(.caption)
-                        Slider(value: $chapterEnd, in: 1...200, step: 1) { editing in
-                            if !editing, chapterEnd < chapterStart { chapterStart = chapterEnd }
-                        }
-                    }
-                }
-            }
+            Text("（章节范围导出暂未开放，当前导出全部章节）")
+                .font(.system(size: 11))
+                .foregroundColor(Theme.textTertiary)
         }
         .cardStyle()
     }
