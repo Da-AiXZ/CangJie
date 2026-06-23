@@ -190,7 +190,7 @@ struct DAGCanvasView: View {
 
             // 圆角矩形
             let roundRect = RoundedRectangle(cornerRadius: 8)
-            let path = Path(roundRect.path(in: rect))
+            let path = roundRect.path(in: rect)
 
             // 填充色
             let fillColor = nodeFillColor(status)
@@ -200,14 +200,14 @@ struct DAGCanvasView: View {
             let strokeColor = nodeStrokeColor(status)
             let borderWidth: CGFloat = status == "running" ? 2.5 + pulsePhase : 2
             context.stroke(
-                Path(roundRect.path(in: rect)),
+                roundRect.path(in: rect),
                 with: .color(strokeColor),
                 style: StrokeStyle(lineWidth: borderWidth, lineCap: .round)
             )
 
             // 顶部色条（分类色）
             let headerRect = CGRect(x: rect.minX, y: rect.minY, width: rect.width, height: 4)
-            let headerPath = Path(RoundedRectangle(cornerRadius: 4).path(in: headerRect))
+            let headerPath = RoundedRectangle(cornerRadius: 4).path(in: headerRect)
             context.fill(headerPath, with: .color(categoryColor(nodeDef?.type ?? "")))
 
             // 节点标签

@@ -71,9 +71,9 @@ struct QualityGuardrailPanel: View {
         // 数据多边形
         var dataPath = Path()
         for (i, dim) in dimensions.enumerated() {
-            let angle: CGFloat = CGFloat(i) / CGFloat(n) * 2 * .pi - .pi / 2
+            let angleD: Double = Double(i) / Double(n) * 2 * .pi - .pi / 2
             let r = radius * dim.1
-            let p = CGPoint(x: center.x + r * cos(angle), y: center.y + r * sin(angle))
+            let p = CGPoint(x: center.x + r * CGFloat(cos(angleD)), y: center.y + r * CGFloat(sin(angleD)))
             if i == 0 { dataPath.move(to: p) } else { dataPath.addLine(to: p) }
         }
         dataPath.closeSubpath()
@@ -82,8 +82,8 @@ struct QualityGuardrailPanel: View {
 
         // 标签
         for (i, dim) in dimensions.enumerated() {
-            let angle: CGFloat = CGFloat(i) / CGFloat(n) * 2 * .pi - .pi / 2
-            let labelPos = CGPoint(x: center.x + (radius + 12) * cos(angle), y: center.y + (radius + 12) * sin(angle))
+            let angleD: Double = Double(i) / Double(n) * 2 * .pi - .pi / 2
+            let labelPos = CGPoint(x: center.x + (radius + 12) * CGFloat(cos(angleD)), y: center.y + (radius + 12) * CGFloat(sin(angleD)))
             context.draw(Text(dim.0).font(.system(size: 9)).foregroundColor(Theme.textSecondary), at: labelPos)
         }
     }

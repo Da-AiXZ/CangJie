@@ -17,41 +17,44 @@ struct CastGraphView: View {
     @State private var selectedCharacter: CastCharacter?
 
     var body: some View {
-        Group {
-            if castStore.isLoading {
-                VStack(spacing: Theme.Spacing.lg) {
-                    ProgressView()
-                        .scaleEffect(1.2)
-                    Text("加载人物关系…")
-                        .font(Theme.bodyFont())
-                        .foregroundColor(Theme.textSecondary)
+        contentView
+            .navigationTitle("人物关系")
+            .task {
+                if let novelId = appState.currentNovelId {
+                    await castStore.loadCastGraph(novelId: novelId)
                 }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else if let graph = castStore.castGraph, !graph.characters.isEmpty {
-                ForceDirectedGraph(
-                    nodes: graphNodes(graph),
-                    edges: graphEdges(graph),
-                    nodeColor: { node in characterColor(node.type) },
-                    nodeRadius: { _ in 28 },
-                    nodeLabel: { $0.label },
-                    edgeColor: { edge in relationColor(edge.type) },
-                    edgeLabel: { $0.label },
-                    onTapNode: { nodeId in
-                        selectedCharacter = graph.characters.first { $0.id == nodeId }
-                    }
-                )
-            } else {
-                emptyState
             }
-        }
-        .navigationTitle("人物关系")
-        .task {
-            if let novelId = appState.currentNovelId {
-                await castStore.loadCastGraph(novelId: novelId)
+            .sheet(item: $selectedCharacter) { character in
+                characterDetailSheet(character)
             }
-        }
-        .sheet(item: $selectedCharacter) { character in
-            characterDetailSheet(character)
+    }
+
+    @ViewBuilder
+    private var contentView: some View {
+        if castStore.isLoading {
+            VStack(spacing: Theme.Spacing.lg) {
+                ProgressView()
+                    .scaleEffect(1.2)
+                Text("加载人物关系…")
+                    .font(Theme.bodyFont())
+                    .foregroundColor(Theme.textSecondary)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else if let graph = castStore.castGraph, !graph.characters.isEmpty {
+            ForceDirectedGraph(
+                nodes: graphNodes(graph),
+                edges: graphEdges(graph),
+                nodeColor: { node in characterColor(node.type) },
+                nodeRadius: { _ in 28 },
+                nodeLabel: { $0.label },
+                edgeColor: { edge in relationColor(edge.type) },
+                edgeLabel: { $0.label },
+                onTapNode: { nodeId in
+                    selectedCharacter = graph.characters.first { $0.id == nodeId }
+                }
+            )
+        } else {
+            emptyState
         }
     }
 
