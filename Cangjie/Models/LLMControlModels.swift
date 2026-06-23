@@ -57,7 +57,7 @@ struct LLMPreset: Codable, Identifiable, Equatable {
 
 /// LLM 端点配置，对应后端 LLMProfile
 struct LLMProfile: Codable, Identifiable, Equatable {
-    let id: String
+    var id: String
     let name: String
     let presetKey: String
     let `protocol`: String
