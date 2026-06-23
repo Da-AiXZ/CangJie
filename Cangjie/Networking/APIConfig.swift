@@ -110,40 +110,45 @@ final class APIConfig: ObservableObject {
 
         // 优先从 UserDefaults 加载配置（TrollStore 环境下杀后台不丢失）
         // 如果 UserDefaults 没有，尝试从 Keychain 读取（老版本数据迁移）
-        if let savedBaseURL = UserDefaults.standard.string(forKey: UserDefaultsKey.baseURL) {
-            self.baseURL = savedBaseURL
+        // 注意：Swift 规定 init 中所有存储属性初始化完成前不能访问 self 的属性，
+        // 因此用局部变量承载 Keychain 读取结果，避免访问 self.xxx。
+        if let saved = UserDefaults.standard.string(forKey: UserDefaultsKey.baseURL) {
+            self.baseURL = saved
         } else {
-            self.baseURL = (try? keychain.get(KeychainKey.baseURL)) ?? ""
-            // 迁移：如果 Keychain 有值，同步到 UserDefaults
-            if !self.baseURL.isEmpty {
-                UserDefaults.standard.set(self.baseURL, forKey: UserDefaultsKey.baseURL)
+            let fromKeychain = (try? keychain.get(KeychainKey.baseURL)) ?? ""
+            self.baseURL = fromKeychain
+            if !fromKeychain.isEmpty {
+                UserDefaults.standard.set(fromKeychain, forKey: UserDefaultsKey.baseURL)
             }
         }
 
-        if let savedBearerToken = UserDefaults.standard.string(forKey: UserDefaultsKey.bearerToken) {
-            self.bearerToken = savedBearerToken
+        if let saved = UserDefaults.standard.string(forKey: UserDefaultsKey.bearerToken) {
+            self.bearerToken = saved
         } else {
-            self.bearerToken = (try? keychain.get(KeychainKey.bearerToken)) ?? ""
-            if !self.bearerToken.isEmpty {
-                UserDefaults.standard.set(self.bearerToken, forKey: UserDefaultsKey.bearerToken)
+            let fromKeychain = (try? keychain.get(KeychainKey.bearerToken)) ?? ""
+            self.bearerToken = fromKeychain
+            if !fromKeychain.isEmpty {
+                UserDefaults.standard.set(fromKeychain, forKey: UserDefaultsKey.bearerToken)
             }
         }
 
-        if let savedBasicAuthUser = UserDefaults.standard.string(forKey: UserDefaultsKey.basicAuthUser) {
-            self.basicAuthUser = savedBasicAuthUser
+        if let saved = UserDefaults.standard.string(forKey: UserDefaultsKey.basicAuthUser) {
+            self.basicAuthUser = saved
         } else {
-            self.basicAuthUser = (try? keychain.get(KeychainKey.basicAuthUser)) ?? ""
-            if !self.basicAuthUser.isEmpty {
-                UserDefaults.standard.set(self.basicAuthUser, forKey: UserDefaultsKey.basicAuthUser)
+            let fromKeychain = (try? keychain.get(KeychainKey.basicAuthUser)) ?? ""
+            self.basicAuthUser = fromKeychain
+            if !fromKeychain.isEmpty {
+                UserDefaults.standard.set(fromKeychain, forKey: UserDefaultsKey.basicAuthUser)
             }
         }
 
-        if let savedBasicAuthPassword = UserDefaults.standard.string(forKey: UserDefaultsKey.basicAuthPassword) {
-            self.basicAuthPassword = savedBasicAuthPassword
+        if let saved = UserDefaults.standard.string(forKey: UserDefaultsKey.basicAuthPassword) {
+            self.basicAuthPassword = saved
         } else {
-            self.basicAuthPassword = (try? keychain.get(KeychainKey.basicAuthPassword)) ?? ""
-            if !self.basicAuthPassword.isEmpty {
-                UserDefaults.standard.set(self.basicAuthPassword, forKey: UserDefaultsKey.basicAuthPassword)
+            let fromKeychain = (try? keychain.get(KeychainKey.basicAuthPassword)) ?? ""
+            self.basicAuthPassword = fromKeychain
+            if !fromKeychain.isEmpty {
+                UserDefaults.standard.set(fromKeychain, forKey: UserDefaultsKey.basicAuthPassword)
             }
         }
     }
