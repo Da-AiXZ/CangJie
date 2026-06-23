@@ -1,0 +1,160 @@
+/* 仓颉 — PlotPilot iOS 客户端本地化字符串（简体中文） */
+
+/* ═══ 通用按钮 ═══ */
+"common.confirm" = "确认";
+"common.cancel" = "取消";
+"common.save" = "保存";
+"common.delete" = "删除";
+"common.edit" = "编辑";
+"common.add" = "添加";
+"common.create" = "创建";
+"common.close" = "关闭";
+"common.retry" = "重试";
+"common.refresh" = "刷新";
+"common.done" = "完成";
+"common.next" = "下一步";
+"common.previous" = "上一步";
+"common.back" = "返回";
+"common.search" = "搜索";
+"common.loading" = "加载中...";
+"common.no_data" = "暂无数据";
+"common.export" = "导出";
+"common.import" = "导入";
+"common.copy" = "复制";
+"common.share" = "分享";
+"common.select_all" = "全选";
+"common.deselect_all" = "取消全选";
+
+/* ═══ 连接状态 ═══ */
+"status.connected" = "已连接";
+"status.disconnected" = "未连接";
+"status.connecting" = "连接中...";
+"status.healthy" = "健康";
+"status.unhealthy" = "异常";
+"status.running" = "运行中";
+"status.stopped" = "已停止";
+"status.paused" = "已暂停";
+"status.idle" = "空闲";
+"status.error" = "错误";
+"status.unknown" = "未知";
+
+/* ═══ 服务器配置 ═══ */
+"server.title" = "服务器配置";
+"server.url_placeholder" = "https://plotpilot.example.com";
+"server.token_placeholder" = "Bearer Token（可选）";
+"server.basic_auth_user" = "Basic Auth 用户名（可选）";
+"server.basic_auth_password" = "Basic Auth 密码（可选）";
+"server.test_connection" = "测试连接";
+"server.save" = "保存配置";
+"server.connection_success" = "连接成功";
+"server.connection_failed" = "连接失败";
+"server.daemon_running" = "守护进程运行中";
+"server.daemon_stopped" = "守护进程未运行";
+"server.backend_version" = "后端版本";
+"server.first_launch_guide" = "首次启动，请配置服务器地址";
+"server.url_required" = "请输入服务器地址";
+
+/* ═══ 导航 ═══ */
+"nav.bookshelf" = "书架";
+"nav.workbench" = "工作台";
+"nav.autopilot" = "自动驾驶";
+"nav.bible" = "设定集";
+"nav.knowledge_graph" = "知识图谱";
+"nav.cast" = "人物关系";
+"nav.monitor" = "监控";
+"nav.prompt_plaza" = "提示词广场";
+"nav.governance" = "叙事治理";
+"nav.settings" = "设置";
+"nav.export" = "导出";
+"nav.snapshot" = "快照";
+"nav.trace" = "AI Trace";
+
+/* ═══ 书架 ═══ */
+"bookshelf.title" = "书架";
+"bookshelf.create_new" = "新建小说";
+"bookshelf.empty" = "书架空空如也，点击右上角创建第一部小说";
+"bookshelf.word_count" = "%d 字";
+"bookshelf.chapter_count" = "%d 章";
+"bookshelf.progress" = "进度";
+
+/* ═══ 新书向导 ═══ */
+"wizard.step1_title" = "设定生成";
+"wizard.step2_title" = "角色设定";
+"wizard.step3_title" = "宏观规划";
+"wizard.novel_title" = "小说标题";
+"wizard.novel_author" = "作者";
+"wizard.novel_premise" = "故事梗概";
+"wizard.target_chapters" = "目标章数";
+"wizard.genre" = "类型";
+"wizard.world_preset" = "世界观基调";
+
+/* ═══ 工作台 ═══ */
+"workbench.title" = "工作台";
+"workbench.chapter_content" = "章节正文";
+"workbench.chapter_navigator" = "章节导航";
+"workbench.context_panel" = "上下文";
+"workbench.save_chapter" = "保存章节";
+"workbench.generate_hint" = "生成提示";
+"workbench.ai_review" = "AI 审阅";
+"workbench.generating" = "正在生成...";
+"workbench.word_count" = "字数：%d";
+
+/* ═══ 自动驾驶 ═══ */
+"autopilot.title" = "自动驾驶控制台";
+"autopilot.start" = "启动";
+"autopilot.stop" = "停止";
+"autopilot.resume" = "恢复";
+"autopilot.target_chapters" = "目标章数";
+"autopilot.target_words" = "每章字数";
+"autopilot.circuit_breaker" = "熔断器";
+"autopilot.reset_breaker" = "重置熔断器";
+"autopilot.log_stream" = "日志流";
+"autopilot.chapter_stream" = "章节生成流";
+"autopilot.dag_view" = "DAG 视图";
+"autopilot.paused_for_review" = "等待审阅";
+"autopilot.needs_review" = "第 %d 章待审阅";
+
+/* ═══ 设置 ═══ */
+"settings.title" = "设置";
+"settings.appearance" = "外观";
+"settings.theme" = "主题";
+"settings.theme_light" = "浅色";
+"settings.theme_dark" = "深色";
+"settings.theme_system" = "跟随系统";
+"settings.font_size" = "字号";
+"settings.font_small" = "小";
+"settings.font_medium" = "中";
+"settings.font_large" = "大";
+"settings.writing_prefs" = "写作偏好";
+"settings.autopilot_control" = "全托管控制";
+"settings.llm_config" = "模型引擎";
+"settings.server_connection" = "服务器连接";
+"settings.about" = "关于";
+
+/* ═══ LLM 配置 ═══ */
+"llm.title" = "LLM 端点配置";
+"llm.add_profile" = "添加端点";
+"llm.profile_name" = "名称";
+"llm.protocol" = "协议";
+"llm.base_url" = "Base URL";
+"llm.api_key" = "API Key";
+"llm.model" = "模型";
+"llm.temperature" = "温度";
+"llm.max_tokens" = "最大 Token";
+"llm.timeout" = "超时（秒）";
+"llm.activate" = "激活";
+"llm.test" = "测试";
+"llm.fetch_models" = "拉取模型列表";
+"llm.test_success" = "连通成功，延迟 %dms";
+"llm.test_failed" = "连通失败";
+
+/* ═══ 错误消息 ═══ */
+"error.network" = "网络错误，请检查网络连接";
+"error.server" = "服务器错误（%d）：%@";
+"error.decoding" = "数据解析失败";
+"error.auth_failed" = "认证失败，请检查 Token";
+"error.not_found" = "资源不存在";
+"error.service_unavailable" = "服务不可用，请稍后重试";
+"error.invalid_url" = "无效的地址";
+"error.timeout" = "请求超时";
+"error.unknown" = "未知错误";

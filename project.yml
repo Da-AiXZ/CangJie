@@ -1,0 +1,38 @@
+name: Cangjie
+options:
+  createIntermediateGroups: true
+  generateEmptyDirectories: true
+  minimumXcodeGenVersion: "2.30"
+
+packages:
+  KeychainAccess:
+    url: https://github.com/kishikawakatsumi/KeychainAccess
+    majorVersion: "4.2.2"
+
+targets:
+  Cangjie:
+    type: application
+    platform: iOS
+    deploymentTarget:
+      iOS: "16.0"
+    sources:
+      - Cangjie
+    dependencies:
+      - package: KeychainAccess
+        product: KeychainAccess
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.cangjie.ios
+        PRODUCT_NAME: Cangjie
+        INFOPLIST_FILE: Cangjie/Resources/Info.plist
+        CODE_SIGN_ENTITLEMENTS: Cangjie/Resources/Cangjie.entitlements
+        CODE_SIGN_IDENTITY: ""
+        CODE_SIGNING_REQUIRED: NO
+        CODE_SIGNING_ALLOWED: NO
+        DEVELOPMENT_TEAM: ""
+        SWIFT_VERSION: "5.9"
+        SWIFT_STRICT_CONCURRENCY: minimal
+        ARCHS: arm64
+        TARGETED_DEVICE_FAMILY: "1,2"
+        ENABLE_BITCODE: NO
+        GENERATE_INFOPLIST_FILE: NO

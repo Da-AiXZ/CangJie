@@ -1,0 +1,104 @@
+name: Build Cangjie IPA
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - '*.md'
+      - 'docs/**'
+  workflow_dispatch:    # 允许手动触发
+
+env:
+  SCHEME: Cangjie
+  PRODUCT_NAME: Cangjie
+
+jobs:
+  build:
+    name: Build & Package IPA
+    runs-on: macos-14
+    timeout-minutes: 30
+
+    steps:
+      # === 基础设置 ===
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Select Xcode 15.4
+        run: sudo xcode-select -s /Applications/Xcode_15.4.app
+
+      - name: Print Xcode version
+        run: xcodebuild -version
+
+      - name: Install build tools
+        run: |
+          brew install ldid xcodegen
+          gem install xcpretty
+
+      # === SPM 缓存（加速构建）===
+      - name: Cache SPM packages
+        uses: actions/cache@v4
+        with:
+          path: SourcePackages
+          key: ${{ runner.os }}-spm-${{ hashFiles('project.yml') }}
+          restore-keys: ${{ runner.os }}-spm-
+
+      # === 项目生成 ===
+      - name: Configure git HTTPS
+        run: git config --global url."https://github.com/".insteadOf "git@github.com:"
+
+      - name: Generate Xcode project (XcodeGen)
+        run: |
+          xcodegen generate
+          # XcodeGen 2.45+ 生成 objectVersion 77（Xcode 16 格式）
+          # Xcode 15.4 需要 objectVersion 60，用 sed 降级
+          sed -i '' 's/objectVersion = [0-9]*/objectVersion = 60/' Cangjie.xcodeproj/project.pbxproj
+          echo "✅ Cangjie.xcodeproj generated"
+
+      - name: Resolve SPM dependencies
+        run: |
+          xcodebuild -resolvePackageDependencies \
+            -scheme Cangjie \
+            -clonedSourcePackagesDirPath SourcePackages
+
+      # === 编译 ===
+      - name: Build Archive
+        run: |
+          set -o pipefail
+          xcodebuild archive \
+            -scheme Cangjie \
+            -sdk iphoneos \
+            -arch arm64 \
+            -configuration Release \
+            -archivePath build/Cangjie.xcarchive \
+            -clonedSourcePackagesDirPath SourcePackages \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO \
+            DEVELOPMENT_TEAM="" \
+            PRODUCT_BUNDLE_IDENTIFIER=com.cangjie.ios \
+            IPHONEOS_DEPLOYMENT_TARGET=16.0 \
+            SWIFT_STRICT_CONCURRENCY=minimal \
+            | tee build.log | xcpretty --color
+
+      # === 打包 IPA ===
+      - name: Build IPA from Archive
+        run: bash scripts/build-ipa.sh build/Cangjie.xcarchive output
+
+      - name: Verify IPA
+        run: bash scripts/verify-ipa.sh output/Cangjie.ipa
+
+      # === 上传 ===
+      - name: Upload IPA artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Cangjie-IPA
+          path: output/Cangjie.ipa
+          retention-days: 30
+
+      # === 失败时上传构建日志 ===
+      - name: Upload build log on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-log
+          path: build.log
