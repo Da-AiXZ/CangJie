@@ -15,7 +15,7 @@ struct LLMPreset: Codable, Identifiable, Equatable {
     var id: String { key }
     let key: String
     let label: String
-    let protocol: String
+    let `protocol`: String
     let defaultBaseUrl: String
     let defaultModel: String
     let description: String
@@ -33,11 +33,23 @@ struct LLMPreset: Codable, Identifiable, Equatable {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.key = try c.decodeIfPresent(String.self, forKey: .key) ?? ""
         self.label = try c.decodeIfPresent(String.self, forKey: .label) ?? ""
-        self.protocol = try c.decodeIfPresent(String.self, forKey: .protocol) ?? "openai"
+        self.`protocol` = try c.decodeIfPresent(String.self, forKey: .protocol) ?? "openai"
         self.defaultBaseUrl = try c.decodeIfPresent(String.self, forKey: .defaultBaseUrl) ?? ""
         self.defaultModel = try c.decodeIfPresent(String.self, forKey: .defaultModel) ?? ""
         self.description = try c.decodeIfPresent(String.self, forKey: .description) ?? ""
         self.tags = try c.decodeIfPresent([String].self, forKey: .tags) ?? []
+    }
+
+    init(key: String = "", label: String = "", protocol: String = "openai",
+         defaultBaseUrl: String = "", defaultModel: String = "",
+         description: String = "", tags: [String] = []) {
+        self.key = key
+        self.label = label
+        self.`protocol` = `protocol`
+        self.defaultBaseUrl = defaultBaseUrl
+        self.defaultModel = defaultModel
+        self.description = description
+        self.tags = tags
     }
 }
 
@@ -82,7 +94,7 @@ struct LLMProfile: Codable, Identifiable, Equatable {
         self.id = try c.decodeIfPresent(String.self, forKey: .id) ?? ""
         self.name = try c.decodeIfPresent(String.self, forKey: .name) ?? ""
         self.presetKey = try c.decodeIfPresent(String.self, forKey: .presetKey) ?? "custom-openai-compatible"
-        self.protocol = try c.decodeIfPresent(String.self, forKey: .protocol) ?? "openai"
+        self.`protocol` = try c.decodeIfPresent(String.self, forKey: .protocol) ?? "openai"
         self.baseUrl = try c.decodeIfPresent(String.self, forKey: .baseUrl) ?? ""
         self.apiKey = try c.decodeIfPresent(String.self, forKey: .apiKey) ?? ""
         self.model = try c.decodeIfPresent(String.self, forKey: .model) ?? ""
@@ -120,6 +132,14 @@ struct LLMControlConfig: Codable, Equatable {
         self.endpointMode = try c.decodeIfPresent(String.self, forKey: .endpointMode) ?? "unified"
         self.profiles = try c.decodeIfPresent([LLMProfile].self, forKey: .profiles) ?? []
     }
+
+    init(version: Int = 1, activeProfileId: String? = nil,
+         endpointMode: String = "unified", profiles: [LLMProfile] = []) {
+        self.version = version
+        self.activeProfileId = activeProfileId
+        self.endpointMode = endpointMode
+        self.profiles = profiles
+    }
 }
 
 // MARK: - LLM 运行时摘要
@@ -151,11 +171,25 @@ struct LLMRuntimeSummary: Codable, Equatable {
         self.source = try c.decodeIfPresent(String.self, forKey: .source) ?? "profile"
         self.activeProfileId = try c.decodeIfPresent(String.self, forKey: .activeProfileId)
         self.activeProfileName = try c.decodeIfPresent(String.self, forKey: .activeProfileName)
-        self.protocol = try c.decodeIfPresent(String.self, forKey: .protocol)
+        self.`protocol` = try c.decodeIfPresent(String.self, forKey: .protocol)
         self.model = try c.decodeIfPresent(String.self, forKey: .model)
         self.baseUrl = try c.decodeIfPresent(String.self, forKey: .baseUrl)
         self.usingMock = try c.decodeIfPresent(Bool.self, forKey: .usingMock) ?? false
         self.reason = try c.decodeIfPresent(String.self, forKey: .reason)
+    }
+
+    init(source: String = "profile", activeProfileId: String? = nil,
+         activeProfileName: String? = nil, protocol: String? = nil,
+         model: String? = nil, baseUrl: String? = nil,
+         usingMock: Bool = false, reason: String? = nil) {
+        self.source = source
+        self.activeProfileId = activeProfileId
+        self.activeProfileName = activeProfileName
+        self.`protocol` = `protocol`
+        self.model = model
+        self.baseUrl = baseUrl
+        self.usingMock = usingMock
+        self.reason = reason
     }
 }
 
@@ -169,9 +203,9 @@ struct LLMControlPanelData: Codable, Equatable {
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
-        self.config = try c.decodeIfPresent(LLMControlConfig.self, forKey: .config) ?? LLMControlConfig(version: 1, activeProfileId: nil, endpointMode: "unified", profiles: [])
+        self.config = try c.decodeIfPresent(LLMControlConfig.self, forKey: .config) ?? LLMControlConfig()
         self.presets = try c.decodeIfPresent([LLMPreset].self, forKey: .presets) ?? []
-        self.runtime = try c.decodeIfPresent(LLMRuntimeSummary.self, forKey: .runtime) ?? LLMRuntimeSummary(source: "mock", activeProfileId: nil, activeProfileName: nil, protocol: nil, model: nil, baseUrl: nil, usingMock: true, reason: nil)
+        self.runtime = try c.decodeIfPresent(LLMRuntimeSummary.self, forKey: .runtime) ?? LLMRuntimeSummary(source: "mock", usingMock: true)
     }
 }
 
@@ -202,6 +236,16 @@ struct LLMTestResult: Codable, Equatable {
         self.latencyMs = try c.decodeIfPresent(Int.self, forKey: .latencyMs) ?? 0
         self.preview = try c.decodeIfPresent(String.self, forKey: .preview) ?? ""
         self.error = try c.decodeIfPresent(String.self, forKey: .error)
+    }
+
+    init(ok: Bool, providerLabel: String, model: String,
+         latencyMs: Int, preview: String, error: String? = nil) {
+        self.ok = ok
+        self.providerLabel = providerLabel
+        self.model = model
+        self.latencyMs = latencyMs
+        self.preview = preview
+        self.error = error
     }
 }
 

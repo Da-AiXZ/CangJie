@@ -37,8 +37,8 @@ enum NovelStage: String, Codable, CaseIterable {
     }
 }
 
-/// 自动驾驶状态
-enum AutopilotStatus: String, Codable {
+/// 自动驾驶运行状态
+enum AutopilotRunState: String, Codable {
     case stopped
     case running
     case paused
@@ -195,14 +195,45 @@ struct NovelDTO: Codable, Identifiable, Equatable {
         self.generationPrefs = try c.decodeIfPresent(AnyCodable.self, forKey: .generationPrefs) ?? AnyCodable([:])
     }
 
+    init(id: String, title: String, author: String, targetChapters: Int,
+         stage: String, premise: String, chapters: [ChapterDTO],
+         totalWordCount: Int, slug: String, hasBible: Bool, hasOutline: Bool,
+         autopilotStatus: String, autoApproveMode: Bool,
+         lockedGenre: String, lockedWorldPreset: String,
+         lockedStoryStructure: String, lockedPacingControl: String,
+         lockedWritingStyle: String, lockedSpecialRequirements: String,
+         targetWordsPerChapter: Int, generationPrefs: AnyCodable) {
+        self.id = id
+        self.title = title
+        self.author = author
+        self.targetChapters = targetChapters
+        self.stage = stage
+        self.premise = premise
+        self.chapters = chapters
+        self.totalWordCount = totalWordCount
+        self.slug = slug
+        self.hasBible = hasBible
+        self.hasOutline = hasOutline
+        self.autopilotStatus = autopilotStatus
+        self.autoApproveMode = autoApproveMode
+        self.lockedGenre = lockedGenre
+        self.lockedWorldPreset = lockedWorldPreset
+        self.lockedStoryStructure = lockedStoryStructure
+        self.lockedPacingControl = lockedPacingControl
+        self.lockedWritingStyle = lockedWritingStyle
+        self.lockedSpecialRequirements = lockedSpecialRequirements
+        self.targetWordsPerChapter = targetWordsPerChapter
+        self.generationPrefs = generationPrefs
+    }
+
     /// 阶段枚举
     var stageEnum: NovelStage? {
         return NovelStage(rawValue: stage)
     }
 
     /// 自动驾驶状态枚举
-    var autopilotStatusEnum: AutopilotStatus? {
-        return AutopilotStatus(rawValue: autopilotStatus)
+    var autopilotStatusEnum: AutopilotRunState? {
+        return AutopilotRunState(rawValue: autopilotStatus)
     }
 }
 

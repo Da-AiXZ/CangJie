@@ -179,9 +179,9 @@ struct KnowledgeGraphStatistics: Codable, Equatable {
         let c = try decoder.singleValueContainer()
         let dict = try c.decode([String: AnyCodable].self)
         self.totalTriples = dict["total_triples"]?.intValue ?? 0
-        self.byEntityType = (dict["by_entity_type"]?.dictionaryValue ?? [:]).compactMapValues { $0.intValue }
-        self.byImportance = (dict["by_importance"]?.dictionaryValue ?? [:]).compactMapValues { $0.intValue }
-        self.bySourceType = (dict["by_source_type"]?.dictionaryValue ?? [:]).compactMapValues { $0.intValue }
+        self.byEntityType = (dict["by_entity_type"]?.dictionaryValue ?? [:]).compactMapValues { $0 as? Int }
+        self.byImportance = (dict["by_importance"]?.dictionaryValue ?? [:]).compactMapValues { $0 as? Int }
+        self.bySourceType = (dict["by_source_type"]?.dictionaryValue ?? [:]).compactMapValues { $0 as? Int }
     }
 }
 

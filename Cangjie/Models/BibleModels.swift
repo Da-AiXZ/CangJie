@@ -282,3 +282,13 @@ struct AddLocationRequest: Codable {
         case parentId = "parent_id"
     }
 }
+
+// MARK: - BibleDTO 扩展
+
+extension BibleDTO {
+    /// 转为字典（用于 API 请求体）
+    var dictionaryValue: [String: Any]? {
+        guard let data = try? JSONEncoder().encode(self) else { return nil }
+        return try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+    }
+}

@@ -33,7 +33,7 @@ final class MonitorStore: ObservableObject {
         async let tension: TensionCurveResponse? = try? apiClient.request(
             APIEndpoint.Monitor.tensionCurve(novelId: novelId)
         )
-        async let drifts: [VoiceDrift] = try? apiClient.request(
+        async let drifts: [VoiceDrift]? = try? apiClient.request(
             APIEndpoint.Monitor.voiceDrift(novelId: novelId)
         )
         async let foreshadow: ForeshadowStats? = try? apiClient.request(
@@ -41,7 +41,7 @@ final class MonitorStore: ObservableObject {
         )
 
         self.tensionCurve = await tension
-        self.voiceDrifts = await drifts
+        self.voiceDrifts = await drifts ?? []
         self.foreshadowStats = await foreshadow
 
         isLoading = false

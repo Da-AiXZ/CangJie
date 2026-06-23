@@ -28,7 +28,7 @@ struct AutopilotLogStream: View {
 
         // 隐藏 HTTP
         if hideHttp {
-            result = result.filter { !$0.message.lowercased().contains("http") }
+            result = result.filter { !($0.message ?? "").lowercased().contains("http") }
         }
 
         // 只看重要

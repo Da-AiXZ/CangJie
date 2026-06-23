@@ -177,7 +177,6 @@ struct MacroPlanEvent: Codable, Equatable {
 
     enum CodingKeys: String, CodingKey {
         case type, phase, message, current, total, percent, text, title, description, error
-        case nodeType = "type"
         case partIndex = "part_index"
         case volumeIndex = "volume_index"
         case actIndex = "act_index"
@@ -197,7 +196,7 @@ struct MacroPlanEvent: Codable, Equatable {
         self.total = try c.decodeIfPresent(Int.self, forKey: .total)
         self.percent = try c.decodeIfPresent(Double.self, forKey: .percent)
         self.text = try c.decodeIfPresent(String.self, forKey: .text)
-        self.nodeType = try c.decodeIfPresent(String.self, forKey: .nodeType)
+        self.nodeType = try c.decodeIfPresent(String.self, forKey: .type)
         self.partIndex = try c.decodeIfPresent(Int.self, forKey: .partIndex)
         self.volumeIndex = try c.decodeIfPresent(Int.self, forKey: .volumeIndex)
         self.actIndex = try c.decodeIfPresent(Int.self, forKey: .actIndex)

@@ -82,11 +82,11 @@ struct BibleStreamingStep: View {
                 VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
                     ForEach(store.bibleGenerationLog.indices, id: \.self) { index in
                         let isLast = index == store.bibleGenerationLog.count - 1
-                        Text(store.bibleGenerationLog[index])
+                        (Text(store.bibleGenerationLog[index])
                             .font(Theme.bodyFont())
                             .foregroundColor(isLast ? Theme.textPrimary : Theme.textSecondary)
+                            + (isLast ? Text("▎").foregroundColor(Theme.primary) : Text("")))
                             .frame(maxWidth: .infinity, alignment: .leading)
-                            + (isLast ? Text("▎").foregroundColor(Theme.primary) : Text(""))
                     }
                 }
                 .padding(Theme.Spacing.md)

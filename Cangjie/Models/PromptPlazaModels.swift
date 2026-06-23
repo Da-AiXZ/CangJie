@@ -42,7 +42,7 @@ struct PromptCategoryInfo: Codable, Identifiable, Equatable {
 // MARK: - 提示词节点
 
 /// 提示词节点，对应后端 /llm-control/prompts/{node_key} 返回
-struct PromptNode: Codable, Identifiable, Equatable {
+struct PromptNode: Codable, Identifiable, Equatable, Hashable {
     var id: String { nodeKey }
     let nodeKey: String
     let title: String?
@@ -200,7 +200,7 @@ struct PromptDebugResult: Codable, Equatable {
         let dict = try c.decode([String: AnyCodable].self)
         self.nodeKey = dict["node_key"]?.stringStringValue ?? ""
         self.renderedPrompt = dict["rendered_prompt"]?.stringStringValue ?? ""
-        self.variables = (dict["variables"]?.dictionaryValue ?? [:]).compactMapValues { $0.stringStringValue }
+        self.variables = (dict["variables"]?.dictionaryValue ?? [:]).compactMapValues { $0 as? String }
         self.modelResponse = dict["model_response"]?.stringStringValue
         self.tokenInput = dict["token_input"]?.intValue
         self.tokenOutput = dict["token_output"]?.intValue
@@ -254,7 +254,7 @@ struct PromptStats: Codable, Equatable {
         let dict = try c.decode([String: AnyCodable].self)
         self.totalNodes = dict["total_nodes"]?.intValue ?? 0
         self.totalVersions = dict["total_versions"]?.intValue ?? 0
-        self.byCategory = (dict["by_category"]?.dictionaryValue ?? [:]).compactMapValues { $0.intValue }
+        self.byCategory = (dict["by_category"]?.dictionaryValue ?? [:]).compactMapValues { $0 as? Int }
     }
 }
 

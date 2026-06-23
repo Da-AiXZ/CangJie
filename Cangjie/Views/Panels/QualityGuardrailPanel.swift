@@ -59,7 +59,7 @@ struct QualityGuardrailPanel: View {
         for ring in 1...4 {
             var path = Path()
             for i in 0..<n {
-                let angle = CGFloat(i) / CGFloat(n) * 2 * .pi - .pi / 2
+                let angle: CGFloat = CGFloat(i) / CGFloat(n) * 2 * .pi - .pi / 2
                 let r = radius * CGFloat(ring) / 4
                 let p = CGPoint(x: center.x + r * cos(angle), y: center.y + r * sin(angle))
                 if i == 0 { path.move(to: p) } else { path.addLine(to: p) }
@@ -71,7 +71,7 @@ struct QualityGuardrailPanel: View {
         // 数据多边形
         var dataPath = Path()
         for (i, dim) in dimensions.enumerated() {
-            let angle = CGFloat(i) / CGFloat(n) * 2 * .pi - .pi / 2
+            let angle: CGFloat = CGFloat(i) / CGFloat(n) * 2 * .pi - .pi / 2
             let r = radius * dim.1
             let p = CGPoint(x: center.x + r * cos(angle), y: center.y + r * sin(angle))
             if i == 0 { dataPath.move(to: p) } else { dataPath.addLine(to: p) }
@@ -82,7 +82,7 @@ struct QualityGuardrailPanel: View {
 
         // 标签
         for (i, dim) in dimensions.enumerated() {
-            let angle = CGFloat(i) / CGFloat(n) * 2 * .pi - .pi / 2
+            let angle: CGFloat = CGFloat(i) / CGFloat(n) * 2 * .pi - .pi / 2
             let labelPos = CGPoint(x: center.x + (radius + 12) * cos(angle), y: center.y + (radius + 12) * sin(angle))
             context.draw(Text(dim.0).font(.system(size: 9)).foregroundColor(Theme.textSecondary), at: labelPos)
         }

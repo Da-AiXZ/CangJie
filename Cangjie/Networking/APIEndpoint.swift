@@ -32,11 +32,6 @@ import Foundation
 /// ```
 enum APIEndpoint {
 
-    // MARK: - 通用
-
-    /// 健康检查 — `GET /health`
-    case health
-
     // MARK: - Novels（小说管理）
     enum Novels {
         /// 列出所有小说 — `GET /novels/`
@@ -957,7 +952,7 @@ extension APIEndpoint.LLMControl: APIEndpoint.EndpointInfo {
         case .panel, .promptsPlazaInit, .promptsStats, .promptsCategoriesInfo,
              .promptsTemplates, .prompts, .promptsByCategory, .promptNode,
              .promptVersions, .promptVersion, .promptChain, .promptVariables,
-             .promptBindings, .exportPrompts:
+             .promptBindings, .exportPrompts, .comparePrompts:
             return .get
         case .createPromptNode, .test, .models, .rollbackPrompt,
              .renderPrompt, .debugPrompt, .promptSandbox, .importPrompts:
@@ -1031,4 +1026,440 @@ extension APIEndpoint.Stats: APIEndpoint.EndpointInfo {
     }
 
     var method: HTTPMethod { .get }
+}
+
+// MARK: - StoryStructure 端点信息
+
+extension APIEndpoint.StoryStructure: APIEndpoint.EndpointInfo {
+    var path: String {
+        switch self {
+        case .get(let novelId):
+            return "/novels/\(novelId)/structure"
+        case .children(let novelId):
+            return "/novels/\(novelId)/structure/children"
+        case .createNode(let novelId):
+            return "/novels/\(novelId)/structure/nodes"
+        case .updateNode(let novelId, let nodeId):
+            return "/novels/\(novelId)/structure/nodes/\(nodeId)"
+        case .deleteNode(let novelId, let nodeId):
+            return "/novels/\(novelId)/structure/nodes/\(nodeId)"
+        case .reorder(let novelId):
+            return "/novels/\(novelId)/structure/reorder"
+        case .updateRanges(let novelId):
+            return "/novels/\(novelId)/structure/update-ranges"
+        case .createDefault(let novelId):
+            return "/novels/\(novelId)/structure/create-default"
+        }
+    }
+
+    var method: HTTPMethod {
+        switch self {
+        case .get, .children:
+            return .get
+        case .createNode, .reorder, .updateRanges, .createDefault:
+            return .post
+        case .updateNode:
+            return .put
+        case .deleteNode:
+            return .delete
+        }
+    }
+}
+
+// MARK: - Cast 端点信息
+
+extension APIEndpoint.Cast: APIEndpoint.EndpointInfo {
+    var path: String {
+        switch self {
+        case .graph(let novelId):
+            return "/novels/\(novelId)/cast"
+        case .search(let novelId):
+            return "/novels/\(novelId)/cast/search"
+        case .coverage(let novelId):
+            return "/novels/\(novelId)/cast/coverage"
+        case .schedule(let novelId):
+            return "/novels/\(novelId)/cast/schedule"
+        case .narrativeProfile(let novelId, let characterId):
+            return "/novels/\(novelId)/characters/\(characterId)/narrative-profile"
+        case .entityMemory(let novelId, let entityId):
+            return "/novels/\(novelId)/entities/\(entityId)/memory"
+        case .projection(let novelId, let characterId):
+            return "/novels/\(novelId)/characters/\(characterId)/projection"
+        }
+    }
+
+    var method: HTTPMethod {
+        switch self {
+        case .graph, .search, .coverage, .narrativeProfile, .entityMemory, .projection:
+            return .get
+        case .schedule:
+            return .post
+        }
+    }
+}
+
+// MARK: - Foreshadow 端点信息
+
+extension APIEndpoint.Foreshadow: APIEndpoint.EndpointInfo {
+    var path: String {
+        switch self {
+        case .create(let novelId):
+            return "/novels/\(novelId)/foreshadow-ledger"
+        case .list(let novelId):
+            return "/novels/\(novelId)/foreshadow-ledger"
+        case .get(let novelId, let entryId):
+            return "/novels/\(novelId)/foreshadow-ledger/\(entryId)"
+        case .update(let novelId, let entryId):
+            return "/novels/\(novelId)/foreshadow-ledger/\(entryId)"
+        case .delete(let novelId, let entryId):
+            return "/novels/\(novelId)/foreshadow-ledger/\(entryId)"
+        }
+    }
+
+    var method: HTTPMethod {
+        switch self {
+        case .list, .get:
+            return .get
+        case .create:
+            return .post
+        case .update:
+            return .put
+        case .delete:
+            return .delete
+        }
+    }
+}
+
+// MARK: - Monitor 端点信息
+
+extension APIEndpoint.Monitor: APIEndpoint.EndpointInfo {
+    var path: String {
+        switch self {
+        case .tensionCurve(let novelId):
+            return "/novels/\(novelId)/monitor/tension-curve"
+        case .voiceDrift(let novelId):
+            return "/novels/\(novelId)/monitor/voice-drift"
+        case .foreshadowStats(let novelId):
+            return "/novels/\(novelId)/monitor/foreshadow-stats"
+        }
+    }
+
+    var method: HTTPMethod { .get }
+}
+
+// MARK: - Export 端点信息
+
+extension APIEndpoint.Export: APIEndpoint.EndpointInfo {
+    var path: String {
+        switch self {
+        case .novel(let novelId):
+            return "/export/novel/\(novelId)"
+        case .chapter(let chapterId):
+            return "/export/chapter/\(chapterId)"
+        }
+    }
+
+    var method: HTTPMethod { .get }
+}
+
+// MARK: - Checkpoints 端点信息
+
+extension APIEndpoint.Checkpoints: APIEndpoint.EndpointInfo {
+    var path: String {
+        switch self {
+        case .list(let novelId):
+            return "/novels/\(novelId)/checkpoints"
+        case .create(let novelId):
+            return "/novels/\(novelId)/checkpoints"
+        case .rollback(let novelId, let checkpointId):
+            return "/novels/\(novelId)/checkpoints/\(checkpointId)/rollback"
+        case .branches(let novelId):
+            return "/novels/\(novelId)/checkpoints/branches"
+        case .head(let novelId):
+            return "/novels/\(novelId)/checkpoints/head"
+        case .guardrailCheck(let novelId):
+            return "/novels/\(novelId)/guardrail/check"
+        case .storyPhase(let novelId):
+            return "/novels/\(novelId)/story-phase"
+        case .updateStoryPhase(let novelId):
+            return "/novels/\(novelId)/story-phase"
+        case .characterPsyches(let novelId):
+            return "/novels/\(novelId)/character-psyches"
+        case .characterPsycheDetail(let novelId, let characterName):
+            return "/novels/\(novelId)/character-psyches/\(characterName)"
+        }
+    }
+
+    var method: HTTPMethod {
+        switch self {
+        case .list, .branches, .head, .storyPhase, .characterPsyches, .characterPsycheDetail:
+            return .get
+        case .create, .rollback, .guardrailCheck:
+            return .post
+        case .updateStoryPhase:
+            return .put
+        }
+    }
+}
+
+// MARK: - Snapshots 端点信息
+
+extension APIEndpoint.Snapshots: APIEndpoint.EndpointInfo {
+    var path: String {
+        switch self {
+        case .list(let novelId):
+            return "/novels/\(novelId)/snapshots"
+        case .get(let novelId, let snapshotId):
+            return "/novels/\(novelId)/snapshots/\(snapshotId)"
+        case .create(let novelId):
+            return "/novels/\(novelId)/snapshots"
+        case .delete(let novelId, let snapshotId):
+            return "/novels/\(novelId)/snapshots/\(snapshotId)"
+        }
+    }
+
+    var method: HTTPMethod {
+        switch self {
+        case .list, .get:
+            return .get
+        case .create:
+            return .post
+        case .delete:
+            return .delete
+        }
+    }
+}
+
+// MARK: - Governance 端点信息
+
+extension APIEndpoint.Governance: APIEndpoint.EndpointInfo {
+    var path: String {
+        switch self {
+        case .state(let novelId):
+            return "/novels/\(novelId)/governance/state"
+        case .contract(let novelId):
+            return "/novels/\(novelId)/governance/contract"
+        case .mergeStorylines(let novelId):
+            return "/novels/\(novelId)/governance/storylines/merge"
+        case .chapterBudgetPreview(let novelId):
+            return "/novels/\(novelId)/governance/chapter-budget/preview"
+        case .reviewAction(let novelId):
+            return "/novels/\(novelId)/governance/review-action"
+        }
+    }
+
+    var method: HTTPMethod {
+        switch self {
+        case .state:
+            return .get
+        case .contract, .mergeStorylines, .chapterBudgetPreview, .reviewAction:
+            return .post
+        }
+    }
+}
+
+// MARK: - Evolution 端点信息
+
+extension APIEndpoint.Evolution: APIEndpoint.EndpointInfo {
+    var path: String {
+        switch self {
+        case .snapshots(let novelId):
+            return "/novels/\(novelId)/evolution/snapshots"
+        case .snapshotAtChapter(let novelId, let chapterNumber):
+            return "/novels/\(novelId)/evolution/snapshots/\(chapterNumber)"
+        case .gate(let novelId):
+            return "/novels/\(novelId)/evolution/gate"
+        case .snapshotOverrides(let novelId, let chapterNumber):
+            return "/novels/\(novelId)/evolution/snapshots/\(chapterNumber)/overrides"
+        case .replay(let novelId, let chapterNumber):
+            return "/novels/\(novelId)/evolution/replay-from/\(chapterNumber)"
+        }
+    }
+
+    var method: HTTPMethod {
+        switch self {
+        case .snapshots, .snapshotAtChapter:
+            return .get
+        case .gate, .snapshotOverrides, .replay:
+            return .post
+        }
+    }
+}
+
+// MARK: - Chronicles 端点信息
+
+extension APIEndpoint.Chronicles: APIEndpoint.EndpointInfo {
+    var path: String {
+        switch self {
+        case .get(let novelId):
+            return "/novels/\(novelId)/chronicles"
+        }
+    }
+
+    var method: HTTPMethod { .get }
+}
+
+// MARK: - Trace 端点信息
+
+extension APIEndpoint.Trace: APIEndpoint.EndpointInfo {
+    var path: String {
+        switch self {
+        case .list(let novelId):
+            return "/novels/\(novelId)/traces"
+        case .stats(let novelId):
+            return "/novels/\(novelId)/traces/stats"
+        case .aiTraces(let novelId):
+            return "/novels/\(novelId)/ai-traces"
+        case .timeline(let novelId, let traceId):
+            return "/novels/\(novelId)/traces/\(traceId)/timeline"
+        case .aiStages(let novelId):
+            return "/novels/\(novelId)/ai-traces/stages"
+        case .aiByStage(let novelId, let stage):
+            return "/novels/\(novelId)/ai-traces/by-stage/\(stage)"
+        }
+    }
+
+    var method: HTTPMethod { .get }
+}
+
+// MARK: - Props 端点信息
+
+extension APIEndpoint.Props: APIEndpoint.EndpointInfo {
+    var path: String {
+        switch self {
+        case .list(let novelId):
+            return "/novels/\(novelId)/props"
+        case .create(let novelId):
+            return "/novels/\(novelId)/props"
+        case .get(let novelId, let propId):
+            return "/novels/\(novelId)/props/\(propId)"
+        case .update(let novelId, let propId):
+            return "/novels/\(novelId)/props/\(propId)"
+        case .delete(let novelId, let propId):
+            return "/novels/\(novelId)/props/\(propId)"
+        case .events(let novelId, let propId):
+            return "/novels/\(novelId)/props/\(propId)/events"
+        case .createEvent(let novelId, let propId):
+            return "/novels/\(novelId)/props/\(propId)/events"
+        }
+    }
+
+    var method: HTTPMethod {
+        switch self {
+        case .list, .get, .events:
+            return .get
+        case .create, .createEvent:
+            return .post
+        case .update:
+            return .patch
+        case .delete:
+            return .delete
+        }
+    }
+}
+
+// MARK: - AntiAI 端点信息
+
+extension APIEndpoint.AntiAI: APIEndpoint.EndpointInfo {
+    var path: String {
+        switch self {
+        case .scan:
+            return "/anti-ai/scan"
+        case .categories:
+            return "/anti-ai/categories"
+        case .rules:
+            return "/anti-ai/rules"
+        case .allowlist:
+            return "/anti-ai/allowlist"
+        case .allowlistScenes:
+            return "/anti-ai/allowlist/scenes"
+        case .stats:
+            return "/anti-ai/stats"
+        case .audits(let novelId):
+            return "/anti-ai/audits/\(novelId)"
+        case .chapterAudit(let novelId, let chapterNumber):
+            return "/anti-ai/audits/\(novelId)/\(chapterNumber)"
+        case .trend(let novelId):
+            return "/anti-ai/trend/\(novelId)"
+        }
+    }
+
+    var method: HTTPMethod {
+        switch self {
+        case .categories, .rules, .allowlistScenes, .stats, .audits, .chapterAudit, .trend:
+            return .get
+        case .scan, .allowlist:
+            return .post
+        }
+    }
+}
+
+// MARK: - Sandbox 端点信息
+
+extension APIEndpoint.Sandbox: APIEndpoint.EndpointInfo {
+    var path: String {
+        switch self {
+        case .dialogueWhitelist(let novelId):
+            return "/novels/\(novelId)/sandbox/dialogue-whitelist"
+        case .characterAnchor(let novelId, let characterId):
+            return "/novels/\(novelId)/sandbox/character/\(characterId)/anchor"
+        case .generateDialogue(let novelId):
+            return "/novels/\(novelId)/sandbox/generate-dialogue"
+        }
+    }
+
+    var method: HTTPMethod {
+        switch self {
+        case .dialogueWhitelist, .characterAnchor:
+            return .get
+        case .generateDialogue:
+            return .post
+        }
+    }
+}
+
+// MARK: - KnowledgeGraph 端点信息
+
+extension APIEndpoint.KnowledgeGraph: APIEndpoint.EndpointInfo {
+    var path: String {
+        switch self {
+        case .triples(let novelId):
+            return "/knowledge-graph/novels/\(novelId)/triples"
+        case .infer(let novelId):
+            return "/knowledge-graph/novels/\(novelId)/infer"
+        case .inferenceEvidence(let novelId, let chapterNumber):
+            return "/knowledge-graph/novels/\(novelId)/chapters/by-number/\(chapterNumber)/inference-evidence"
+        case .deleteChapterInference(let novelId, let chapterNumber):
+            return "/knowledge-graph/novels/\(novelId)/chapters/by-number/\(chapterNumber)/inference"
+        case .deleteInferredTriple(let novelId, let tripleId):
+            return "/knowledge-graph/novels/\(novelId)/inferred-triples/\(tripleId)"
+        case .confirmTriple(let tripleId):
+            return "/knowledge-graph/triples/\(tripleId)/confirm"
+        case .starTriple(let novelId, let tripleId):
+            return "/knowledge-graph/novels/\(novelId)/triples/\(tripleId)/star"
+        case .deleteTriple(let tripleId):
+            return "/knowledge-graph/triples/\(tripleId)"
+        case .elementRelations(let elementType, let elementId):
+            return "/knowledge-graph/elements/\(elementType)/\(elementId)/relations"
+        case .statistics(let novelId):
+            return "/knowledge-graph/novels/\(novelId)/statistics"
+        case .index(let novelId):
+            return "/knowledge-graph/novels/\(novelId)/index"
+        case .search(let novelId):
+            return "/knowledge-graph/novels/\(novelId)/search"
+        }
+    }
+
+    var method: HTTPMethod {
+        switch self {
+        case .triples, .inferenceEvidence, .elementRelations, .statistics:
+            return .get
+        case .infer, .index, .search, .confirmTriple:
+            return .post
+        case .deleteChapterInference, .deleteInferredTriple, .deleteTriple:
+            return .delete
+        case .starTriple:
+            return .patch
+        }
+    }
 }

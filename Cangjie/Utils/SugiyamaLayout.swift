@@ -335,14 +335,20 @@ struct SugiyamaLayout {
         let totalHeight = currentY
 
         // 构建节点结果
-        let positionedNodes = nodePositions.map { (id, pos) in
+        let rawPositionedNodes: [PositionedNode] = nodePositions.map { (id, pos) -> PositionedNode in
             PositionedNode(id: id, x: pos.x, y: pos.y, layer: pos.layer)
-        }.sorted { $0.layer == $1.layer ? $0.x < $1.x : $0.layer < $1.layer }
+        }
+        let positionedNodes = rawPositionedNodes.sorted { (a, b) -> Bool in
+            if a.layer == b.layer {
+                return a.x < b.x
+            }
+            return a.layer < b.layer
+        }
 
         // 构建边结果（贝塞尔曲线控制点）
-        let positionedEdges = edges.map { edge in
-            let sourcePos = nodePositions[edge.source] ?? (x: 0, y: 0, layer: 0)
-            let targetPos = nodePositions[edge.target] ?? (x: 0, y: 0, layer: 0)
+        let positionedEdges: [PositionedEdge] = edges.map { edge -> PositionedEdge in
+            let sourcePos = nodePositions[edge.source] ?? (x: CGFloat(0), y: CGFloat(0), layer: 0)
+            let targetPos = nodePositions[edge.target] ?? (x: CGFloat(0), y: CGFloat(0), layer: 0)
 
             // 贝塞尔控制点
             let midY = (sourcePos.y + targetPos.y) / 2

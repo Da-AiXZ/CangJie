@@ -9,12 +9,16 @@ import SwiftUI
 import Foundation
 
 /// 新书向导步骤
-enum OnboardingStep: Int, CaseIterable {
+enum OnboardingStep: Int, CaseIterable, Comparable {
     case novelInfo = 0
     case bibleGeneration = 1
     case characterSetup = 2
     case macroPlanning = 3
     case completed = 4
+
+    static func < (lhs: OnboardingStep, rhs: OnboardingStep) -> Bool {
+        return lhs.rawValue < rhs.rawValue
+    }
 
     var title: String {
         switch self {

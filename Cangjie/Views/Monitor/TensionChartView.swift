@@ -10,6 +10,14 @@
 import SwiftUI
 import Charts
 
+/// 圆面积辅助工具，用于 Charts PointMark 的 symbolSize 计算
+struct CircleArea {
+    /// 根据半径计算圆面积，用于 symbolSize
+    static func plotSize(radius: CGFloat) -> CGFloat {
+        return .pi * radius * radius
+    }
+}
+
 /// 张力曲线图
 struct TensionChartView: View {
 

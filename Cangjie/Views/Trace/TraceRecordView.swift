@@ -279,7 +279,7 @@ struct TraceRecordView: View {
 
     private func formatRelativeTime(_ dateStr: String) -> String {
         let df = ISO8601DateFormatter()
-        guard let date = df.date(from: dateStr) ?? DateFormatter.iso8601.date(from: dateStr) else { return dateStr }
+        guard let date = df.date(from: dateStr) ?? ISODateFormatter.date(from: dateStr) else { return dateStr }
         let interval = -date.timeIntervalSinceNow
         if interval < 60 { return "刚刚" }
         if interval < 3600 { return "\(Int(interval / 60))分钟前" }

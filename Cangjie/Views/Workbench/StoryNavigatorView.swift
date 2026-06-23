@@ -101,7 +101,7 @@ struct StoryNavigatorView: View {
         DisclosureGroup(isExpanded: .constant(true)) {
             if let children = node.children {
                 ForEach(children) { child in
-                    structureNodeRow(child, level: level + 1)
+                    AnyView(structureNodeRow(child, level: level + 1))
                 }
             }
         } label: {

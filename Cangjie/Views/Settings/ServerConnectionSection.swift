@@ -20,55 +20,57 @@ struct ServerConnectionSection: View {
     @State private var basicAuthPassword: String = ""
 
     var body: some View {
-        // 服务器地址
-        TextField("服务器地址", text: $serverURL)
-            .textFieldStyle(.roundedBorder)
-            .keyboardType(.URL)
-            .autocapitalization(.none)
-            .disableAutocorrection(true)
+        Section {
+            // 服务器地址
+            TextField("服务器地址", text: $serverURL)
+                .textFieldStyle(.roundedBorder)
+                .keyboardType(.URL)
+                .autocapitalization(.none)
+                .disableAutocorrection(true)
 
-        SecureField("Bearer Token（可选）", text: $bearerToken)
-            .textFieldStyle(.roundedBorder)
+            SecureField("Bearer Token（可选）", text: $bearerToken)
+                .textFieldStyle(.roundedBorder)
 
-        // 连接状态
-        connectionStatusRow
+            // 连接状态
+            connectionStatusRow
 
-        // 操作按钮
-        HStack {
-            Button {
-                Task { await testConnection() }
-            } label: {
-                Label("测试连接", systemImage: "antenna.radiowaves.left.and.right")
-            }
-            .buttonStyle(.bordered)
-            .disabled(serverURL.isEmpty)
-
-            Button {
-                saveConfig()
-            } label: {
-                Label("保存", systemImage: "tray.and.arrow.down")
-            }
-            .buttonStyle(.borderedProminent)
-            .disabled(serverURL.isEmpty)
-        }
-
-        // 健康信息
-        if let health = appState.healthStatus {
-            VStack(alignment: .leading, spacing: 4) {
-                Label("版本：\(health.version)", systemImage: "tag")
-                    .font(.system(size: 12))
-                Label("守护进程：\(health.isDaemonRunning ? "运行中" : "未运行")", systemImage: "gear")
-                    .font(.system(size: 12))
-                if let uptime = health.uptimeSeconds {
-                    Label("运行时长：\(Int(uptime))秒", systemImage: "clock")
-                        .font(.system(size: 12))
+            // 操作按钮
+            HStack {
+                Button {
+                    Task { await testConnection() }
+                } label: {
+                    Label("测试连接", systemImage: "antenna.radiowaves.left.and.right")
                 }
+                .buttonStyle(.bordered)
+                .disabled(serverURL.isEmpty)
+
+                Button {
+                    saveConfig()
+                } label: {
+                    Label("保存", systemImage: "tray.and.arrow.down")
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(serverURL.isEmpty)
             }
-            .foregroundColor(Theme.textSecondary)
+
+            // 健康信息
+            if let health = appState.healthStatus {
+                VStack(alignment: .leading, spacing: 4) {
+                    Label("版本：\(health.version)", systemImage: "tag")
+                        .font(.system(size: 12))
+                    Label("守护进程：\(health.isDaemonRunning ? "运行中" : "未运行")", systemImage: "gear")
+                        .font(.system(size: 12))
+                    if let uptime = health.uptimeSeconds {
+                        Label("运行时长：\(Int(uptime))秒", systemImage: "clock")
+                            .font(.system(size: 12))
+                    }
+                }
+                .foregroundColor(Theme.textSecondary)
+            }
         }
-    }
-    .onAppear {
-        loadCurrentConfig()
+        .onAppear {
+            loadCurrentConfig()
+        }
     }
 
     // MARK: - 连接状态行
