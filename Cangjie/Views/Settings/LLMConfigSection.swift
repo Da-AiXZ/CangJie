@@ -89,7 +89,7 @@ struct LLMConfigSection: View {
         .swipeActions {
             Button {
                 Task {
-                    // 设为默认
+                    await llmStore.activateProfile(profileId: profile.id)
                 }
             } label: {
                 Label("默认", systemImage: "star.fill")
@@ -97,7 +97,9 @@ struct LLMConfigSection: View {
             .tint(.yellow)
 
             Button(role: .destructive) {
-                // 删除
+                Task {
+                    await llmStore.deleteProfile(profileId: profile.id)
+                }
             } label: {
                 Label("删除", systemImage: "trash")
             }
@@ -206,9 +208,13 @@ struct LLMProfileEditView: View {
                 TextField("Base URL", text: $baseUrl)
                     .keyboardType(.URL)
                     .autocapitalization(.none)
+                    .disableAutocorrection(true)
                 SecureField("API Key", text: $apiKey)
+                    .autocapitalization(.none)
+                    .disableAutocorrection(true)
                 TextField("模型名", text: $model)
                     .autocapitalization(.none)
+                    .disableAutocorrection(true)
                 Picker("协议", selection: $protocolType) {
                     Text("OpenAI").tag("openai")
                     Text("Anthropic").tag("anthropic")
@@ -263,10 +269,25 @@ struct LLMProfileEditView: View {
             }
             ToolbarItem(placement: .navigationBarTrailing) {
                 Button("保存") {
-                    // 保存逻辑（简化版）
-                    onSaved()
+                    let profile = LLMProfile(
+                        id: profile?.id ?? "",
+                        name: name,
+                        presetKey: "custom",
+                        `protocol`: protocolType,
+                        baseUrl: baseUrl,
+                        apiKey: apiKey,
+                        model: model,
+                        temperature: temperature,
+                        maxTokens: maxTokens,
+                        timeoutSeconds: timeoutSeconds
+                    )
+                    Task {
+                        await store.saveProfile(profile)
+                        onSaved()
+                    }
                 }
                 .fontWeight(.semibold)
+                .disabled(name.isEmpty || baseUrl.isEmpty)
             }
         }
         .onAppear {

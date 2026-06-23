@@ -30,6 +30,60 @@ final class LLMControlStore: ObservableObject {
         self.apiClient = apiClient
     }
 
+    // MARK: - 保存端点（新建/编辑）
+
+    /// 保存端点（新建或编辑后整体提交配置）
+    /// - Parameter profile: 要保存的端点
+    /// - Returns: 是否保存成功
+    @discardableResult
+    func saveProfile(_ profile: LLMProfile) async -> Bool {
+        guard var config = panelData?.config else {
+            errorMessage = "配置数据未加载"
+            return false
+        }
+
+        // 如果是新建（id 为空），生成 id；否则替换已有项
+        var target = profile
+        if target.id.isEmpty {
+            target.id = "profile-\(UUID().uuidString.prefix(8))"
+        }
+
+        if let idx = config.profiles.firstIndex(where: { $0.id == target.id }) {
+            config.profiles[idx] = target
+        } else {
+            config.profiles.append(target)
+        }
+
+        // 如果是第一个端点，自动设为激活
+        if config.activeProfileId == nil || config.activeProfileId?.isEmpty == true {
+            config.activeProfileId = target.id
+        }
+
+        await updateConfig(config)
+        return errorMessage == nil
+    }
+
+    // MARK: - 设为默认端点
+
+    /// 将指定端点设为激活
+    func activateProfile(profileId: String) async {
+        guard var config = panelData?.config else { return }
+        config.activeProfileId = profileId
+        await updateConfig(config)
+    }
+
+    // MARK: - 删除端点
+
+    /// 删除端点
+    func deleteProfile(profileId: String) async {
+        guard var config = panelData?.config else { return }
+        config.profiles.removeAll { $0.id == profileId }
+        if config.activeProfileId == profileId {
+            config.activeProfileId = config.profiles.first?.id
+        }
+        await updateConfig(config)
+    }
+
     // MARK: - 加载面板数据
 
     /// 加载 LLM 控制面板数据

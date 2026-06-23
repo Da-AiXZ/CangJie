@@ -107,6 +107,27 @@ struct LLMProfile: Codable, Identifiable, Equatable {
         self.notes = try c.decodeIfPresent(String.self, forKey: .notes) ?? ""
         self.useLegacyChatCompletions = try c.decodeIfPresent(Bool.self, forKey: .useLegacyChatCompletions) ?? false
     }
+
+    /// 便利初始化器（用于新建/编辑端点）
+    init(id: String, name: String, presetKey: String = "custom", `protocol`: String,
+         baseUrl: String, apiKey: String, model: String,
+         temperature: Double = 0.7, maxTokens: Int = 16000, timeoutSeconds: Int = 300) {
+        self.id = id
+        self.name = name
+        self.presetKey = presetKey
+        self.`protocol` = `protocol`
+        self.baseUrl = baseUrl
+        self.apiKey = apiKey
+        self.model = model
+        self.temperature = temperature
+        self.maxTokens = maxTokens
+        self.timeoutSeconds = timeoutSeconds
+        self.extraHeaders = [:]
+        self.extraQuery = [:]
+        self.extraBody = [:]
+        self.notes = ""
+        self.useLegacyChatCompletions = false
+    }
 }
 
 // MARK: - LLM 控制配置
