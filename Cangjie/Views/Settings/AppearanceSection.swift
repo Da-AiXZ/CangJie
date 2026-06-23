@@ -10,12 +10,36 @@ import SwiftUI
 /// 外观设置分区
 struct AppearanceSection: View {
 
-    @AppStorage("cangjie.themeMode") private var themeMode: String = ThemeMode.system.rawValue
-    @AppStorage("cangjie.fontSizeScale") private var fontSizeScale: String = FontSizeScale.medium.rawValue
+    /// 通过 AppState 绑定主题和字号，确保变更立即触发 @Published → 视图重建
+    @EnvironmentObject var appState: AppState
+
+    /// 主题模式 Binding（String ↔ ThemeMode 转换）
+    private var themeModeBinding: Binding<String> {
+        Binding(
+            get: { appState.themeMode.rawValue },
+            set: { newValue in
+                if let mode = ThemeMode(rawValue: newValue) {
+                    appState.themeMode = mode
+                }
+            }
+        )
+    }
+
+    /// 字号 Binding（String ↔ FontSizeScale 转换）
+    private var fontSizeScaleBinding: Binding<String> {
+        Binding(
+            get: { appState.fontSizeScale.rawValue },
+            set: { newValue in
+                if let scale = FontSizeScale(rawValue: newValue) {
+                    appState.fontSizeScale = scale
+                }
+            }
+        )
+    }
 
     var body: some View {
         // 主题模式
-        Picker("主题模式", selection: $themeMode) {
+        Picker("主题模式", selection: themeModeBinding) {
             ForEach(ThemeMode.allCases, id: \.self) { mode in
                 Text(mode.rawValue).tag(mode.rawValue)
             }
@@ -23,7 +47,7 @@ struct AppearanceSection: View {
         .pickerStyle(.segmented)
 
         // 字号
-        Picker("字号", selection: $fontSizeScale) {
+        Picker("字号", selection: fontSizeScaleBinding) {
             ForEach(FontSizeScale.allCases, id: \.self) { scale in
                 Text(scale.rawValue).tag(scale.rawValue)
             }

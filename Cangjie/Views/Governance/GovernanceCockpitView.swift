@@ -48,6 +48,7 @@ struct GovernanceCockpitView: View {
                 }
         }
         .navigationTitle("叙事治理")
+        .navigationBarTitleDisplayMode(.inline)
         .task {
             if let novelId = appState.currentNovelId {
                 await store.loadState(novelId: novelId)

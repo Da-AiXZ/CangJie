@@ -7,6 +7,7 @@
 //
 
 import SwiftUI
+import UIKit
 
 /// 服务器连接设置分区
 struct ServerConnectionSection: View {
@@ -21,18 +22,36 @@ struct ServerConnectionSection: View {
 
     var body: some View {
         Section {
-            // 服务器地址（含粘贴按钮，方便从剪贴板粘贴地址）
+            // 服务器地址
             TextField("服务器地址", text: $serverURL)
                 .textFieldStyle(.roundedBorder)
                 .keyboardType(.URL)
                 .autocapitalization(.none)
                 .disableAutocorrection(true)
-                .pasteButton(into: $serverURL)
 
-            // Bearer Token（含粘贴按钮，解决 TrollStore 环境下长按粘贴不可用的问题）
-            SecureField("Bearer Token（可选）", text: $bearerToken)
+            // 粘贴服务器地址按钮（带文字标签，确保点击区域明确）
+            Button("📋 从剪贴板粘贴服务器地址") {
+                if let text = UIPasteboard.general.string {
+                    serverURL = text
+                }
+            }
+            .buttonStyle(.bordered)
+            .frame(maxWidth: .infinity)
+
+            // Bearer Token（改用 TextField，全局支持第三方键盘）
+            TextField("Bearer Token（可选）", text: $bearerToken)
                 .textFieldStyle(.roundedBorder)
-                .pasteButton(into: $bearerToken)
+                .autocapitalization(.none)
+                .disableAutocorrection(true)
+
+            // 粘贴 Bearer Token 按钮
+            Button("📋 从剪贴板粘贴 Bearer Token") {
+                if let text = UIPasteboard.general.string {
+                    bearerToken = text
+                }
+            }
+            .buttonStyle(.bordered)
+            .frame(maxWidth: .infinity)
 
             // 连接状态
             connectionStatusRow

@@ -7,6 +7,7 @@
 //
 
 import SwiftUI
+import UIKit
 
 /// 仓颉 — PlotPilot iOS 客户端入口
 ///
@@ -34,6 +35,8 @@ struct CangjieApp: App {
                 .environment(\.fontSizeScale, appState.currentFontSizeScale)
                 .environment(\.themeMode, appState.themeMode)
                 .tint(Theme.primary)
+                // 强制重建视图树：主题或字号变化时立即生效，无需杀后台重进
+                .id(appState.themeMode.rawValue + appState.fontSizeScale.rawValue)
                 .task {
                     // App 启动时执行健康检查
                     await appState.checkServerConnection()
@@ -103,27 +106,55 @@ struct ServerConfigGuideView: View {
                             .font(Theme.headlineFont())
 
                         VStack(spacing: Theme.Spacing.sm) {
-                            // 服务器地址（含粘贴按钮，方便从剪贴板粘贴地址）
+                            // 服务器地址
                             TextField("服务器地址", text: $serverURL)
                                 .textFieldStyle(.roundedBorder)
                                 .keyboardType(.URL)
                                 .autocapitalization(.none)
                                 .disableAutocorrection(true)
-                                .pasteButton(into: $serverURL)
 
-                            // Bearer Token（含粘贴按钮，解决 TrollStore 环境下长按粘贴不可用的问题）
-                            SecureField("Bearer Token（可选）", text: $bearerToken)
+                            // 粘贴服务器地址按钮（带文字标签，确保点击区域明确）
+                            Button("📋 从剪贴板粘贴服务器地址") {
+                                if let text = UIPasteboard.general.string {
+                                    serverURL = text
+                                }
+                            }
+                            .buttonStyle(.bordered)
+                            .frame(maxWidth: .infinity)
+
+                            // Bearer Token（改用 TextField，全局支持第三方键盘）
+                            TextField("Bearer Token（可选）", text: $bearerToken)
                                 .textFieldStyle(.roundedBorder)
-                                .pasteButton(into: $bearerToken)
+                                .autocapitalization(.none)
+                                .disableAutocorrection(true)
+
+                            // 粘贴 Bearer Token 按钮
+                            Button("📋 从剪贴板粘贴 Bearer Token") {
+                                if let text = UIPasteboard.general.string {
+                                    bearerToken = text
+                                }
+                            }
+                            .buttonStyle(.bordered)
+                            .frame(maxWidth: .infinity)
 
                             TextField("Basic Auth 用户名（可选）", text: $basicAuthUser)
                                 .textFieldStyle(.roundedBorder)
                                 .autocapitalization(.none)
 
-                            // Basic Auth 密码（含粘贴按钮）
-                            SecureField("Basic Auth 密码（可选）", text: $basicAuthPassword)
+                            // Basic Auth 密码（改用 TextField，全局支持第三方键盘）
+                            TextField("Basic Auth 密码（可选）", text: $basicAuthPassword)
                                 .textFieldStyle(.roundedBorder)
-                                .pasteButton(into: $basicAuthPassword)
+                                .autocapitalization(.none)
+                                .disableAutocorrection(true)
+
+                            // 粘贴密码按钮
+                            Button("📋 从剪贴板粘贴密码") {
+                                if let text = UIPasteboard.general.string {
+                                    basicAuthPassword = text
+                                }
+                            }
+                            .buttonStyle(.bordered)
+                            .frame(maxWidth: .infinity)
                         }
 
                         // 测试结果

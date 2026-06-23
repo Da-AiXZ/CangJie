@@ -40,6 +40,7 @@ struct WorldlineDAGView: View {
             }
         }
         .navigationTitle("世界线")
+        .navigationBarTitleDisplayMode(.inline)
         .task {
             if let novelId = appState.currentNovelId {
                 await store.loadSnapshots(novelId: novelId)

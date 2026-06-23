@@ -19,6 +19,7 @@ struct CastGraphView: View {
     var body: some View {
         contentView
             .navigationTitle("人物关系")
+            .navigationBarTitleDisplayMode(.inline)
             .task {
                 if let novelId = appState.currentNovelId {
                     await castStore.loadCastGraph(novelId: novelId)

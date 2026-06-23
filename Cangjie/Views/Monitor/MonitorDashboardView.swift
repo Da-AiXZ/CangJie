@@ -48,6 +48,7 @@ struct MonitorDashboardView: View {
         }
         .background(Theme.background)
         .navigationTitle("监控大盘")
+        .navigationBarTitleDisplayMode(.inline)
         .task {
             if let novelId = appState.currentNovelId {
                 await monitorStore.loadAll(novelId: novelId)

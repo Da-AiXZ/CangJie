@@ -65,6 +65,7 @@ struct BiblePanelView: View {
             }
         }
         .navigationTitle("设定集")
+        .navigationBarTitleDisplayMode(.inline)
         .task {
             await bibleStore.loadBible(novelId: novelId)
         }

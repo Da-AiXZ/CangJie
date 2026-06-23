@@ -32,6 +32,7 @@ struct LocationGraphView: View {
             }
         }
         .navigationTitle("地点关系")
+        .navigationBarTitleDisplayMode(.inline)
         .task {
             if let novelId = appState.currentNovelId {
                 await bibleStore.loadBible(novelId: novelId)

@@ -53,6 +53,7 @@ struct ExportView: View {
         }
         .background(Theme.background)
         .navigationTitle("导出")
+        .navigationBarTitleDisplayMode(.inline)
     }
 
     // MARK: - 格式选择

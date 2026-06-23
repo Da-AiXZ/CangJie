@@ -119,17 +119,53 @@ final class LLMControlStore: ObservableObject {
     // MARK: - 测试连通性
 
     /// 测试 LLM 端点连通性
+    ///
+    /// 后端 POST /test 期望完整的 LLMProfile 作为请求体（而非 profile_id）。
+    /// 此方法根据 profileId 从已加载的配置中查找对应 profile 并发送。
     /// - Parameter profileId: 端点 ID（可选，默认测试当前激活端点）
     func testConnection(profileId: String? = nil) async {
         isTesting = true
         errorMessage = nil
 
+        // 查找要测试的 profile
+        let targetProfile: LLMProfile?
+        if let pid = profileId {
+            targetProfile = panelData?.config.profiles.first { $0.id == pid }
+        } else {
+            targetProfile = activeProfile
+        }
+
+        guard let profile = targetProfile else {
+            errorMessage = "未找到端点配置"
+            testResult = LLMTestResult(ok: false, providerLabel: "", model: "", latencyMs: 0, preview: "", error: "未找到端点配置")
+            isTesting = false
+            return
+        }
+
         do {
-            let request = LLMTestRequest(profileId: profileId)
-            testResult = try await apiClient.request(APIEndpoint.LLMControl.test, body: request)
+            // 后端 POST /test 期望完整 LLMProfile 作为请求体
+            testResult = try await apiClient.request(APIEndpoint.LLMControl.test, body: profile)
         } catch {
             errorMessage = error.localizedDescription
-            testResult = LLMTestResult(ok: false, providerLabel: "", model: "", latencyMs: 0, preview: "", error: error.localizedDescription)
+            testResult = LLMTestResult(ok: false, providerLabel: profile.name, model: profile.model, latencyMs: 0, preview: "", error: error.localizedDescription)
+        }
+
+        isTesting = false
+    }
+
+    /// 测试连通性（直接传入 LLMProfile，用于新建未保存的端点测试）
+    ///
+    /// 后端 POST /test 期望完整的 LLMProfile 作为请求体。
+    /// - Parameter profile: 要测试的端点配置
+    func testConnectionWithProfile(_ profile: LLMProfile) async {
+        isTesting = true
+        errorMessage = nil
+
+        do {
+            testResult = try await apiClient.request(APIEndpoint.LLMControl.test, body: profile)
+        } catch {
+            errorMessage = error.localizedDescription
+            testResult = LLMTestResult(ok: false, providerLabel: profile.name, model: profile.model, latencyMs: 0, preview: "", error: error.localizedDescription)
         }
 
         isTesting = false

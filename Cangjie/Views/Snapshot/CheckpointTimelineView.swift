@@ -36,6 +36,7 @@ struct CheckpointTimelineView: View {
         }
         .background(Theme.background)
         .navigationTitle("检查点")
+        .navigationBarTitleDisplayMode(.inline)
         .task { await loadData() }
         .sheet(item: $selectedCheckpoint) { cp in
             checkpointDetailSheet(cp)

@@ -71,6 +71,7 @@ struct HomeView: View {
         }
         .background(Theme.background)
         .navigationTitle("书架")
+        .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .navigationBarTrailing) {
                 Button(action: onCreateNovel) {

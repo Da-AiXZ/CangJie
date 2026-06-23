@@ -58,6 +58,7 @@ struct SettingsView: View {
             }
         }
         .navigationTitle("设置")
+        .navigationBarTitleDisplayMode(.inline)
         .environmentObject(settingsStore)
     }
 }

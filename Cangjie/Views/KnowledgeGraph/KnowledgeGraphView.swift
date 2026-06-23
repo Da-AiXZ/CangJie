@@ -41,6 +41,7 @@ struct KnowledgeGraphView: View {
             .tabViewStyle(.automatic)
         }
         .navigationTitle("知识图谱")
+        .navigationBarTitleDisplayMode(.inline)
         .task {
             if let novelId = appState.currentNovelId {
                 await kgStore.loadTriples(novelId: novelId)

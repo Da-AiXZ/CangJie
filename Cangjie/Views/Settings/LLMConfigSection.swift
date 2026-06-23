@@ -207,49 +207,42 @@ struct LLMProfileEditView: View {
     @State private var maxTokens: Int = 16000
     @State private var timeoutSeconds: Int = 300
     @State private var protocolType: String = "openai"
-    /// API Key 显示/隐藏切换状态
-    @State private var showApiKey: Bool = false
 
     var body: some View {
         Form {
             Section("基本信息") {
                 TextField("名称", text: $name)
-                // Base URL（含粘贴按钮，方便从剪贴板粘贴地址）
+                // Base URL
                 TextField("Base URL", text: $baseUrl)
                     .keyboardType(.URL)
                     .autocapitalization(.none)
                     .disableAutocorrection(true)
-                    .pasteButton(into: $baseUrl)
-                // API Key（支持显示/隐藏切换 + 粘贴按钮，解决 TrollStore 环境下长按粘贴不可用的问题）
-                HStack {
-                    if showApiKey {
-                        TextField("API Key", text: $apiKey)
-                            .autocapitalization(.none)
-                            .disableAutocorrection(true)
-                    } else {
-                        SecureField("API Key", text: $apiKey)
-                            .autocapitalization(.none)
-                            .disableAutocorrection(true)
+                // 粘贴 Base URL 按钮（带文字标签，确保点击区域明确）
+                Button("📋 从剪贴板粘贴 Base URL") {
+                    if let text = UIPasteboard.general.string {
+                        baseUrl = text
                     }
-                    // 显示/隐藏切换按钮
-                    Button {
-                        showApiKey.toggle()
-                    } label: {
-                        Image(systemName: showApiKey ? "eye.slash" : "eye")
-                            .foregroundColor(Theme.primary)
-                    }
-                    .buttonStyle(.plain)
-                    // 粘贴按钮（从剪贴板读取 API Key）
-                    Button {
-                        if let text = UIPasteboard.general.string {
-                            apiKey = text
-                        }
-                    } label: {
-                        Image(systemName: "doc.on.clipboard")
-                            .foregroundColor(Theme.primary)
-                    }
-                    .buttonStyle(.plain)
                 }
+                .buttonStyle(.bordered)
+                .frame(maxWidth: .infinity)
+                // API Key（改用 TextField，全局支持第三方键盘，不再使用 SecureField）
+                TextField("API Key", text: $apiKey)
+                    .autocapitalization(.none)
+                    .disableAutocorrection(true)
+                // 后端不回传 API Key，编辑已有端点时提示用户重新输入
+                if profile != nil && (apiKey.isEmpty || apiKey.contains("*")) {
+                    Text("⚠️ API Key 需重新输入（后端不回传明文）")
+                        .font(.system(size: 11))
+                        .foregroundColor(Theme.warning)
+                }
+                // 粘贴 API Key 按钮
+                Button("📋 从剪贴板粘贴 API Key") {
+                    if let text = UIPasteboard.general.string {
+                        apiKey = text
+                    }
+                }
+                .buttonStyle(.bordered)
+                .frame(maxWidth: .infinity)
                 TextField("模型名", text: $model)
                     .autocapitalization(.none)
                     .disableAutocorrection(true)
@@ -271,7 +264,27 @@ struct LLMProfileEditView: View {
 
             Section("操作") {
                 Button("测试连通性") {
-                    Task { await store.testConnection(profileId: profile?.id) }
+                    Task {
+                        if let existing = profile {
+                            // 已有端点：通过 profileId 查找并发送完整 profile
+                            await store.testConnection(profileId: existing.id)
+                        } else {
+                            // 新建模式：用表单当前值构造临时 profile 发送测试
+                            let tempProfile = LLMProfile(
+                                id: "temp-test",
+                                name: name,
+                                presetKey: "custom",
+                                `protocol`: protocolType,
+                                baseUrl: baseUrl,
+                                apiKey: apiKey,
+                                model: model,
+                                temperature: temperature,
+                                maxTokens: maxTokens,
+                                timeoutSeconds: timeoutSeconds
+                            )
+                            await store.testConnectionWithProfile(tempProfile)
+                        }
+                    }
                 }
                 .disabled(name.isEmpty || baseUrl.isEmpty)
             }

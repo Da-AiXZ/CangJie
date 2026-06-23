@@ -60,18 +60,30 @@ struct RootView: View {
                     showCreateNovel = false
                     appState.selectNovel(novel.id)
                     novelStore.selectNovel(novel)
-                    showOnboardingWizard = true
+                    // 延迟到下一个 RunLoop 打开向导，确保 currentNovel 已更新，
+                    // 避免 sheet 关闭与 fullScreenCover 弹出同时发生导致状态传播延迟引发崩溃
+                    DispatchQueue.main.async {
+                        showOnboardingWizard = true
+                    }
                 }
             )
             .environmentObject(appState)
         }
         .fullScreenCover(isPresented: $showOnboardingWizard) {
+            // 确保 currentNovel 有值才显示向导，避免 nil 导致空内容崩溃
             if let novel = novelStore.currentNovel {
                 OnboardingWizardView(novel: novel) {
                     showOnboardingWizard = false
                     appState.sidebarSelection = .workbench
                 }
                 .environmentObject(appState)
+            } else {
+                // currentNovel 为 nil 时关闭向导并回到书架
+                Color.clear
+                    .onAppear {
+                        showOnboardingWizard = false
+                        appState.sidebarSelection = .bookshelf
+                    }
             }
         }
         .task {

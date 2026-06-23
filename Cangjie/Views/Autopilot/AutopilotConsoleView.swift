@@ -44,6 +44,7 @@ struct AutopilotConsoleView: View {
         }
         .background(Theme.background)
         .navigationTitle("自动驾驶")
+        .navigationBarTitleDisplayMode(.inline)
         .task {
             await autopilotStore.refreshStatus(novelId: novelId)
             await autopilotStore.refreshCircuitBreaker(novelId: novelId)

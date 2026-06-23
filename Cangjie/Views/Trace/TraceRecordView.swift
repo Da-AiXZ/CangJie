@@ -28,6 +28,7 @@ struct TraceRecordView: View {
             }
         }
         .navigationTitle("AI Trace")
+        .navigationBarTitleDisplayMode(.inline)
         .task {
             if let novelId = appState.currentNovelId {
                 await store.loadAITraces(novelId: novelId)

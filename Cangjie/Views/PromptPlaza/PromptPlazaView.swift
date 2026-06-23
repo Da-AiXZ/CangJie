@@ -41,6 +41,7 @@ struct PromptPlazaView: View {
             }
             .listStyle(.sidebar)
             .navigationTitle("提示词")
+            .navigationBarTitleDisplayMode(.inline)
         } content: {
             // 中栏：模板列表
             List(selection: $selectedNode) {
@@ -69,6 +70,7 @@ struct PromptPlazaView: View {
                 }
             }
             .navigationTitle(selectedCategory ?? "全部")
+            .navigationBarTitleDisplayMode(.inline)
         } detail: {
             // 右栏：详情
             if let node = selectedNode {

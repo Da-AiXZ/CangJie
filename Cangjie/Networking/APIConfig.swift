@@ -17,7 +17,10 @@ import KeychainAccess
 /// - 所有 API 路径以 `/api/v1` 为前缀
 /// - 统计 API 前缀为 `/api/stats`
 /// - 健康检查端点：`GET /health`（无前缀，根路径）
-/// - 首次启动若 Keychain 无配置，强制显示服务器配置引导页
+/// - 首次启动若无配置，强制显示服务器配置引导页
+///
+/// 存储策略：优先使用 UserDefaults（TrollStore 环境下可靠），
+/// Keychain 作为 fallback（老版本数据迁移）。
 final class APIConfig: ObservableObject {
 
     // MARK: - 单例
@@ -25,12 +28,22 @@ final class APIConfig: ObservableObject {
     /// 全局共享实例
     static let shared = APIConfig()
 
-    // MARK: - Keychain
+    // MARK: - Keychain（fallback）
 
-    /// Keychain 实例，使用 App Bundle ID 作为服务标识
+    /// Keychain 实例，用于读取旧版数据
     private let keychain: Keychain
 
-    // MARK: - Keychain 键
+    // MARK: - UserDefaults 键
+
+    /// UserDefaults 存储键（TrollStore 环境下比 Keychain 更可靠）
+    private enum UserDefaultsKey {
+        static let baseURL = "cangjie.server.baseURL"
+        static let bearerToken = "cangjie.server.bearerToken"
+        static let basicAuthUser = "cangjie.server.basicAuthUser"
+        static let basicAuthPassword = "cangjie.server.basicAuthPassword"
+    }
+
+    // MARK: - Keychain 键（仅用于 fallback 读取）
 
     private enum KeychainKey {
         static let baseURL = "cangjie.server.baseURL"
@@ -61,28 +74,29 @@ final class APIConfig: ObservableObject {
     /// 服务器 Base URL（如 `https://plotpilot.example.com`）
     @Published var baseURL: String {
         didSet {
-            try? keychain.set(baseURL, key: KeychainKey.baseURL)
+            // 优先写入 UserDefaults（TrollStore 环境下杀后台不丢失）
+            UserDefaults.standard.set(baseURL, forKey: UserDefaultsKey.baseURL)
         }
     }
 
     /// Bearer Token（用于 Nginx Bearer Auth 中间件，可选）
     @Published var bearerToken: String {
         didSet {
-            try? keychain.set(bearerToken, key: KeychainKey.bearerToken)
+            UserDefaults.standard.set(bearerToken, forKey: UserDefaultsKey.bearerToken)
         }
     }
 
     /// Basic Auth 用户名（用于 Nginx Basic Auth，可选）
     @Published var basicAuthUser: String {
         didSet {
-            try? keychain.set(basicAuthUser, key: KeychainKey.basicAuthUser)
+            UserDefaults.standard.set(basicAuthUser, forKey: UserDefaultsKey.basicAuthUser)
         }
     }
 
     /// Basic Auth 密码（用于 Nginx Basic Auth，可选）
     @Published var basicAuthPassword: String {
         didSet {
-            try? keychain.set(basicAuthPassword, key: KeychainKey.basicAuthPassword)
+            UserDefaults.standard.set(basicAuthPassword, forKey: UserDefaultsKey.basicAuthPassword)
         }
     }
 
@@ -94,11 +108,44 @@ final class APIConfig: ObservableObject {
     private init() {
         self.keychain = Keychain(service: "com.cangjie.ios")
 
-        // 从 Keychain 加载已保存的配置
-        self.baseURL = (try? keychain.get(KeychainKey.baseURL)) ?? ""
-        self.bearerToken = (try? keychain.get(KeychainKey.bearerToken)) ?? ""
-        self.basicAuthUser = (try? keychain.get(KeychainKey.basicAuthUser)) ?? ""
-        self.basicAuthPassword = (try? keychain.get(KeychainKey.basicAuthPassword)) ?? ""
+        // 优先从 UserDefaults 加载配置（TrollStore 环境下杀后台不丢失）
+        // 如果 UserDefaults 没有，尝试从 Keychain 读取（老版本数据迁移）
+        if let savedBaseURL = UserDefaults.standard.string(forKey: UserDefaultsKey.baseURL) {
+            self.baseURL = savedBaseURL
+        } else {
+            self.baseURL = (try? keychain.get(KeychainKey.baseURL)) ?? ""
+            // 迁移：如果 Keychain 有值，同步到 UserDefaults
+            if !self.baseURL.isEmpty {
+                UserDefaults.standard.set(self.baseURL, forKey: UserDefaultsKey.baseURL)
+            }
+        }
+
+        if let savedBearerToken = UserDefaults.standard.string(forKey: UserDefaultsKey.bearerToken) {
+            self.bearerToken = savedBearerToken
+        } else {
+            self.bearerToken = (try? keychain.get(KeychainKey.bearerToken)) ?? ""
+            if !self.bearerToken.isEmpty {
+                UserDefaults.standard.set(self.bearerToken, forKey: UserDefaultsKey.bearerToken)
+            }
+        }
+
+        if let savedBasicAuthUser = UserDefaults.standard.string(forKey: UserDefaultsKey.basicAuthUser) {
+            self.basicAuthUser = savedBasicAuthUser
+        } else {
+            self.basicAuthUser = (try? keychain.get(KeychainKey.basicAuthUser)) ?? ""
+            if !self.basicAuthUser.isEmpty {
+                UserDefaults.standard.set(self.basicAuthUser, forKey: UserDefaultsKey.basicAuthUser)
+            }
+        }
+
+        if let savedBasicAuthPassword = UserDefaults.standard.string(forKey: UserDefaultsKey.basicAuthPassword) {
+            self.basicAuthPassword = savedBasicAuthPassword
+        } else {
+            self.basicAuthPassword = (try? keychain.get(KeychainKey.basicAuthPassword)) ?? ""
+            if !self.basicAuthPassword.isEmpty {
+                UserDefaults.standard.set(self.basicAuthPassword, forKey: UserDefaultsKey.basicAuthPassword)
+            }
+        }
     }
 
     // MARK: - 配置管理
@@ -206,6 +253,12 @@ final class APIConfig: ObservableObject {
         self.bearerToken = ""
         self.basicAuthUser = ""
         self.basicAuthPassword = ""
+        // 清除 UserDefaults
+        UserDefaults.standard.removeObject(forKey: UserDefaultsKey.baseURL)
+        UserDefaults.standard.removeObject(forKey: UserDefaultsKey.bearerToken)
+        UserDefaults.standard.removeObject(forKey: UserDefaultsKey.basicAuthUser)
+        UserDefaults.standard.removeObject(forKey: UserDefaultsKey.basicAuthPassword)
+        // 同时清除 Keychain（清理旧数据）
         try? keychain.remove(KeychainKey.baseURL)
         try? keychain.remove(KeychainKey.bearerToken)
         try? keychain.remove(KeychainKey.basicAuthUser)

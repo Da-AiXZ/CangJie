@@ -52,6 +52,7 @@ struct WorkbenchView: View {
         }
         .navigationSplitViewStyle(.balanced)
         .navigationTitle(novelStore.currentNovel?.title ?? "工作台")
+        .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .navigationBarTrailing) {
                 Button {
