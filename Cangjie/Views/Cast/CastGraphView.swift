@@ -47,7 +47,7 @@ struct CastGraphView: View {
                 nodeColor: { node in characterColor(node.type) },
                 nodeRadius: { _ in 28 },
                 nodeLabel: { $0.label },
-                edgeColor: { edge in relationColor(edge.type) },
+                edgeColor: { edge in relationColor(edge.label) },
                 edgeLabel: { $0.label },
                 onTapNode: { nodeId in
                     selectedCharacter = graph.characters.first { $0.id == nodeId }
