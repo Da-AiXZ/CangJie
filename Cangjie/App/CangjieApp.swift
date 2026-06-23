@@ -103,21 +103,27 @@ struct ServerConfigGuideView: View {
                             .font(Theme.headlineFont())
 
                         VStack(spacing: Theme.Spacing.sm) {
+                            // 服务器地址（含粘贴按钮，方便从剪贴板粘贴地址）
                             TextField("服务器地址", text: $serverURL)
                                 .textFieldStyle(.roundedBorder)
                                 .keyboardType(.URL)
                                 .autocapitalization(.none)
                                 .disableAutocorrection(true)
+                                .pasteButton(into: $serverURL)
 
+                            // Bearer Token（含粘贴按钮，解决 TrollStore 环境下长按粘贴不可用的问题）
                             SecureField("Bearer Token（可选）", text: $bearerToken)
                                 .textFieldStyle(.roundedBorder)
+                                .pasteButton(into: $bearerToken)
 
                             TextField("Basic Auth 用户名（可选）", text: $basicAuthUser)
                                 .textFieldStyle(.roundedBorder)
                                 .autocapitalization(.none)
 
+                            // Basic Auth 密码（含粘贴按钮）
                             SecureField("Basic Auth 密码（可选）", text: $basicAuthPassword)
                                 .textFieldStyle(.roundedBorder)
+                                .pasteButton(into: $basicAuthPassword)
                         }
 
                         // 测试结果

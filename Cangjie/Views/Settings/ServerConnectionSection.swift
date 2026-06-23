@@ -21,15 +21,18 @@ struct ServerConnectionSection: View {
 
     var body: some View {
         Section {
-            // 服务器地址
+            // 服务器地址（含粘贴按钮，方便从剪贴板粘贴地址）
             TextField("服务器地址", text: $serverURL)
                 .textFieldStyle(.roundedBorder)
                 .keyboardType(.URL)
                 .autocapitalization(.none)
                 .disableAutocorrection(true)
+                .pasteButton(into: $serverURL)
 
+            // Bearer Token（含粘贴按钮，解决 TrollStore 环境下长按粘贴不可用的问题）
             SecureField("Bearer Token（可选）", text: $bearerToken)
                 .textFieldStyle(.roundedBorder)
+                .pasteButton(into: $bearerToken)
 
             // 连接状态
             connectionStatusRow

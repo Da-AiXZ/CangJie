@@ -7,6 +7,7 @@
 //
 
 import SwiftUI
+import UIKit
 
 /// LLM 配置设置分区
 struct LLMConfigSection: View {
@@ -85,6 +86,12 @@ struct LLMConfigSection: View {
                 .font(.system(size: 10))
                 .foregroundColor(Theme.textTertiary)
                 .lineLimit(1)
+        }
+        .contentShape(Rectangle())
+        .onTapGesture {
+            // 点击端点行直接进入编辑，不依赖长按 contextMenu
+            editingProfile = profile
+            showEditSheet = true
         }
         .swipeActions {
             Button {
@@ -200,18 +207,49 @@ struct LLMProfileEditView: View {
     @State private var maxTokens: Int = 16000
     @State private var timeoutSeconds: Int = 300
     @State private var protocolType: String = "openai"
+    /// API Key 显示/隐藏切换状态
+    @State private var showApiKey: Bool = false
 
     var body: some View {
         Form {
             Section("基本信息") {
                 TextField("名称", text: $name)
+                // Base URL（含粘贴按钮，方便从剪贴板粘贴地址）
                 TextField("Base URL", text: $baseUrl)
                     .keyboardType(.URL)
                     .autocapitalization(.none)
                     .disableAutocorrection(true)
-                SecureField("API Key", text: $apiKey)
-                    .autocapitalization(.none)
-                    .disableAutocorrection(true)
+                    .pasteButton(into: $baseUrl)
+                // API Key（支持显示/隐藏切换 + 粘贴按钮，解决 TrollStore 环境下长按粘贴不可用的问题）
+                HStack {
+                    if showApiKey {
+                        TextField("API Key", text: $apiKey)
+                            .autocapitalization(.none)
+                            .disableAutocorrection(true)
+                    } else {
+                        SecureField("API Key", text: $apiKey)
+                            .autocapitalization(.none)
+                            .disableAutocorrection(true)
+                    }
+                    // 显示/隐藏切换按钮
+                    Button {
+                        showApiKey.toggle()
+                    } label: {
+                        Image(systemName: showApiKey ? "eye.slash" : "eye")
+                            .foregroundColor(Theme.primary)
+                    }
+                    .buttonStyle(.plain)
+                    // 粘贴按钮（从剪贴板读取 API Key）
+                    Button {
+                        if let text = UIPasteboard.general.string {
+                            apiKey = text
+                        }
+                    } label: {
+                        Image(systemName: "doc.on.clipboard")
+                            .foregroundColor(Theme.primary)
+                    }
+                    .buttonStyle(.plain)
+                }
                 TextField("模型名", text: $model)
                     .autocapitalization(.none)
                     .disableAutocorrection(true)

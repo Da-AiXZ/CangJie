@@ -6,6 +6,7 @@
 //
 
 import SwiftUI
+import UIKit
 
 // MARK: - 条件修饰符
 
@@ -196,5 +197,41 @@ extension View {
             x: 0,
             y: 2
         )
+    }
+}
+
+// MARK: - 粘贴按钮
+
+extension View {
+
+    /// 在视图右侧添加一个粘贴按钮，点击读取系统剪贴板并填入指定 Binding。
+    ///
+    /// 用于 TrollStore 侧载环境下，SwiftUI 长按"粘贴"菜单不可靠的场景。
+    /// 用户可以直接点击粘贴按钮将剪贴板内容填入输入框，
+    /// 无需依赖长按手势或第三方键盘。
+    ///
+    /// 用法：
+    /// ```swift
+    /// TextField("API Key", text: $apiKey)
+    ///     .pasteButton(into: $apiKey)
+    /// ```
+    ///
+    /// - Parameter binding: 要填入的文本绑定
+    /// - Returns: 包含原视图和粘贴按钮的 HStack
+    func pasteButton(into binding: Binding<String>) -> some View {
+        HStack {
+            self
+            Button {
+                // 读取系统剪贴板内容并填入
+                if let text = UIPasteboard.general.string {
+                    binding.wrappedValue = text
+                }
+            } label: {
+                Image(systemName: "doc.on.clipboard")
+                    .font(.system(size: 16))
+                    .foregroundColor(Theme.primary)
+            }
+            .buttonStyle(.plain)
+        }
     }
 }
