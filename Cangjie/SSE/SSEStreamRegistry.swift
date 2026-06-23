@@ -402,19 +402,86 @@ extension SSEStreamRegistry {
         )
     }
 
+    /// 根据 Bible 生成阶段构建 SSE URL（含 stage 查询参数）。
+    ///
+    /// 后端 generate_bible_stream 接口接受 stage 查询参数（默认 "worldbuilding"）。
+    ///
+    /// - Parameters:
+    ///   - novelId: 小说 ID
+    ///   - stage: 生成阶段（worldbuilding / characters / locations / all）
+    /// - Returns: SSE 端点 URL
+    func bibleGenerateStreamURL(novelId: String, stage: String) -> URL? {
+        let path = "/bible/novels/\(novelId)/generate-stream"
+        guard let url = config.fullURL(path: path, prefix: APIConfig.apiV1Prefix) else { return nil }
+        var components = URLComponents(url: url, resolvingAgainstBaseURL: false)
+        components?.queryItems = [URLQueryItem(name: "stage", value: stage)]
+        return components?.url
+    }
+
     /// 启动 Bible 生成流
+    /// - Parameters:
+    ///   - novelId: 小说 ID
+    ///   - stage: 生成阶段（worldbuilding / characters / locations / all）
+    ///   - onEvent: 事件回调
+    ///   - onError: 错误回调
     @discardableResult
     func startBibleGenerateStream(
         novelId: String,
+        stage: String = "worldbuilding",
         onEvent: @escaping (SSEEvent) -> Void,
         onError: ((Error) -> Void)? = nil
     ) -> Bool {
-        return startStream(
-            type: .bibleGenerateStream,
-            novelId: novelId,
-            onEvent: onEvent,
-            onError: onError
+        // 【修复】Bible 生成流需要 stage 查询参数，后端默认 "worldbuilding"。
+        // 修复前未传递 stage 参数，导致后端总是使用默认值而非用户指定阶段。
+        Logger.sse.info("启动 Bible 生成流 [novel: \(novelId), stage: \(stage)]")
+
+        // 构建带 stage 参数的 SSE URL
+        guard let url = bibleGenerateStreamURL(novelId: novelId, stage: stage) else {
+            Logger.sse.error("SSE URL 构建失败: Bible 生成流")
+            onError?(APIError.invalidURL)
+            return false
+        }
+
+        let key = registryKey(streamType: .bibleGenerateStream, novelId: novelId)
+
+        lock.lock()
+
+        // 取消旧连接
+        if let oldConnection = connections[key] {
+            oldConnection.cancel()
+            connections.removeValue(forKey: key)
+        }
+
+        // 创建新连接
+        let connection = SSEConnection(streamType: .bibleGenerateStream, url: url, client: client)
+        connections[key] = connection
+        eventHandlers[key] = onEvent
+        stateHandlers[key] = nil
+        errorHandlers[key] = onError
+
+        // 记录活跃流
+        activeNovelIds.insert(novelId)
+        if activeStreams[novelId] == nil {
+            activeStreams[novelId] = []
+        }
+        activeStreams[novelId]?.insert(.bibleGenerateStream)
+
+        lock.unlock()
+
+        // 启动连接
+        connection.start(
+            onEvent: { [weak self] event in
+                self?.handleEvent(event, key: key)
+            },
+            onStateChange: { [weak self] state in
+                self?.handleStateChange(state, key: key)
+            },
+            onError: { [weak self] error in
+                self?.handleError(error, key: key)
+            }
         )
+
+        return true
     }
 
     /// 启动宏观规划流

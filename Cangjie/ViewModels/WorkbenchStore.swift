@@ -203,11 +203,14 @@ final class WorkbenchStore: ObservableObject {
     /// - Parameters:
     ///   - novelId: 小说 ID
     ///   - chapterNumber: 章节号
-    func saveDraft(novelId: String, chapterNumber: Int) async {
+    ///   - source: 草稿来源（pre_regen=重新生成前 | manual_save=手动 | auto_gen=首次生成）
+    func saveDraft(novelId: String, chapterNumber: Int, source: String = "pre_regen") async {
         do {
+            // 【修复】后端期望 SaveDraftRequest（含 source 字段），而非空请求体。
+            // 修复前发送 EmptyResponse()，source 字段缺失导致后端使用默认值。
             let _: ChapterDraftResponse = try await apiClient.request(
                 APIEndpoint.Chapters.saveDraft(novelId: novelId, chapterNumber: chapterNumber),
-                body: EmptyResponse()
+                body: SaveDraftRequest(source: source)
             )
             await loadDrafts(novelId: novelId, chapterNumber: chapterNumber)
         } catch {

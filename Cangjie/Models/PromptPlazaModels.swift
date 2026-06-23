@@ -234,9 +234,9 @@ struct PromptPlazaInit: Codable, Equatable {
         let c = try decoder.singleValueContainer()
         let dict = try c.decode([String: AnyCodable].self)
         let catData = try JSONSerialization.data(withJSONObject: dict["categories"]?.value ?? [])
-        self.categories = (try? JSONDecoder().decode([PromptCategoryInfo].self, from: catData)) ?? []
+        self.categories = (try? CangjieDecoder.shared.decode([PromptCategoryInfo].self, from: catData)) ?? []
         let nodeData = try JSONSerialization.data(withJSONObject: dict["nodes"]?.value ?? [])
-        self.nodes = (try? JSONDecoder().decode([PromptNode].self, from: nodeData)) ?? []
+        self.nodes = (try? CangjieDecoder.shared.decode([PromptNode].self, from: nodeData)) ?? []
         self.stats = dict["stats"].map { AnyCodable($0) }
     }
 }

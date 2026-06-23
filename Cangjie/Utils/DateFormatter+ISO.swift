@@ -137,3 +137,20 @@ enum DateEncodingStrategyHelper {
         try container.encode(ISODateFormatter.string(from: date))
     }
 }
+
+// MARK: - 共享 JSONDecoder（带微秒日期解码）
+
+/// 【修复】共享 JSONDecoder，配置微秒日期解码策略。
+///
+/// 修复前，多个 Store 在通过 apiClient.download() 获取原始 Data 后，
+/// 使用裸 JSONDecoder() 解码，缺少微秒日期格式支持，导致含日期字段的
+/// 模型（如 AutopilotStatus.daemonHeartbeatAt、CircuitBreakerStatus.lastFailureAt
+/// 等）解码失败。
+enum CangjieDecoder {
+    /// 共享 JSONDecoder 实例，配置微秒日期解码策略
+    static let shared: JSONDecoder = {
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .custom(DateDecodingStrategyHelper.decode)
+        return decoder
+    }()
+}

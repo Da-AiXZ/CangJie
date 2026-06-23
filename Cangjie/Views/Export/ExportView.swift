@@ -17,6 +17,9 @@ struct ExportView: View {
     @State private var includeCover = true
     @State private var includeTOC = true
     @State private var exportAllChapters = true
+    // 【修复】补全章节范围导出参数（已知限制 #5：导出范围未接线）
+    @State private var chapterStart: Int = 1
+    @State private var chapterEnd: Int = 100
 
     var body: some View {
         ScrollView {
@@ -98,11 +101,23 @@ struct ExportView: View {
             Text("章节范围").font(Theme.headlineFont())
 
             Toggle("导出全部章节", isOn: $exportAllChapters)
-                .disabled(true)
 
-            Text("（章节范围导出暂未开放，当前导出全部章节）")
-                .font(.system(size: 11))
-                .foregroundColor(Theme.textTertiary)
+            // 【修复】补全章节范围导出 UI（已知限制 #5）
+            if !exportAllChapters {
+                HStack {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("起始章节").font(.system(size: 11)).foregroundColor(Theme.textSecondary)
+                        Stepper("第 \(chapterStart) 章", value: $chapterStart, in: 1...9999)
+                            .font(.system(size: 12))
+                    }
+                    Spacer()
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("结束章节").font(.system(size: 11)).foregroundColor(Theme.textSecondary)
+                        Stepper("第 \(chapterEnd) 章", value: $chapterEnd, in: 1...9999)
+                            .font(.system(size: 12))
+                    }
+                }
+            }
         }
         .cardStyle()
     }
@@ -180,7 +195,10 @@ struct ExportView: View {
 
     private func performExport() async {
         guard let novelId = appState.currentNovelId else { return }
-        await store.exportNovel(novelId: novelId, format: selectedFormat)
+        // 【修复】传入章节范围参数（已知限制 #5：导出范围未接线）
+        let start = exportAllChapters ? nil : chapterStart
+        let end = exportAllChapters ? nil : chapterEnd
+        await store.exportNovel(novelId: novelId, format: selectedFormat, chapterStart: start, chapterEnd: end)
     }
 
     // MARK: - 辅助

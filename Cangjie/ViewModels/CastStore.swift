@@ -46,17 +46,18 @@ final class CastStore: ObservableObject {
     ///   - query: 搜索关键词
     func search(novelId: String, query: String) async {
         do {
-            var url = APIEndpoint.Cast.search(novelId: novelId).url()!
-            var components = URLComponents(url: url, resolvingAgainstBaseURL: false)
-            components?.queryItems = [URLQueryItem(name: "q", value: query)]
-            url = components?.url ?? url
-
-            let request = apiClient.authMiddleware.makeAuthenticatedRequest(
-                url: url, method: .get
+            // 【修复】修复前构建了带 q 查询参数的 URL 但未使用，
+            // 直接调用 download 时丢失了查询参数，导致搜索功能失效。
+            // 现在使用 EndpointInfoWrapper 正确传递查询参数。
+            let data = try await apiClient.download(
+                APIEndpoint.EndpointInfoWrapper(
+                    path: "/novels/\(novelId)/cast/search",
+                    prefix: APIEndpoint.defaultPrefix,
+                    method: .get,
+                    queryItems: [URLQueryItem(name: "q", value: query)]
+                )
             )
-            // 使用 download 方法
-            let data = try await apiClient.download(APIEndpoint.Cast.search(novelId: novelId))
-            searchResults = try JSONDecoder().decode(CastSearchResult.self, from: data)
+            searchResults = try CangjieDecoder.shared.decode(CastSearchResult.self, from: data)
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -82,7 +83,7 @@ final class CastStore: ObservableObject {
                 APIEndpoint.Cast.narrativeProfile(novelId: novelId, characterId: characterId)
             )
             if let data = try? JSONSerialization.data(withJSONObject: raw.value) {
-                let profile = try? JSONDecoder().decode(CharacterNarrativeProfile.self, from: data)
+                let profile = try? CangjieDecoder.shared.decode(CharacterNarrativeProfile.self, from: data)
                 if let profile = profile {
                     narrativeProfiles[characterId] = profile
                 }

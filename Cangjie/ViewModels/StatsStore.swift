@@ -57,10 +57,11 @@ final class StatsStore: ObservableObject {
                 return
             }
 
+            // 【修复】使用配置微秒日期格式的共享解码器
             let data = try await apiClient.download(
                 APIEndpoint.EndpointInfoWrapper(path: "/book/\(slug)", prefix: APIConfig.statsPrefix, method: .get)
             )
-            let response = try JSONDecoder().decode(StatsSuccessResponse<BookStats>.self, from: data)
+            let response = try CangjieDecoder.shared.decode(StatsSuccessResponse<BookStats>.self, from: data)
             bookStats = response.data
         } catch {
             errorMessage = error.localizedDescription
@@ -81,7 +82,8 @@ final class StatsStore: ObservableObject {
                     prefix: APIConfig.statsPrefix, method: .get
                 )
             )
-            let response = try JSONDecoder().decode(StatsSuccessResponse<ChapterStats>.self, from: data)
+            // 【修复】使用配置微秒日期格式的共享解码器
+            let response = try CangjieDecoder.shared.decode(StatsSuccessResponse<ChapterStats>.self, from: data)
             chapterStats = response.data
         } catch {
             errorMessage = error.localizedDescription
@@ -101,7 +103,8 @@ final class StatsStore: ObservableObject {
                     queryItems: [URLQueryItem(name: "days", value: String(days))]
                 )
             )
-            let response = try JSONDecoder().decode(StatsSuccessResponse<[WritingProgress]>.self, from: data)
+            // 【修复】使用配置微秒日期格式的共享解码器
+            let response = try CangjieDecoder.shared.decode(StatsSuccessResponse<[WritingProgress]>.self, from: data)
             writingProgress = response.data
         } catch {
             errorMessage = error.localizedDescription

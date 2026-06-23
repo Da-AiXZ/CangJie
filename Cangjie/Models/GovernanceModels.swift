@@ -84,16 +84,16 @@ struct GovernanceState: Codable, Equatable {
         let dict = try c.decode([String: AnyCodable].self)
 
         let contractData = try JSONSerialization.data(withJSONObject: dict["contract"]?.value ?? [:])
-        self.contract = try? JSONDecoder().decode(GovernanceContract.self, from: contractData)
+        self.contract = try? CangjieDecoder.shared.decode(GovernanceContract.self, from: contractData)
 
         let storylinesData = try JSONSerialization.data(withJSONObject: dict["storylines"]?.value ?? [])
-        self.storylines = try? JSONDecoder().decode([Storyline].self, from: storylinesData)
+        self.storylines = try? CangjieDecoder.shared.decode([Storyline].self, from: storylinesData)
 
         let debtsData = try JSONSerialization.data(withJSONObject: dict["debts"]?.value ?? [])
-        self.debts = try? JSONDecoder().decode([DebtRecord].self, from: debtsData)
+        self.debts = try? CangjieDecoder.shared.decode([DebtRecord].self, from: debtsData)
 
         let reportsData = try JSONSerialization.data(withJSONObject: dict["reports"]?.value ?? [])
-        self.reports = try? JSONDecoder().decode([GovernanceReport].self, from: reportsData)
+        self.reports = try? CangjieDecoder.shared.decode([GovernanceReport].self, from: reportsData)
     }
 }
 
@@ -226,7 +226,7 @@ struct GovernanceBudgetPreview: Codable, Equatable {
         let c = try decoder.singleValueContainer()
         let dict = try c.decode([String: AnyCodable].self)
         let budgetData = try JSONSerialization.data(withJSONObject: dict["budget"]?.value ?? [:])
-        self.budget = try? JSONDecoder().decode(GovernanceBudget.self, from: budgetData)
+        self.budget = try? CangjieDecoder.shared.decode(GovernanceBudget.self, from: budgetData)
         self.contextRequest = dict["context_request"].map { AnyCodable($0) }
     }
 }

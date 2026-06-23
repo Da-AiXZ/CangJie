@@ -178,7 +178,7 @@ struct AntiAITrend: Codable, Equatable {
         let dict = try c.decode([String: AnyCodable].self)
         self.novelId = dict["novel_id"]?.stringStringValue ?? ""
         let dpData = try JSONSerialization.data(withJSONObject: dict["data_points"]?.value ?? [])
-        self.dataPoints = (try? JSONDecoder().decode([AntiAITrendPoint].self, from: dpData)) ?? []
+        self.dataPoints = (try? CangjieDecoder.shared.decode([AntiAITrendPoint].self, from: dpData)) ?? []
     }
 }
 

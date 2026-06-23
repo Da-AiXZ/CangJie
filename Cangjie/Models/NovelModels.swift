@@ -498,6 +498,18 @@ struct ChapterElementCreate: Codable {
     }
 }
 
+// MARK: - 保存草稿请求
+
+/// 保存草稿请求，对应后端 SaveDraftRequest（interfaces/api/v1/core/chapters.py）
+/// 后端有 source 字段（默认 "pre_regen"），标识草稿来源。
+struct SaveDraftRequest: Codable {
+    let source: String
+
+    init(source: String = "pre_regen") {
+        self.source = source
+    }
+}
+
 // MARK: - 小说统计
 
 /// 小说统计响应（GET /novels/{id}/statistics）

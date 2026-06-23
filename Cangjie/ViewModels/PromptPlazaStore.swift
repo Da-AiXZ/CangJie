@@ -52,7 +52,7 @@ final class PromptPlazaStore: ObservableObject {
         do {
             let raw: AnyCodable = try await apiClient.request(APIEndpoint.LLMControl.promptsStats)
             if let data = try? JSONSerialization.data(withJSONObject: raw.value) {
-                stats = try? JSONDecoder().decode(PromptStats.self, from: data)
+                stats = try? CangjieDecoder.shared.decode(PromptStats.self, from: data)
             }
         } catch {
             Logger.data.error("加载提示词统计失败: \(error.localizedDescription)")
@@ -66,7 +66,7 @@ final class PromptPlazaStore: ObservableObject {
                 APIEndpoint.LLMControl.promptNode(nodeKey: nodeKey)
             )
             if let data = try? JSONSerialization.data(withJSONObject: raw.value) {
-                currentNode = try? JSONDecoder().decode(PromptNode.self, from: data)
+                currentNode = try? CangjieDecoder.shared.decode(PromptNode.self, from: data)
             }
         } catch {
             errorMessage = error.localizedDescription
@@ -81,7 +81,7 @@ final class PromptPlazaStore: ObservableObject {
             )
             if let array = raw.arrayValue {
                 let data = try JSONSerialization.data(withJSONObject: array)
-                versions = try JSONDecoder().decode([PromptVersion].self, from: data)
+                versions = try CangjieDecoder.shared.decode([PromptVersion].self, from: data)
             }
         } catch {
             errorMessage = error.localizedDescription
@@ -98,7 +98,7 @@ final class PromptPlazaStore: ObservableObject {
                 body: request
             )
             if let data = try? JSONSerialization.data(withJSONObject: raw.value) {
-                currentNode = try? JSONDecoder().decode(PromptNode.self, from: data)
+                currentNode = try? CangjieDecoder.shared.decode(PromptNode.self, from: data)
             }
         } catch {
             errorMessage = error.localizedDescription
@@ -115,7 +115,7 @@ final class PromptPlazaStore: ObservableObject {
                 body: request
             )
             if let data = try? JSONSerialization.data(withJSONObject: raw.value) {
-                renderResult = try? JSONDecoder().decode(PromptRenderResult.self, from: data)
+                renderResult = try? CangjieDecoder.shared.decode(PromptRenderResult.self, from: data)
             }
         } catch {
             errorMessage = error.localizedDescription
@@ -130,7 +130,7 @@ final class PromptPlazaStore: ObservableObject {
                 body: AnyCodable(["variables": variables])
             )
             if let data = try? JSONSerialization.data(withJSONObject: raw.value) {
-                debugResult = try? JSONDecoder().decode(PromptDebugResult.self, from: data)
+                debugResult = try? CangjieDecoder.shared.decode(PromptDebugResult.self, from: data)
             }
         } catch {
             errorMessage = error.localizedDescription
@@ -144,7 +144,7 @@ final class PromptPlazaStore: ObservableObject {
                 APIEndpoint.LLMControl.comparePrompts(v1Id: v1Id, v2Id: v2Id)
             )
             if let data = try? JSONSerialization.data(withJSONObject: raw.value) {
-                comparison = try? JSONDecoder().decode(PromptComparison.self, from: data)
+                comparison = try? CangjieDecoder.shared.decode(PromptComparison.self, from: data)
             }
         } catch {
             errorMessage = error.localizedDescription
@@ -169,7 +169,7 @@ final class PromptPlazaStore: ObservableObject {
             let raw: AnyCodable = try await apiClient.request(APIEndpoint.LLMControl.promptsTemplates)
             if let array = raw.arrayValue {
                 let data = try JSONSerialization.data(withJSONObject: array)
-                templates = try JSONDecoder().decode([PromptTemplate].self, from: data)
+                templates = try CangjieDecoder.shared.decode([PromptTemplate].self, from: data)
             }
         } catch {
             errorMessage = error.localizedDescription

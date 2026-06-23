@@ -92,7 +92,7 @@ struct StoryStructureTree: Codable, Equatable {
         if let dict = try? container.decode([String: AnyCodable].self) {
             self.novelId = dict["novel_id"]?.stringStringValue ?? ""
             let nodesData = try JSONSerialization.data(withJSONObject: dict["nodes"]?.value ?? [])
-            self.nodes = (try? JSONDecoder().decode([StoryNode].self, from: nodesData)) ?? []
+            self.nodes = (try? CangjieDecoder.shared.decode([StoryNode].self, from: nodesData)) ?? []
         } else if let nodesArray = try? container.decode([StoryNode].self) {
             self.novelId = ""
             self.nodes = nodesArray

@@ -37,10 +37,10 @@ final class KnowledgeGraphStore: ObservableObject {
             )
             if let array = raw.arrayValue {
                 let data = try JSONSerialization.data(withJSONObject: array)
-                triples = try JSONDecoder().decode([KnowledgeTriple].self, from: data)
+                triples = try CangjieDecoder.shared.decode([KnowledgeTriple].self, from: data)
             } else if let dict = raw.dictionaryValue, let items = dict["triples"] {
                 let data = try JSONSerialization.data(withJSONObject: items)
-                triples = try JSONDecoder().decode([KnowledgeTriple].self, from: data)
+                triples = try CangjieDecoder.shared.decode([KnowledgeTriple].self, from: data)
             }
         } catch {
             errorMessage = error.localizedDescription
@@ -56,7 +56,7 @@ final class KnowledgeGraphStore: ObservableObject {
                 APIEndpoint.KnowledgeGraph.statistics(novelId: novelId)
             )
             if let data = try? JSONSerialization.data(withJSONObject: raw.value) {
-                statistics = try? JSONDecoder().decode(KnowledgeGraphStatistics.self, from: data)
+                statistics = try? CangjieDecoder.shared.decode(KnowledgeGraphStatistics.self, from: data)
             }
         } catch {
             Logger.data.error("加载 KG 统计失败: \(error.localizedDescription)")
@@ -73,7 +73,7 @@ final class KnowledgeGraphStore: ObservableObject {
                 body: request
             )
             if let data = try? JSONSerialization.data(withJSONObject: raw.value) {
-                let response = try? JSONDecoder().decode(KnowledgeSearchResponse.self, from: data)
+                let response = try? CangjieDecoder.shared.decode(KnowledgeSearchResponse.self, from: data)
                 searchResults = response?.hits ?? []
             }
         } catch {

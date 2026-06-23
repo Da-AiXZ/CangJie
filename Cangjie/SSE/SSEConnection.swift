@@ -165,6 +165,8 @@ final class SSEConnection: ObservableObject {
                 }
 
                 self.updateState(.connected)
+                // 【修复】连接成功后重置重连计数器，否则连续重连会累积导致后续重连提前耗尽次数
+                self.resetRetryCount()
                 Logger.sse.info("SSE 连接已建立: \(self.streamType.displayName)")
 
                 for try await event in stream {

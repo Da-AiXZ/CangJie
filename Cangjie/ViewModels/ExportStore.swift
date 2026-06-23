@@ -26,37 +26,32 @@ final class ExportStore: ObservableObject {
     /// - Parameters:
     ///   - novelId: 小说 ID
     ///   - format: 导出格式
+    ///   - chapterStart: 起始章节号（可选，后端支持范围导出）
+    ///   - chapterEnd: 结束章节号（可选，后端支持范围导出）
     /// - Returns: 导出结果
     @discardableResult
-    func exportNovel(novelId: String, format: ExportFormat) async -> ExportResult? {
+    func exportNovel(novelId: String, format: ExportFormat, chapterStart: Int? = nil, chapterEnd: Int? = nil) async -> ExportResult? {
         isExporting = true
         errorMessage = nil
 
         do {
-            // 后端导出返回 StreamingResponse（二进制文件），非 JSON
-            // 需要构建带 format 查询参数的 URL
-            guard let baseUrl = APIEndpoint.Export.novel(novelId: novelId).url() else {
-                errorMessage = "无效的 URL"
-                isExporting = false
-                return nil
+            // 【修复】后端导出返回 StreamingResponse（二进制文件），非 JSON。
+            // 修复前路径为 /novel/{id}（缺少 /export 前缀），导致 404。
+            // 正确路径为 /export/novel/{id}?format=xxx
+            var queryItems: [URLQueryItem] = [URLQueryItem(name: "format", value: format.rawValue)]
+            if let start = chapterStart {
+                queryItems.append(URLQueryItem(name: "chapter_start", value: String(start)))
+            }
+            if let end = chapterEnd {
+                queryItems.append(URLQueryItem(name: "chapter_end", value: String(end)))
             }
 
-            var components = URLComponents(url: baseUrl, resolvingAgainstBaseURL: false)
-            components?.queryItems = [URLQueryItem(name: "format", value: format.rawValue)]
-
-            guard let url = components?.url else {
-                errorMessage = "URL 构建失败"
-                isExporting = false
-                return nil
-            }
-
-            // 使用 download 下载二进制数据
             let data = try await apiClient.download(
                 APIEndpoint.EndpointInfoWrapper(
                     path: "/novel/\(novelId)",
-                    prefix: APIEndpoint.defaultPrefix,
+                    prefix: APIEndpoint.defaultPrefix + "/export",
                     method: .get,
-                    queryItems: [URLQueryItem(name: "format", value: format.rawValue)]
+                    queryItems: queryItems
                 )
             )
 
@@ -80,19 +75,31 @@ final class ExportStore: ObservableObject {
     /// - Parameters:
     ///   - chapterId: 章节 ID
     ///   - format: 导出格式
+    ///   - novelId: 小说 ID（可选，与 chapterNumber 配合使用）
+    ///   - chapterNumber: 章节编号（可选，与 novelId 配合使用）
     /// - Returns: 导出结果
     @discardableResult
-    func exportChapter(chapterId: String, format: ExportFormat) async -> ExportResult? {
+    func exportChapter(chapterId: String, format: ExportFormat, novelId: String? = nil, chapterNumber: Int? = nil) async -> ExportResult? {
         isExporting = true
         errorMessage = nil
 
         do {
+            // 【修复】修复前路径为 /chapter/{id}（缺少 /export 前缀），导致 404。
+            // 正确路径为 /export/chapter/{id}?format=xxx
+            var queryItems: [URLQueryItem] = [URLQueryItem(name: "format", value: format.rawValue)]
+            if let nid = novelId {
+                queryItems.append(URLQueryItem(name: "novel_id", value: nid))
+            }
+            if let cn = chapterNumber {
+                queryItems.append(URLQueryItem(name: "chapter_number", value: String(cn)))
+            }
+
             let data = try await apiClient.download(
                 APIEndpoint.EndpointInfoWrapper(
                     path: "/chapter/\(chapterId)",
-                    prefix: APIEndpoint.defaultPrefix,
+                    prefix: APIEndpoint.defaultPrefix + "/export",
                     method: .get,
-                    queryItems: [URLQueryItem(name: "format", value: format.rawValue)]
+                    queryItems: queryItems
                 )
             )
 

@@ -111,19 +111,51 @@ final class BibleStore: ObservableObject {
         }
     }
 
+    /// 添加时间线笔记
+    /// 【新增】对应后端 POST /bible/novels/{novel_id}/bible/timeline-notes
+    func addTimelineNote(novelId: String, request: AddTimelineNoteRequest) async {
+        do {
+            let updated: BibleDTO = try await apiClient.request(
+                APIEndpoint.Bible.addTimelineNote(novelId: novelId),
+                body: request
+            )
+            bible = updated
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    /// 添加文风笔记
+    /// 【新增】对应后端 POST /bible/novels/{novel_id}/bible/style-notes
+    func addStyleNote(novelId: String, request: AddStyleNoteRequest) async {
+        do {
+            let updated: BibleDTO = try await apiClient.request(
+                APIEndpoint.Bible.addStyleNote(novelId: novelId),
+                body: request
+            )
+            bible = updated
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
     // MARK: - 流式生成
 
     /// 启动 Bible 流式生成
     /// - Parameters:
     ///   - novelId: 小说 ID
-    ///   - stage: 生成阶段
+    ///   - stage: 生成阶段（worldbuilding / characters / locations / all / full）
     func startGeneration(novelId: String, stage: String = "full") async {
         isGenerating = true
         errorMessage = nil
         generationLog.removeAll()
 
+        // 【修复】将 stage 参数传递给 SSE 流（修复前 stage 被忽略，后端总是使用默认 "worldbuilding"）
+        // 后端 generate-stream 默认 stage="worldbuilding"，需要显式传入用户选择的阶段
+        let sseStage = stage == "full" ? "all" : stage
         sseRegistry.startBibleGenerateStream(
             novelId: novelId,
+            stage: sseStage,
             onEvent: { [weak self] event in
                 Task { @MainActor in
                     self?.handleSSEEvent(event)
@@ -165,9 +197,10 @@ final class BibleStore: ObservableObject {
     /// - Parameter novelId: 小说 ID
     func loadGenerationStatus(novelId: String) async {
         do {
+            // 【修复】使用配置微秒日期格式的共享解码器
             let raw: AnyCodable = try await apiClient.request(APIEndpoint.Bible.status(novelId: novelId))
             if let data = try? JSONSerialization.data(withJSONObject: raw.value) {
-                generationStatus = try? JSONDecoder().decode(BibleGenerationStatus.self, from: data)
+                generationStatus = try? CangjieDecoder.shared.decode(BibleGenerationStatus.self, from: data)
             }
         } catch {
             // 状态不存在时忽略

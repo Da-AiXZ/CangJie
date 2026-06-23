@@ -33,12 +33,13 @@ final class StructureStore: ObservableObject {
                 APIEndpoint.StoryStructure.get(novelId: novelId)
             )
             // 后端返回可能是节点数组或嵌套树
+            // 【修复】使用配置微秒日期格式的共享解码器
             if let array = raw.arrayValue {
                 let data = try JSONSerialization.data(withJSONObject: array)
-                tree = try JSONDecoder().decode([StoryNode].self, from: data)
+                tree = try CangjieDecoder.shared.decode([StoryNode].self, from: data)
             } else if let dict = raw.dictionaryValue {
                 let nodesData = try JSONSerialization.data(withJSONObject: dict["nodes"] ?? dict["children"] ?? [])
-                tree = try JSONDecoder().decode([StoryNode].self, from: nodesData)
+                tree = try CangjieDecoder.shared.decode([StoryNode].self, from: nodesData)
             }
         } catch {
             errorMessage = error.localizedDescription
@@ -54,8 +55,9 @@ final class StructureStore: ObservableObject {
                 APIEndpoint.StoryStructure.createNode(novelId: novelId),
                 body: request
             )
+            // 【修复】使用配置微秒日期格式的共享解码器
             if let data = try? JSONSerialization.data(withJSONObject: raw.value) {
-                let node = try? JSONDecoder().decode(StoryNode.self, from: data)
+                let node = try? CangjieDecoder.shared.decode(StoryNode.self, from: data)
                 if let node = node {
                     tree.append(node)
                 }
@@ -72,8 +74,9 @@ final class StructureStore: ObservableObject {
                 APIEndpoint.StoryStructure.updateNode(novelId: novelId, nodeId: nodeId),
                 body: request
             )
+            // 【修复】使用配置微秒日期格式的共享解码器
             if let data = try? JSONSerialization.data(withJSONObject: raw.value) {
-                let updated = try? JSONDecoder().decode(StoryNode.self, from: data)
+                let updated = try? CangjieDecoder.shared.decode(StoryNode.self, from: data)
                 if let updated = updated, let index = tree.firstIndex(where: { $0.id == nodeId }) {
                     tree[index] = updated
                 }
@@ -116,9 +119,10 @@ final class StructureStore: ObservableObject {
             let raw: AnyCodable = try await apiClient.request(
                 APIEndpoint.StoryStructure.createDefault(novelId: novelId)
             )
+            // 【修复】使用配置微秒日期格式的共享解码器
             if let array = raw.arrayValue {
                 let data = try JSONSerialization.data(withJSONObject: array)
-                tree = try JSONDecoder().decode([StoryNode].self, from: data)
+                tree = try CangjieDecoder.shared.decode([StoryNode].self, from: data)
             }
         } catch {
             errorMessage = error.localizedDescription

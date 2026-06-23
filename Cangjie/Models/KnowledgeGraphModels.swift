@@ -196,7 +196,7 @@ struct InferenceEvidence: Codable, Equatable {
         let c = try decoder.singleValueContainer()
         let dict = try c.decode([String: AnyCodable].self)
         let tripleData = try JSONSerialization.data(withJSONObject: dict["triples"]?.value ?? [])
-        self.triples = (try? JSONDecoder().decode([KnowledgeTriple].self, from: tripleData)) ?? []
+        self.triples = (try? CangjieDecoder.shared.decode([KnowledgeTriple].self, from: tripleData)) ?? []
         self.evidence = (dict["evidence"]?.arrayValue ?? []).map { AnyCodable($0) }
     }
 }

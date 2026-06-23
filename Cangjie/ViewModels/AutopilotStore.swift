@@ -39,6 +39,7 @@ final class AutopilotStore: ObservableObject {
 
     private let apiClient: APIClient
     private let sseRegistry: SSEStreamRegistry
+    private let novelStore: NovelStore?
 
     // MARK: - 状态轮询定时器
 
@@ -46,9 +47,10 @@ final class AutopilotStore: ObservableObject {
 
     // MARK: - 初始化
 
-    init(apiClient: APIClient = .shared, sseRegistry: SSEStreamRegistry = .shared) {
+    init(apiClient: APIClient = .shared, sseRegistry: SSEStreamRegistry = .shared, novelStore: NovelStore? = nil) {
         self.apiClient = apiClient
         self.sseRegistry = sseRegistry
+        self.novelStore = novelStore
     }
 
     // MARK: - 自动驾驶控制
@@ -128,9 +130,10 @@ final class AutopilotStore: ObservableObject {
     func refreshStatus(novelId: String) async {
         do {
             // 后端 /status 返回 dict，用 AnyCodable 接收后手动解析
+            // 【修复】使用配置微秒日期格式的共享解码器，修复前用裸 JSONDecoder() 导致日期字段解码失败
             let raw: AnyCodable = try await apiClient.request(APIEndpoint.Autopilot.status(novelId: novelId))
             if let data = try? JSONSerialization.data(withJSONObject: raw.value) {
-                status = try? JSONDecoder().decode(AutopilotStatus.self, from: data)
+                status = try? CangjieDecoder.shared.decode(AutopilotStatus.self, from: data)
             }
         } catch {
             Logger.engine.error("刷新自动驾驶状态失败: \(error.localizedDescription)")
@@ -141,9 +144,10 @@ final class AutopilotStore: ObservableObject {
     /// - Parameter novelId: 小说 ID
     func refreshCircuitBreaker(novelId: String) async {
         do {
+            // 【修复】使用配置微秒日期格式的共享解码器
             let raw: AnyCodable = try await apiClient.request(APIEndpoint.Autopilot.circuitBreaker(novelId: novelId))
             if let data = try? JSONSerialization.data(withJSONObject: raw.value) {
-                circuitBreaker = try? JSONDecoder().decode(CircuitBreakerStatus.self, from: data)
+                circuitBreaker = try? CangjieDecoder.shared.decode(CircuitBreakerStatus.self, from: data)
             }
         } catch {
             Logger.engine.error("刷新熔断器状态失败: \(error.localizedDescription)")
@@ -242,13 +246,27 @@ final class AutopilotStore: ObservableObject {
         guard let chapterEvent = try? event.decode(ChapterStreamEvent.self) else { return }
         chapterEvents.append(chapterEvent)
 
-        // 章节完成时刷新状态
+        // 保留最近 100 条
+        if chapterEvents.count > 100 {
+            chapterEvents.removeFirst(chapterEvents.count - 100)
+        }
+
+        // 【修复】章节完成时刷新状态和章节列表（修复前为空操作死代码）
         if chapterEvent.done == true {
-            Task {
-                if let novelId = status?.currentChapterNumber {
-                    _ = novelId
+            Task { @MainActor [weak self] in
+                guard let self = self else { return }
+                // 通过日志事件中的 novelId 或外部传入的 novelId 刷新状态
+                // 由于 SSE 事件不含 novelId，使用 novelStore 的 currentNovelId
+                if let novelId = self.novelStore?.currentNovel?.id {
+                    await self.refreshStatus(novelId: novelId)
+                    await self.novelStore?.loadChapters(novelId)
                 }
             }
+        }
+
+        // 章节生成出错时显示错误
+        if let error = chapterEvent.error, !error.isEmpty {
+            errorMessage = error
         }
     }
 

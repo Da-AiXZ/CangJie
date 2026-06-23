@@ -49,7 +49,7 @@ final class EvolutionStore: ObservableObject {
                 APIEndpoint.Evolution.snapshotAtChapter(novelId: novelId, chapterNumber: chapterNumber)
             )
             if let data = try? JSONSerialization.data(withJSONObject: raw.value) {
-                let snapshot = try? JSONDecoder().decode(EvolutionSnapshot.self, from: data)
+                let snapshot = try? CangjieDecoder.shared.decode(EvolutionSnapshot.self, from: data)
                 if let snapshot = snapshot {
                     // 替换或追加
                     if let index = snapshots.firstIndex(where: { $0.id == snapshot.id }) {
@@ -72,7 +72,7 @@ final class EvolutionStore: ObservableObject {
                 body: request
             )
             if let data = try? JSONSerialization.data(withJSONObject: raw.value) {
-                gateReport = try? JSONDecoder().decode(EvolutionGateReport.self, from: data)
+                gateReport = try? CangjieDecoder.shared.decode(EvolutionGateReport.self, from: data)
             }
         } catch {
             errorMessage = error.localizedDescription

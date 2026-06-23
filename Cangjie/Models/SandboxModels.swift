@@ -84,7 +84,7 @@ struct CharacterAnchor: Codable, Equatable {
         self.verbalPatterns = (dict["verbal_patterns"]?.arrayValue ?? []).compactMap { $0 as? String }
         self.behavioralNotes = dict["behavioral_notes"]?.stringStringValue
         let samplesData = try JSONSerialization.data(withJSONObject: dict["recent_dialogue_samples"]?.value ?? [])
-        self.recentDialogueSamples = try? JSONDecoder().decode([DialogueEntry].self, from: samplesData)
+        self.recentDialogueSamples = try? CangjieDecoder.shared.decode([DialogueEntry].self, from: samplesData)
     }
 }
 

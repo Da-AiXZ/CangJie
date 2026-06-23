@@ -34,7 +34,7 @@ final class GovernanceStore: ObservableObject {
                 APIEndpoint.Governance.state(novelId: novelId)
             )
             if let data = try? JSONSerialization.data(withJSONObject: raw.value) {
-                state = try? JSONDecoder().decode(GovernanceState.self, from: data)
+                state = try? CangjieDecoder.shared.decode(GovernanceState.self, from: data)
             }
         } catch {
             errorMessage = error.localizedDescription
@@ -80,7 +80,7 @@ final class GovernanceStore: ObservableObject {
                 body: payload
             )
             if let data = try? JSONSerialization.data(withJSONObject: raw.value) {
-                budgetPreview = try? JSONDecoder().decode(GovernanceBudgetPreview.self, from: data)
+                budgetPreview = try? CangjieDecoder.shared.decode(GovernanceBudgetPreview.self, from: data)
             }
         } catch {
             errorMessage = error.localizedDescription

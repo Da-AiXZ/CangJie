@@ -241,8 +241,10 @@ struct BibleGenerationFeedback: Codable, Equatable {
 
 // MARK: - 添加角色/设定/地点请求
 
-/// 添加角色请求体
+/// 添加角色请求体，对应后端 AddCharacterRequest（interfaces/api/v1/world/bible.py）
+/// 【修复】后端要求 character_id 字段（必填），修复前缺失导致 422 错误。
 struct AddCharacterRequest: Codable {
+    let characterId: String
     let name: String
     let description: String
     let gender: String?
@@ -252,34 +254,138 @@ struct AddCharacterRequest: Codable {
     let coreMotivation: String?
 
     enum CodingKeys: String, CodingKey {
+        case characterId = "character_id"
         case name, description, gender, age, personality, background
         case coreMotivation = "core_motivation"
     }
+
+    init(
+        characterId: String = UUID().uuidString,
+        name: String,
+        description: String,
+        gender: String? = nil,
+        age: String? = nil,
+        personality: String? = nil,
+        background: String? = nil,
+        coreMotivation: String? = nil
+    ) {
+        self.characterId = characterId
+        self.name = name
+        self.description = description
+        self.gender = gender
+        self.age = age
+        self.personality = personality
+        self.background = background
+        self.coreMotivation = coreMotivation
+    }
 }
 
-/// 添加世界设定请求体
+/// 添加世界设定请求体，对应后端 AddWorldSettingRequest
+/// 【修复】后端要求 setting_id 字段（必填），修复前缺失导致 422 错误。
 struct AddWorldSettingRequest: Codable {
+    let settingId: String
     let name: String
     let description: String
     let settingType: String
 
     enum CodingKeys: String, CodingKey {
+        case settingId = "setting_id"
         case name, description
         case settingType = "setting_type"
     }
+
+    init(
+        settingId: String = UUID().uuidString,
+        name: String,
+        description: String,
+        settingType: String
+    ) {
+        self.settingId = settingId
+        self.name = name
+        self.description = description
+        self.settingType = settingType
+    }
 }
 
-/// 添加地点请求体
+/// 添加地点请求体，对应后端 AddLocationRequest
+/// 【修复】后端要求 location_id 字段（必填），修复前缺失导致 422 错误。
 struct AddLocationRequest: Codable {
+    let locationId: String
     let name: String
     let description: String
     let locationType: String
     let parentId: String?
 
     enum CodingKeys: String, CodingKey {
+        case locationId = "location_id"
         case name, description
         case locationType = "location_type"
         case parentId = "parent_id"
+    }
+
+    init(
+        locationId: String = UUID().uuidString,
+        name: String,
+        description: String,
+        locationType: String,
+        parentId: String? = nil
+    ) {
+        self.locationId = locationId
+        self.name = name
+        self.description = description
+        self.locationType = locationType
+        self.parentId = parentId
+    }
+}
+
+/// 添加时间线笔记请求体，对应后端 AddTimelineNoteRequest
+/// 【修复】后端要求 note_id 字段（必填），修复前整个模型缺失。
+struct AddTimelineNoteRequest: Codable {
+    let noteId: String
+    let event: String
+    let timePoint: String
+    let description: String
+
+    enum CodingKeys: String, CodingKey {
+        case noteId = "note_id"
+        case event
+        case timePoint = "time_point"
+        case description
+    }
+
+    init(
+        noteId: String = UUID().uuidString,
+        event: String,
+        timePoint: String,
+        description: String
+    ) {
+        self.noteId = noteId
+        self.event = event
+        self.timePoint = timePoint
+        self.description = description
+    }
+}
+
+/// 添加风格笔记请求体，对应后端 AddStyleNoteRequest
+/// 【修复】后端要求 note_id 字段（必填），修复前整个模型缺失。
+struct AddStyleNoteRequest: Codable {
+    let noteId: String
+    let category: String
+    let content: String
+
+    enum CodingKeys: String, CodingKey {
+        case noteId = "note_id"
+        case category, content
+    }
+
+    init(
+        noteId: String = UUID().uuidString,
+        category: String,
+        content: String
+    ) {
+        self.noteId = noteId
+        self.category = category
+        self.content = content
     }
 }
 
