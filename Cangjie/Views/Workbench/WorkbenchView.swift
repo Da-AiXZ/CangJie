@@ -10,6 +10,10 @@
 //  在其 content 闭包里再嵌套 NavigationSplitView 会导致 iOS 16 AttributeGraph
 //  assertion 崩溃（EXC_BREAKPOINT）。改为 HStack 三栏布局避免嵌套。
 //
+//  【修复】工具栏新增「宏观规划」按钮，弹出 MacroPlanModal 手动触发宏观规划。
+//  对齐原版 Vue MacroPlanModal.vue：宏观规划在工作台手动触发，不在向导中调 macro API。
+//  弹窗关闭后刷新结构树（confirm 已在 OnboardingStore.startMacroPlanning 内完成）。
+//
 
 import SwiftUI
 
@@ -25,6 +29,9 @@ struct WorkbenchView: View {
 
     /// 是否显示自动驾驶生成流
     @State private var showChapterStream = false
+
+    /// 是否显示宏观规划弹窗
+    @State private var showMacroPlan = false
 
     var body: some View {
         // 【修复】用 HStack 代替 NavigationSplitView，避免嵌套 NavigationSplitView
@@ -55,7 +62,25 @@ struct WorkbenchView: View {
         .navigationTitle(novelStore.currentNovel?.title ?? "工作台")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
-            ToolbarItem(placement: .navigationBarTrailing) {
+            ToolbarItemGroup(placement: .navigationBarTrailing) {
+                // 宏观规划按钮（结构树为空时显示提醒圆点，引导用户先生成）
+                // 【修复 F3】currentNovelId 为 nil 时禁用，避免传空串给 MacroPlanModal 导致 API 404
+                Button {
+                    showMacroPlan = true
+                } label: {
+                    ZStack(alignment: .topTrailing) {
+                        Image(systemName: "wand.and.stars")
+                        if structureStore.tree.isEmpty {
+                            Circle()
+                                .fill(Theme.warning)
+                                .frame(width: 8, height: 8)
+                                .offset(x: 4, y: -4)
+                        }
+                    }
+                }
+                .disabled(appState.currentNovelId == nil)
+
+                // 切换章节流 / 正文编辑
                 Button {
                     showChapterStream.toggle()
                 } label: {
@@ -78,6 +103,17 @@ struct WorkbenchView: View {
             if isRunning {
                 showChapterStream = true
             }
+        }
+        .sheet(isPresented: $showMacroPlan, onDismiss: {
+            // 宏观规划弹窗关闭后刷新结构树
+            // （confirm 已在 OnboardingStore.startMacroPlanning 内自动完成写入 DB）
+            if let novelId = appState.currentNovelId {
+                Task {
+                    await structureStore.loadTree(novelId: novelId)
+                }
+            }
+        }) {
+            MacroPlanModal(novelId: appState.currentNovelId ?? "")
         }
     }
 

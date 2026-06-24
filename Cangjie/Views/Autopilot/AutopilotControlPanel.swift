@@ -5,6 +5,9 @@
 //  控制面板：目标章数/每章字数/最大自动章数 + 启动/停止/恢复 + 当前状态卡片。
 //  对齐 Vue3 AutopilotPanel.vue 的状态卡片 + 操作按钮 + 启动配置弹窗。
 //
+//  【修复】启动失败 409（宏观结构未生成）时弹出引导提示，
+//  指引用户去工作台点击「宏观规划」按钮生成并确认故事骨架。
+//
 
 import SwiftUI
 
@@ -21,6 +24,7 @@ struct AutopilotControlPanel: View {
     @State private var maxAutoChapters: Int = 9999
     @State private var autoApproveMode: Bool = false
     @State private var showStartSheet: Bool = false
+    @State private var showMacroGuidance: Bool = false
 
     var body: some View {
         VStack(spacing: Theme.Spacing.md) {
@@ -38,6 +42,13 @@ struct AutopilotControlPanel: View {
         .padding(Theme.Spacing.md)
         .background(Theme.secondaryBackground)
         .cornerRadius(Theme.CornerRadius.large)
+        .alert("无法启动自动驾驶", isPresented: $showMacroGuidance) {
+            Button("知道了", role: .cancel) {
+                autopilotStore.errorMessage = nil
+            }
+        } message: {
+            Text("请先在工作台点击「宏观规划」按钮，生成并确认故事骨架（部/卷/幕）后再启动自动驾驶。")
+        }
     }
 
     // MARK: - 状态卡片
@@ -173,6 +184,14 @@ struct AutopilotControlPanel: View {
                                 targetWordsPerChapter: targetWordsPerChapter
                             )
                             showStartSheet = false
+                            // 检查是否因宏观结构未生成而启动失败（HTTP 409）
+                            // 【修复 F2】先清 errorMessage 再设 showMacroGuidance，
+                            // 避免 AutopilotConsoleView 的通用 alert 抢同一个 errorMessage 状态
+                            if let msg = autopilotStore.errorMessage,
+                               msg.contains("宏观结构") || msg.contains("409") {
+                                autopilotStore.errorMessage = nil
+                                showMacroGuidance = true
+                            }
                         }
                     }
                     .fontWeight(.semibold)
