@@ -208,48 +208,113 @@ final class OnboardingStore: ObservableObject {
         currentStep = .macroPlanning
     }
 
-    // MARK: - 步骤 4: 宏观规划
+    // MARK: - 步骤 4: 宏观规划（REST 方式，不依赖 SSE）
 
-    /// 启动宏观规划 SSE
+    /// 启动宏观规划
+    ///
+    /// 【修复】原实现只连 SSE 流监听事件，但生成完成后从未调 POST /macro/confirm
+    /// 确认大纲，导致结构没存进 DB → autopilot 启动报 409。
+    /// 现改为 REST 方式：generate → 轮询 progress → result → confirm
     func startMacroPlanning() async {
-        guard let novelId = createdNovel?.id else { return }
+        guard let novel = createdNovel else { return }
+        let novelId = novel.id
 
         isProcessing = true
         errorMessage = nil
         macroPlanEvents.removeAll()
 
-        sseRegistry.startMacroPlanStream(
-            novelId: novelId,
-            onEvent: { [weak self] event in
-                Task { @MainActor in
-                    self?.handleMacroPlanSSEEvent(event)
-                }
-            },
-            onError: { [weak self] error in
-                Task { @MainActor in
-                    self?.errorMessage = error.localizedDescription
-                    self?.isProcessing = false
-                }
-            }
+        // 1. 触发生成
+        let request = MacroPlanRequest(
+            targetChapters: novel.targetChapters,
+            structure: StructurePreference(parts: 3, volumesPerPart: 3, actsPerVolume: 3)
         )
-    }
 
-    /// 处理宏观规划 SSE 事件
-    private func handleMacroPlanSSEEvent(_ event: SSEEvent) {
-        guard let planEvent = try? event.decode(MacroPlanEvent.self) else { return }
-        macroPlanEvents.append(planEvent)
-
-        switch planEvent.type {
-        case "done":
-            macroPlanStructure = planEvent.structure
+        do {
+            let _: AnyCodable = try await apiClient.request(
+                APIEndpoint.Planning.macroGenerate(novelId: novelId),
+                body: request
+            )
+        } catch {
+            errorMessage = "触发宏观规划失败: \(error.localizedDescription)"
             isProcessing = false
-            currentStep = .completed
-        case "error":
-            errorMessage = planEvent.error ?? "宏观规划失败"
-            isProcessing = false
-        default:
-            break
+            return
         }
+
+        // 2. 轮询进度
+        let maxAttempts = 120 // 最多等 10 分钟（120 × 5s）
+        for attempt in 0..<maxAttempts {
+            do {
+                let progress: AnyCodable = try await apiClient.request(
+                    APIEndpoint.Planning.macroProgress(novelId: novelId)
+                )
+                let dict = progress.dictionaryValue ?? [:]
+                let status = dict["status"] as? String ?? ""
+                let message = dict["message"] as? String ?? ""
+                let percent = dict["percent"] as? Double ?? 0
+
+                // 更新进度事件
+                macroPlanEvents.append(MacroPlanEvent(
+                    type: "status", phase: nil, message: message,
+                    current: nil, total: nil, percent: percent,
+                    text: nil, nodeType: nil, partIndex: nil, volumeIndex: nil,
+                    actIndex: nil, title: nil, description: nil,
+                    estimatedChapters: nil, structure: nil, qualityMetrics: nil,
+                    generationTime: nil, error: nil
+                ))
+
+                if status == "completed" || status == "done" {
+                    break
+                }
+                if status == "failed" {
+                    errorMessage = "宏观规划失败: \(message)"
+                    isProcessing = false
+                    return
+                }
+            } catch {
+                // 进度查询失败，继续重试
+            }
+
+            // 每 5 秒轮询一次
+            try? await Task.sleep(nanoseconds: 5_000_000_000)
+            if Task.isCancelled {
+                isProcessing = false
+                return
+            }
+        }
+
+        // 3. 获取结果
+        do {
+            let result: AnyCodable = try await apiClient.request(
+                APIEndpoint.Planning.macroResult(novelId: novelId)
+            )
+            let dict = result.dictionaryValue ?? [:]
+            let structure = dict["structure"] as? [Any] ?? []
+            let structureData = try JSONSerialization.data(withJSONObject: structure)
+            let decoded = try CangjieDecoder.shared.decode([AnyCodable].self, from: structureData)
+            macroPlanStructure = decoded
+
+            macroPlanEvents.append(MacroPlanEvent(
+                type: "done", phase: nil, message: "宏观规划完成",
+                current: nil, total: nil, percent: 100,
+                text: nil, nodeType: nil, partIndex: nil, volumeIndex: nil,
+                actIndex: nil, title: nil, description: nil,
+                estimatedChapters: nil, structure: decoded, qualityMetrics: nil,
+                generationTime: nil, error: nil
+            ))
+
+            // 4. 确认大纲（关键！没这步 DB 里没结构 → autopilot 409）
+            let confirmRequest = MacroPlanConfirmRequest(structure: decoded)
+            let _: AnyCodable = try await apiClient.request(
+                APIEndpoint.Planning.macroConfirm(novelId: novelId),
+                body: confirmRequest
+            )
+        } catch {
+            errorMessage = "获取/确认宏观规划结果失败: \(error.localizedDescription)"
+            isProcessing = false
+            return
+        }
+
+        isProcessing = false
     }
 
     /// 完成向导
