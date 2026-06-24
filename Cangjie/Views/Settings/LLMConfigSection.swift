@@ -217,15 +217,7 @@ struct LLMProfileEditView: View {
                     .keyboardType(.URL)
                     .autocapitalization(.none)
                     .disableAutocorrection(true)
-                // 粘贴 Base URL 按钮（带文字标签，确保点击区域明确）
-                Button("📋 从剪贴板粘贴 Base URL") {
-                    if let text = UIPasteboard.general.string {
-                        baseUrl = text
-                    }
-                }
-                .buttonStyle(.bordered)
-                .frame(maxWidth: .infinity)
-                // API Key（改用 TextField，全局支持第三方键盘，不再使用 SecureField）
+                // API Key
                 TextField("API Key", text: $apiKey)
                     .autocapitalization(.none)
                     .disableAutocorrection(true)
@@ -235,14 +227,6 @@ struct LLMProfileEditView: View {
                         .font(.system(size: 11))
                         .foregroundColor(Theme.warning)
                 }
-                // 粘贴 API Key 按钮
-                Button("📋 从剪贴板粘贴 API Key") {
-                    if let text = UIPasteboard.general.string {
-                        apiKey = text
-                    }
-                }
-                .buttonStyle(.bordered)
-                .frame(maxWidth: .infinity)
                 TextField("模型名", text: $model)
                     .autocapitalization(.none)
                     .disableAutocorrection(true)

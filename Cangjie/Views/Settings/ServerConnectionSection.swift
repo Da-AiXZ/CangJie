@@ -29,29 +29,11 @@ struct ServerConnectionSection: View {
                 .autocapitalization(.none)
                 .disableAutocorrection(true)
 
-            // 粘贴服务器地址按钮（带文字标签，确保点击区域明确）
-            Button("📋 从剪贴板粘贴服务器地址") {
-                if let text = UIPasteboard.general.string {
-                    serverURL = text
-                }
-            }
-            .buttonStyle(.bordered)
-            .frame(maxWidth: .infinity)
-
-            // Bearer Token（改用 TextField，全局支持第三方键盘）
+            // Bearer Token
             TextField("Bearer Token（可选）", text: $bearerToken)
                 .textFieldStyle(.roundedBorder)
                 .autocapitalization(.none)
                 .disableAutocorrection(true)
-
-            // 粘贴 Bearer Token 按钮
-            Button("📋 从剪贴板粘贴 Bearer Token") {
-                if let text = UIPasteboard.general.string {
-                    bearerToken = text
-                }
-            }
-            .buttonStyle(.bordered)
-            .frame(maxWidth: .infinity)
 
             // 连接状态
             connectionStatusRow

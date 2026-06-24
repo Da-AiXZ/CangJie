@@ -60,6 +60,10 @@ struct OnboardingWizardView: View {
             } message: {
                 Text(store.errorMessage ?? "")
             }
+            // 【修复】必须将 store 注入环境，否则子视图 BibleStreamingStep/
+            // CharacterSetupStep/OutlineStep 的 @EnvironmentObject 找不到 store
+            // → SwiftUI assertionFailure → EXC_BREAKPOINT 崩溃
+            .environmentObject(store)
         }
     }
 

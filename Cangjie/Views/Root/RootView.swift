@@ -124,6 +124,9 @@ struct RootView: View {
             if appState.currentNovelId != nil {
                 WorkbenchView()
                     .environmentObject(novelStore)
+                    // 【修复】显式注入 appState，WorkbenchView 用 @EnvironmentObject var appState
+                    // NavigationSplitView content 闭包可能不继承父环境，需要显式注入
+                    .environmentObject(appState)
             } else {
                 emptyWorkbenchPlaceholder
             }
