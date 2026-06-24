@@ -87,7 +87,8 @@ final class ForeshadowStore: ObservableObject {
         let request = UpdateForeshadowRequest(
             chapter: nil, characterId: nil, question: nil,
             status: "consumed", consumedAtChapter: consumedAtChapter,
-            isPriorityForChapter: nil
+            suggestedResolveChapter: nil, resolveChapterWindow: nil,
+            importance: nil, isPriorityForChapter: nil
         )
         await updateEntry(novelId: novelId, entryId: entryId, request: request)
     }

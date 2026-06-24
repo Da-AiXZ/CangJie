@@ -306,13 +306,13 @@ struct InvocationVariableSnapshotGroup: Codable, Equatable, Identifiable {
     var items: [InvocationVariableSnapshotItem]?
 
     enum CodingKeys: String, CodingKey {
-        case id
+        case groupId = "id"
         case scope, stage, title, items
     }
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
-        self.groupId = try c.decodeIfPresent(String.self, forKey: .id)
+        self.groupId = try c.decodeIfPresent(String.self, forKey: .groupId)
         self.scope = try c.decodeIfPresent(String.self, forKey: .scope)
         self.stage = try c.decodeIfPresent(String.self, forKey: .stage)
         self.title = try c.decodeIfPresent(String.self, forKey: .title)

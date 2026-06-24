@@ -263,7 +263,8 @@ final class AIInvocationStore: ObservableObject {
         syncGenerationPolling()
 
         // 通知 listeners — aiInvocationStore.ts:156-161
-        if let sessionId = payload.session.id, !sessionId.isEmpty {
+        let sessionId = payload.session.id
+        if !sessionId.isEmpty {
             let listeners = sessionListeners[sessionId] ?? []
             for (_, listener) in listeners {
                 listener(payload)
@@ -300,7 +301,7 @@ final class AIInvocationStore: ObservableObject {
     // MARK: - open — aiInvocationStore.ts:204-240
 
     /// 打开 session — aiInvocationStore.ts:204-240
-    func open(sessionId: String, showPanel: Bool = true) async {
+    func open(sessionId: String, showPanel: Bool = true) async throws {
         if showPanel {
             showDebugPanel() // Q8：无条件 visible=true
         }
@@ -333,7 +334,7 @@ final class AIInvocationStore: ObservableObject {
             promptDraftUser = promptDraftSavedUser
             openFromResponse(payload, showPanel: showPanel)
         } catch {
-            error = errorText(error)
+            self.error = errorText(error)
             throw error
         }
         loading = false
@@ -361,7 +362,7 @@ final class AIInvocationStore: ObservableObject {
             )
             applyResponse(response)
         } catch {
-            error = errorText(error)
+            self.error = errorText(error)
             throw error
         }
         actionLoading = false
@@ -385,7 +386,7 @@ final class AIInvocationStore: ObservableObject {
             )
             applyResponse(response)
         } catch {
-            error = errorText(error)
+            self.error = errorText(error)
             throw error
         }
         actionLoading = false
@@ -413,7 +414,7 @@ final class AIInvocationStore: ObservableObject {
             }
             syncGenerationPolling()
         } catch {
-            error = errorText(error)
+            self.error = errorText(error)
             throw error
         }
         actionLoading = false
@@ -438,7 +439,7 @@ final class AIInvocationStore: ObservableObject {
             }
             syncGenerationPolling()
         } catch {
-            error = errorText(error)
+            self.error = errorText(error)
             throw error
         }
         actionLoading = false
@@ -501,7 +502,7 @@ final class AIInvocationStore: ObservableObject {
             )
             applyResponse(response)
         } catch {
-            error = errorText(error)
+            self.error = errorText(error)
             throw error
         }
         actionLoading = false
@@ -523,7 +524,7 @@ final class AIInvocationStore: ObservableObject {
             )
             applyResponse(response)
         } catch {
-            error = errorText(error)
+            self.error = errorText(error)
             throw error
         }
         actionLoading = false

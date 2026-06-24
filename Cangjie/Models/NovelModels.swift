@@ -477,27 +477,6 @@ struct UpdateChapterHintRequest: Codable {
     }
 }
 
-// MARK: - 章节元素
-
-/// 章节元素创建请求
-struct ChapterElementCreate: Codable {
-    let elementType: String
-    let elementId: String
-    let relationType: String
-    let importance: String?
-    let appearanceOrder: Int?
-    let notes: String?
-
-    enum CodingKeys: String, CodingKey {
-        case elementType = "element_type"
-        case elementId = "element_id"
-        case relationType = "relation_type"
-        case importance
-        case appearanceOrder = "appearance_order"
-        case notes
-    }
-}
-
 // MARK: - 保存草稿请求
 
 /// 保存草稿请求，对应后端 SaveDraftRequest（interfaces/api/v1/core/chapters.py）

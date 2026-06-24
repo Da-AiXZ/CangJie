@@ -91,8 +91,8 @@ struct PlotOutlineStep: View {
                 }
 
                 // 区块6: 可编辑卡片 — NovelSetupGuide.vue:590-658
-                if let outline = store.editablePlotOutline {
-                    editablePlotOutlineCard(outline)
+                if !store.editablePlotOutline.stagePlan.isEmpty || !store.editablePlotOutline.mainStoryOverview.isEmpty {
+                    editablePlotOutlineCard(store.editablePlotOutline)
                 }
 
                 // 区块7: 重新生成+AI审阅按钮 — NovelSetupGuide.vue:661-673
