@@ -373,16 +373,27 @@ final class SSEStreamRegistry: ObservableObject {
 extension SSEStreamRegistry {
 
     /// 启动章节生成流
+    ///
+    /// 【返工M4】增加 onStateChange 参数，传给 startStream，使调用方可监听流结束状态。
+    /// 修复前未暴露此参数，导致 AutopilotStore 无法感知流结束、onStreamEnd 回调从未调用。
+    /// - Parameters:
+    ///   - novelId: 小说 ID
+    ///   - onEvent: 事件回调
+    ///   - onStateChange: 状态变更回调（可选，流结束时状态为 .disconnected）
+    ///   - onError: 错误回调（可选）
+    /// - Returns: 是否成功启动
     @discardableResult
     func startChapterStream(
         novelId: String,
         onEvent: @escaping (SSEEvent) -> Void,
+        onStateChange: ((SSEConnectionState) -> Void)? = nil,
         onError: ((Error) -> Void)? = nil
     ) -> Bool {
         return startStream(
             type: .chapterStream,
             novelId: novelId,
             onEvent: onEvent,
+            onStateChange: onStateChange,
             onError: onError
         )
     }

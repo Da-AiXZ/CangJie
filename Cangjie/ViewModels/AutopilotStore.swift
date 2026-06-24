@@ -170,6 +170,10 @@ final class AutopilotStore: ObservableObject {
     /// 启动 SSE 流（日志流 + 章节生成流）
     /// - Parameter novelId: 小说 ID
     func startSSEStreams(novelId: String) {
+        // 【返工M4】重置流状态：streamTerminal 和错误标志，确保新流的 onStreamEnd 逻辑正确
+        chapterStreamTerminal = nil
+        chapterStreamDidError = false
+
         // 日志流
         sseRegistry.startAutopilotStream(
             novelId: novelId,
@@ -186,6 +190,9 @@ final class AutopilotStore: ObservableObject {
         )
 
         // 章节生成流
+        // 【返工M4】传入 onStateChange 和 onError 闭包，补齐原版 config.ts:454-460 逻辑：
+        // - 流正常结束（.disconnected 且无错误）→ onStreamEnd(streamTerminal ?? "idle")
+        // - 流异常 → onError + onDisconnected（标记错误标志，不走 onStreamEnd）
         sseRegistry.startChapterStream(
             novelId: novelId,
             onEvent: { [weak self] event in
@@ -193,7 +200,32 @@ final class AutopilotStore: ObservableObject {
                     self?.handleChapterEvent(event)
                 }
             },
-            onError: nil
+            onStateChange: { [weak self] state in
+                Task { @MainActor in
+                    guard let self = self else { return }
+                    // 流正常结束（config.ts:454-460）
+                    // streamTerminal有值（stopped/review）→ onStreamEnd(terminal)
+                    // streamTerminal无值 → onStreamEnd("idle")
+                    if state == .disconnected && !self.chapterStreamDidError {
+                        let terminal = self.chapterStreamTerminal ?? "idle"
+                        Logger.engine.info("chapter-stream 正常结束, onStreamEnd(\(terminal))")
+                        self.onStreamEnd?(terminal)
+                    }
+                    // 重置错误标志，为下次流准备
+                    self.chapterStreamDidError = false
+                }
+            },
+            onError: { [weak self] error in
+                Task { @MainActor in
+                    guard let self = self else { return }
+                    // 流异常 → onError + onDisconnected（原版 catch 分支, config.ts:454-460）
+                    // 标记错误标志，阻止 onStateChange 中的 onStreamEnd 被调用
+                    self.chapterStreamDidError = true
+                    self.errorMessage = error.localizedDescription
+                    self.sseConnected = false
+                    Logger.engine.error("chapter-stream 异常断开: \(error.localizedDescription)")
+                }
+            }
         )
 
         sseConnected = true
@@ -388,6 +420,10 @@ final class AutopilotStore: ObservableObject {
 
     /// 流结束原因（config.ts:359 streamTerminal: 'stopped' | 'review' | 'idle' | nil）
     private var chapterStreamTerminal: String?
+
+    /// 流是否因错误而断开（区分正常结束和异常断开，config.ts:454-460 vs catch分支）
+    /// 正常结束 → onStreamEnd；异常断开 → onError + onDisconnected（不走 onStreamEnd）
+    private var chapterStreamDidError: Bool = false
 
     // MARK: - 便捷属性
 

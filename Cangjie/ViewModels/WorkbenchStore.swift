@@ -67,6 +67,10 @@ final class WorkbenchStore: ObservableObject {
     /// 是否正在生成章节
     @Published var isGeneratingChapter: Bool = false
 
+    /// 【返工M5】当前生成的小说ID（用于 approval_required/error/done 时显式 cancel SSE）
+    /// 原版 workflow.ts:446,489 在这些事件中 return true 终止流，iOS 需显式调用 cancel
+    private var currentGenerateNovelId: String?
+
     // MARK: - 依赖
 
     private let apiClient: APIClient
@@ -291,6 +295,9 @@ final class WorkbenchStore: ObservableObject {
         generateChapterBeats = nil
         errorMessage = nil
 
+        // 【返工M5】记录当前生成的小说ID，用于在 approval_required/error/done 时显式 cancel SSE
+        currentGenerateNovelId = novelId
+
         // 构造请求载荷（Q决策：只传必填字段 chapterNumber + outline，workflow.ts:159-174）
         let payload = GenerateChapterWithContextPayload(
             chapterNumber: chapterNumber,
@@ -358,6 +365,10 @@ final class WorkbenchStore: ObservableObject {
                 errorMessage = "需要AI审批 [\(status)]"
             }
             isGeneratingChapter = false
+            // 【返工M5】显式 cancel SSE（原版 workflow.ts:446 return true 终止流）
+            if let nid = currentGenerateNovelId {
+                sseRegistry.cancelGenerateChapterStream(novelId: nid)
+            }
 
         case "chunk":
             // chunk 事件（workflow.ts:447-452）：正文流式增量
@@ -367,6 +378,10 @@ final class WorkbenchStore: ObservableObject {
         case "done":
             // done 事件（workflow.ts:453-483）：终止流
             handleGenerateChapterDoneEvent(dict)
+            // 【返工M5】显式 cancel SSE（原版 done 也 return true 终止流）
+            if let nid = currentGenerateNovelId {
+                sseRegistry.cancelGenerateChapterStream(novelId: nid)
+            }
 
         case "error":
             // error 事件（workflow.ts:484-490）：终止流
@@ -374,6 +389,10 @@ final class WorkbenchStore: ObservableObject {
             errorMessage = message
             isGeneratingChapter = false
             Logger.engine.error("单章生成失败: \(message)")
+            // 【返工M5】显式 cancel SSE（原版 workflow.ts:489 return true 终止流）
+            if let nid = currentGenerateNovelId {
+                sseRegistry.cancelGenerateChapterStream(novelId: nid)
+            }
 
         default:
             break
