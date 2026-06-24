@@ -583,6 +583,11 @@ struct DagRegistryGapItem: Codable, Equatable, Identifiable {
         self.nodeId = try c.decodeIfPresent(String.self, forKey: .nodeId) ?? ""
         self.nodeType = try c.decodeIfPresent(String.self, forKey: .nodeType) ?? ""
     }
+
+    init(nodeId: String, nodeType: String) {
+        self.nodeId = nodeId
+        self.nodeType = nodeType
+    }
 }
 
 /// DAG ↔ CPMS 联动响应 — 对齐 types/dag.ts:209-215 DagRegistryLinkageResponse

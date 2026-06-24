@@ -362,7 +362,7 @@ struct DAGCanvasView: View {
     // MARK: - 命中测试
 
     /// 反变换坐标并命中测试节点
-    private func hitTest(at point: CGPoint) -> SugiyamaLayout.LayoutNode? {
+    private func hitTest(at point: CGPoint) -> SugiyamaLayout.PositionedNode? {
         guard let result = layoutResult else { return nil }
 
         let transformedX = (point.x - currentOffset.width - offset.width) / (currentScale * scale)
