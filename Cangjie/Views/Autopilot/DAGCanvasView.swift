@@ -17,6 +17,9 @@ struct DAGCanvasView: View {
 
     @EnvironmentObject var dagStore: DAGStore
 
+    /// 小说 ID（T04 新增，NodeDetailPanel/NodeContextMenu 需要）
+    var novelId: String = ""
+
     /// 缩放
     @GestureState private var scale: CGFloat = 1.0
     @State private var currentScale: CGFloat = 0.8
@@ -28,14 +31,30 @@ struct DAGCanvasView: View {
     /// 选中的节点
     @State private var selectedNodeId: String?
 
-    /// 节点详情弹窗
+    /// 节点详情弹窗 — 决策6：用 .sheet 呈现 NodeDetailPanel
     @State private var showNodeDetail = false
+
+    /// 上下文菜单状态 — 决策7：自定义 overlay
+    @State private var contextMenuState: ContextMenuState?
+
+    /// 最后触摸位置（用于长按定位）
+    @State private var lastTouchLocation: CGPoint = .zero
 
     /// 布局结果缓存
     @State private var layoutResult: SugiyamaLayout.LayoutResult?
 
     /// 动画相位（running 节点脉冲）
     @State private var pulsePhase: CGFloat = 0
+
+    /// 上下文菜单状态结构
+    struct ContextMenuState: Identifiable {
+        let id = UUID()
+        let x: CGFloat
+        let y: CGFloat
+        let nodeId: String
+        let nodeEnabled: Bool
+        let nodeType: String
+    }
 
     var body: some View {
         GeometryReader { geometry in
@@ -70,9 +89,22 @@ struct DAGCanvasView: View {
                             currentOffset.height += value.translation.height
                         }
                 )
+                // 追踪触摸位置（用于长按定位），不干扰其他手势
+                .simultaneousGesture(
+                    DragGesture(minimumDistance: 0)
+                        .onChanged { value in
+                            if abs(value.translation.width) < 1 && abs(value.translation.height) < 1 {
+                                lastTouchLocation = value.startLocation
+                            }
+                        }
+                )
                 .onTapGesture { location in
                     handleTap(at: location, in: geometry)
                 }
+                // 决策7：长按触发上下文菜单
+                .onLongPressGesture(minimumDuration: 0.5, maximumDistance: 12, perform: {
+                    handleLongPress(in: geometry)
+                })
 
                 // 控制按钮
                 VStack {
@@ -101,6 +133,33 @@ struct DAGCanvasView: View {
                 }
                 .padding(Theme.Spacing.md)
             }
+            // 决策7：上下文菜单 overlay（自定义浮层）
+            if let menuState = contextMenuState {
+                NodeContextMenu(
+                    x: menuState.x,
+                    y: menuState.y,
+                    nodeId: menuState.nodeId,
+                    nodeEnabled: menuState.nodeEnabled,
+                    nodeType: menuState.nodeType,
+                    onDetail: { nodeId in
+                        // 对齐 NodeContextMenu.vue:16 emit detail → 打开 NodeDetailPanel
+                        selectedNodeId = nodeId
+                        showNodeDetail = true
+                    },
+                    onToggle: { nodeId in
+                        // 对齐 NodeContextMenu.vue:20 emit toggle → 调 dagStore.toggleNode
+                        Task {
+                            await dagStore.toggleNode(novelId: novelId, nodeId: nodeId)
+                        }
+                    },
+                    onClose: {
+                        contextMenuState = nil
+                    }
+                )
+                .environmentObject(dagStore)
+                .transition(.opacity)
+                .zIndex(9999)
+            }
         }
         .background(Color(.systemGray6))
         .onAppear {
@@ -110,9 +169,11 @@ struct DAGCanvasView: View {
         .onChange(of: dagStore.dagDefinition) { _ in
             computeLayout()
         }
+        // 决策6：用 .sheet 呈现 NodeDetailPanel，替换原有简单 nodeDetailSheet
         .sheet(isPresented: $showNodeDetail) {
             if let nodeId = selectedNodeId {
-                nodeDetailSheet(nodeId)
+                NodeDetailPanel(novelId: novelId, nodeId: nodeId)
+                    .environmentObject(dagStore)
             }
         }
     }
@@ -267,22 +328,54 @@ struct DAGCanvasView: View {
     // MARK: - 点击处理
 
     private func handleTap(at point: CGPoint, in geometry: GeometryProxy) {
-        // 反变换坐标
+        // 关闭上下文菜单（如有）
+        contextMenuState = nil
+
+        // 命中测试
+        if let node = hitTest(at: point) {
+            selectedNodeId = node.id
+            showNodeDetail = true
+        }
+    }
+
+    // MARK: - 长按处理（决策7：触发上下文菜单）
+
+    /// 长按节点 → 弹出 NodeContextMenu — 对齐 NodeContextMenu.vue 长按触发
+    private func handleLongPress(in geometry: GeometryProxy) {
+        // 使用最后触摸位置进行命中测试
+        if let node = hitTest(at: lastTouchLocation) {
+            let nodeDef = dagStore.nodes.first { $0.id == node.id }
+            let nodeType = nodeDef?.type ?? ""
+            let nodeEnabled = nodeDef?.enabled ?? true
+
+            // 创建上下文菜单状态（对齐 NodeContextMenu.vue:61-68 menuStyle 定位）
+            contextMenuState = ContextMenuState(
+                x: lastTouchLocation.x,
+                y: lastTouchLocation.y,
+                nodeId: node.id,
+                nodeEnabled: nodeEnabled,
+                nodeType: nodeType
+            )
+        }
+    }
+
+    // MARK: - 命中测试
+
+    /// 反变换坐标并命中测试节点
+    private func hitTest(at point: CGPoint) -> SugiyamaLayout.LayoutNode? {
+        guard let result = layoutResult else { return nil }
+
         let transformedX = (point.x - currentOffset.width - offset.width) / (currentScale * scale)
         let transformedY = (point.y - currentOffset.height - offset.height) / (currentScale * scale)
 
-        // 命中测试
-        if let result = layoutResult {
-            for node in result.nodes {
-                let dx = abs(transformedX - node.x)
-                let dy = abs(transformedY - node.y)
-                if dx < 70 && dy < 25 {
-                    selectedNodeId = node.id
-                    showNodeDetail = true
-                    return
-                }
+        for node in result.nodes {
+            let dx = abs(transformedX - node.x)
+            let dy = abs(transformedY - node.y)
+            if dx < 70 && dy < 25 {
+                return node
             }
         }
+        return nil
     }
 
     // MARK: - 布局计算
@@ -305,54 +398,6 @@ struct DAGCanvasView: View {
                     pulsePhase = 1.5
                 }
                 try? await Task.sleep(nanoseconds: 1_600_000_000)
-            }
-        }
-    }
-
-    // MARK: - 节点详情 Sheet
-
-    private func nodeDetailSheet(_ nodeId: String) -> some View {
-        let node = dagStore.nodes.first { $0.id == nodeId }
-        let runState = dagStore.nodeStates[nodeId]
-
-        return NavigationStack {
-            Form {
-                Section("节点信息") {
-                    LabeledContent("ID", value: nodeId)
-                    LabeledContent("类型", value: node?.type ?? "")
-                    LabeledContent("标签", value: node?.label ?? "")
-                    LabeledContent("状态", value: runState?.status ?? "idle")
-                    LabeledContent("启用", value: node?.enabled == true ? "是" : "否")
-                }
-
-                if let state = runState {
-                    Section("运行时") {
-                        if state.durationMs > 0 {
-                            LabeledContent("耗时", value: "\(state.durationMs)ms")
-                        }
-                        if state.progress > 0 {
-                            LabeledContent("进度", value: "\(Int(state.progress * 100))%")
-                        }
-                        if let error = state.error {
-                            LabeledContent("错误", value: error)
-                        }
-                    }
-
-                    if !state.metrics.isEmpty {
-                        Section("指标") {
-                            ForEach(state.metrics.sorted(by: { $0.key < $1.key }), id: \.key) { key, value in
-                                LabeledContent(key, value: String(format: "%.2f", value))
-                            }
-                        }
-                    }
-                }
-            }
-            .navigationTitle("节点详情")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    Button("关闭") { showNodeDetail = false }
-                }
             }
         }
     }

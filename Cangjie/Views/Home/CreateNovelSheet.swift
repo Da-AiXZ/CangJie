@@ -44,11 +44,6 @@ struct CreateNovelSheet: View {
         ("epic", "史诗", "约 300 万字"),
     ]
 
-    // MARK: - 题材选项（简化版，后续可从后端 Taxonomy 拉取）
-
-    private let genreOptions = ["玄幻", "都市", "科幻", "历史", "悬疑", "言情", "武侠", "游戏"]
-    private let worldPresetOptions = ["东方玄幻", "现代都市", "未来星际", "古代宫廷", "末日废土", "异世界"]
-
     // MARK: - Body
 
     var body: some View {
@@ -70,22 +65,17 @@ struct CreateNovelSheet: View {
                     }
                 }
 
-                // 题材包
+                // 题材包 — 对齐 MarketTaxonomyPicker.vue 6 个 Binding
+                // 决策：删除硬编码 genre/worldPreset Picker，替换为 MarketTaxonomyPicker
                 Section("市场分区") {
-                    Picker("类型", selection: $genre) {
-                        Text("请选择").tag("")
-                        ForEach(genreOptions, id: \.self) { Text($0).tag($0) }
-                    }
-
-                    Picker("世界观基调", selection: $worldPreset) {
-                        Text("请选择").tag("")
-                        ForEach(worldPresetOptions, id: \.self) { Text($0).tag($0) }
-                    }
-
-                    TextField("剧情结构", text: $storyStructure, prompt: Text("如：三幕式结构"))
-                    TextField("节奏把控", text: $pacingControl, prompt: Text("如：快节奏爽文"))
-                    TextField("写作风格", text: $writingStyle, prompt: Text("如：白描叙事"))
-                    TextField("特殊要求", text: $specialRequirements, prompt: Text("如：无后宫"))
+                    MarketTaxonomyPicker(
+                        genre: $genre,
+                        worldPreset: $worldPreset,
+                        storyStructure: $storyStructure,
+                        pacingControl: $pacingControl,
+                        writingStyle: $writingStyle,
+                        specialRequirements: $specialRequirements
+                    )
                 }
 
                 // 目标篇幅

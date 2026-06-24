@@ -103,6 +103,14 @@ struct AutopilotStatus: Codable, Equatable {
     /// 上次审计信息
     let lastChapterAudit: AnyCodable?
 
+    // MARK: - T04 新增：写作遥测字段（对齐 NodeDetailPanel.vue:91-94）
+    /// 累计章节字数 — accumulated_words
+    let accumulatedWords: Int?
+    /// 本章目标字数 — chapter_target_words
+    let chapterTargetWords: Int?
+    /// 上下文 token 数 — context_tokens
+    let contextTokens: Int?
+
     enum CodingKeys: String, CodingKey {
         case autopilotStatus = "autopilot_status"
         case currentStage = "current_stage"
@@ -133,6 +141,10 @@ struct AutopilotStatus: Codable, Equatable {
         case writingSubstepLabel = "writing_substep_label"
         case autopilotPauseReason = "autopilot_pause_reason"
         case lastChapterAudit = "last_chapter_audit"
+        // T04 新增写作遥测字段 CodingKeys
+        case accumulatedWords = "accumulated_words"
+        case chapterTargetWords = "chapter_target_words"
+        case contextTokens = "context_tokens"
     }
 
     init(from decoder: Decoder) throws {
@@ -166,6 +178,10 @@ struct AutopilotStatus: Codable, Equatable {
         self.writingSubstepLabel = try c.decodeIfPresent(String.self, forKey: .writingSubstepLabel)
         self.autopilotPauseReason = try c.decodeIfPresent(String.self, forKey: .autopilotPauseReason)
         self.lastChapterAudit = try c.decodeIfPresent(AnyCodable.self, forKey: .lastChapterAudit)
+        // T04 新增写作遥测字段解码（对齐 NodeDetailPanel.vue:91-94）
+        self.accumulatedWords = try c.decodeIfPresent(Int.self, forKey: .accumulatedWords)
+        self.chapterTargetWords = try c.decodeIfPresent(Int.self, forKey: .chapterTargetWords)
+        self.contextTokens = try c.decodeIfPresent(Int.self, forKey: .contextTokens)
     }
 }
 

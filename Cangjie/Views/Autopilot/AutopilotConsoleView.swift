@@ -28,8 +28,8 @@ struct AutopilotConsoleView: View {
                 CircuitBreakerCard(novelId: novelId)
                     .environmentObject(autopilotStore)
 
-                // DAG 画布
-                DAGCanvasView()
+                // DAG 画布 — T04 传递 novelId（NodeDetailPanel/NodeContextMenu 需要）
+                DAGCanvasView(novelId: novelId)
                     .environmentObject(dagStore)
                     .frame(minHeight: 400)
 
@@ -50,8 +50,8 @@ struct AutopilotConsoleView: View {
             await autopilotStore.refreshCircuitBreaker(novelId: novelId)
             autopilotStore.startSSEStreams(novelId: novelId)
 
-            // 加载 DAG
-            await dagStore.loadDAG(novelId: novelId)
+            // 加载 DAG — T04 改用 hydrateDagForNovel（并行加载 DAG + 注册表 + linkage）
+            await dagStore.hydrateDagForNovel(novelId: novelId)
             await dagStore.loadDAGStatus(novelId: novelId)
             dagStore.startDAGEvents(novelId: novelId)
         }

@@ -93,14 +93,16 @@ struct NodePort: Codable, Equatable {
 
 /// 节点运行时配置，对应后端 NodeConfig
 struct NodeConfig: Codable, Equatable {
-    let promptTemplate: String?
-    let promptVariables: [String: String]
-    let thresholds: [String: Double]
-    let modelOverride: String?
-    let maxRetries: Int
-    let timeoutSeconds: Int
-    let temperature: Double
-    let maxTokens: Int?
+    // 对齐 types/dag.ts:54-63 NodeConfig
+    // var 而非 let：updateNodeConfig 需内存直接修改（对齐 dagStore.ts:290-305）
+    var promptTemplate: String?
+    var promptVariables: [String: String]
+    var thresholds: [String: Double]
+    var modelOverride: String?
+    var maxRetries: Int
+    var timeoutSeconds: Int
+    var temperature: Double
+    var maxTokens: Int?
 
     enum CodingKeys: String, CodingKey {
         case promptTemplate = "prompt_template"
@@ -135,7 +137,8 @@ struct NodeDefinition: Codable, Identifiable, Equatable {
     let label: String
     let position: [String: Double]
     let enabled: Bool
-    let config: NodeConfig?
+    // var 而非 let：updateNodeConfig 需内存直接修改（对齐 dagStore.ts:293-301）
+    var config: NodeConfig?
 
     enum CodingKeys: String, CodingKey {
         case id, type, label, position, enabled, config
@@ -214,7 +217,8 @@ struct DAGDefinition: Codable, Identifiable, Equatable {
     let name: String
     let version: Int
     let description: String
-    let nodes: [NodeDefinition]
+    // var 而非 let：updateNodeConfig 需内存直接修改节点 config（对齐 dagStore.ts:293-301）
+    var nodes: [NodeDefinition]
     let edges: [EdgeDefinition]
     let metadata: DAGMetadata?
 
@@ -342,3 +346,274 @@ struct DAGHealthResponse: Codable, Equatable {
         self.checks = try c.decodeIfPresent(AnyCodable.self, forKey: .checks) ?? AnyCodable([:])
     }
 }
+
+// MARK: - 节点元数据（对齐 types/dag.ts:32-50 NodeMeta）
+
+/// 节点注册表元数据，GET /dag/registry/types 返回的 types 字典中的值。
+/// 对齐 types/dag.ts:32-50
+struct NodeMeta: Codable, Equatable {
+    let nodeType: String
+    let displayName: String
+    let category: String
+    let icon: String
+    let color: String
+    let inputPorts: [NodePort]
+    let outputPorts: [NodePort]
+    let promptTemplate: String
+    let promptVariables: [String]
+    let isConfigurable: Bool
+    let canDisable: Bool
+    let defaultTimeoutSeconds: Int
+    let defaultMaxRetries: Int
+    let cpmsNodeKey: String
+    let description: String
+    let defaultEdges: [String]
+
+    enum CodingKeys: String, CodingKey {
+        case nodeType = "node_type"
+        case displayName = "display_name"
+        case category
+        case icon
+        case color
+        case inputPorts = "input_ports"
+        case outputPorts = "output_ports"
+        case promptTemplate = "prompt_template"
+        case promptVariables = "prompt_variables"
+        case isConfigurable = "is_configurable"
+        case canDisable = "can_disable"
+        case defaultTimeoutSeconds = "default_timeout_seconds"
+        case defaultMaxRetries = "default_max_retries"
+        case cpmsNodeKey = "cpms_node_key"
+        case description
+        case defaultEdges = "default_edges"
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.nodeType = try c.decodeIfPresent(String.self, forKey: .nodeType) ?? ""
+        self.displayName = try c.decodeIfPresent(String.self, forKey: .displayName) ?? ""
+        self.category = try c.decodeIfPresent(String.self, forKey: .category) ?? ""
+        self.icon = try c.decodeIfPresent(String.self, forKey: .icon) ?? ""
+        self.color = try c.decodeIfPresent(String.self, forKey: .color) ?? ""
+        self.inputPorts = try c.decodeIfPresent([NodePort].self, forKey: .inputPorts) ?? []
+        self.outputPorts = try c.decodeIfPresent([NodePort].self, forKey: .outputPorts) ?? []
+        self.promptTemplate = try c.decodeIfPresent(String.self, forKey: .promptTemplate) ?? ""
+        self.promptVariables = try c.decodeIfPresent([String].self, forKey: .promptVariables) ?? []
+        self.isConfigurable = try c.decodeIfPresent(Bool.self, forKey: .isConfigurable) ?? false
+        self.canDisable = try c.decodeIfPresent(Bool.self, forKey: .canDisable) ?? true
+        self.defaultTimeoutSeconds = try c.decodeIfPresent(Int.self, forKey: .defaultTimeoutSeconds) ?? 60
+        self.defaultMaxRetries = try c.decodeIfPresent(Int.self, forKey: .defaultMaxRetries) ?? 1
+        self.cpmsNodeKey = try c.decodeIfPresent(String.self, forKey: .cpmsNodeKey) ?? ""
+        self.description = try c.decodeIfPresent(String.self, forKey: .description) ?? ""
+        self.defaultEdges = try c.decodeIfPresent([String].self, forKey: .defaultEdges) ?? []
+    }
+}
+
+// MARK: - 节点类型注册表响应（dagStore.ts:186-188 types 字段）
+
+/// GET /dag/registry/types 返回的顶层结构 { types: Record<string, NodeMeta> }
+struct NodeTypeRegistryResponse: Codable {
+    let types: [String: NodeMeta]
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.types = try c.decodeIfPresent([String: NodeMeta].self, forKey: .types) ?? [:]
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case types
+    }
+}
+
+// MARK: - 节点实时提示词（对齐 types/dag.ts:165-173 NodePromptLive）
+
+/// GET /dag/{novel_id}/nodes/{node_id}/prompt-live 返回。
+/// 对齐 types/dag.ts:165-173
+struct NodePromptLive: Codable, Equatable {
+    let nodeId: String
+    let nodeType: String
+    let cpmsNodeKey: String
+    let system: String
+    let userTemplate: String
+    let source: String
+    let variables: [String]
+
+    enum CodingKeys: String, CodingKey {
+        case nodeId = "node_id"
+        case nodeType = "node_type"
+        case cpmsNodeKey = "cpms_node_key"
+        case system
+        case userTemplate = "user_template"
+        case source
+        case variables
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.nodeId = try c.decodeIfPresent(String.self, forKey: .nodeId) ?? ""
+        self.nodeType = try c.decodeIfPresent(String.self, forKey: .nodeType) ?? ""
+        self.cpmsNodeKey = try c.decodeIfPresent(String.self, forKey: .cpmsNodeKey) ?? ""
+        self.system = try c.decodeIfPresent(String.self, forKey: .system) ?? ""
+        self.userTemplate = try c.decodeIfPresent(String.self, forKey: .userTemplate) ?? ""
+        self.source = try c.decodeIfPresent(String.self, forKey: .source) ?? "none"
+        self.variables = try c.decodeIfPresent([String].self, forKey: .variables) ?? []
+    }
+}
+
+// MARK: - DAG ↔ CPMS 联动（对齐 types/dag.ts:177-215）
+
+/// CPMS 子键定义 — 对齐 types/dag.ts:177-182 DagLinkageSubKey
+struct DagLinkageSubKey: Codable, Equatable {
+    let cpmsNodeKey: String
+    let targetVariable: String
+    let description: String
+    let required: Bool
+
+    enum CodingKeys: String, CodingKey {
+        case cpmsNodeKey = "cpms_node_key"
+        case targetVariable = "target_variable"
+        case description
+        case required
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.cpmsNodeKey = try c.decodeIfPresent(String.self, forKey: .cpmsNodeKey) ?? ""
+        self.targetVariable = try c.decodeIfPresent(String.self, forKey: .targetVariable) ?? ""
+        self.description = try c.decodeIfPresent(String.self, forKey: .description) ?? ""
+        self.required = try c.decodeIfPresent(Bool.self, forKey: .required) ?? false
+    }
+}
+
+/// 联动节点行 — 对齐 types/dag.ts:184-194 DagLinkageNodeRow
+struct DagLinkageNodeRow: Codable, Equatable {
+    let nodeId: String
+    let nodeType: String
+    let label: String
+    let enabledDefault: Bool
+    let cpmsNodeKey: String
+    let cpmsSubKeys: [DagLinkageSubKey]
+    let promptMode: String
+    let category: String
+    let displayName: String
+
+    enum CodingKeys: String, CodingKey {
+        case nodeId = "node_id"
+        case nodeType = "node_type"
+        case label
+        case enabledDefault = "enabled_default"
+        case cpmsNodeKey = "cpms_node_key"
+        case cpmsSubKeys = "cpms_sub_keys"
+        case promptMode = "prompt_mode"
+        case category
+        case displayName = "display_name"
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.nodeId = try c.decodeIfPresent(String.self, forKey: .nodeId) ?? ""
+        self.nodeType = try c.decodeIfPresent(String.self, forKey: .nodeType) ?? ""
+        self.label = try c.decodeIfPresent(String.self, forKey: .label) ?? ""
+        self.enabledDefault = try c.decodeIfPresent(Bool.self, forKey: .enabledDefault) ?? true
+        self.cpmsNodeKey = try c.decodeIfPresent(String.self, forKey: .cpmsNodeKey) ?? ""
+        self.cpmsSubKeys = try c.decodeIfPresent([DagLinkageSubKey].self, forKey: .cpmsSubKeys) ?? []
+        self.promptMode = try c.decodeIfPresent(String.self, forKey: .promptMode) ?? ""
+        self.category = try c.decodeIfPresent(String.self, forKey: .category) ?? ""
+        self.displayName = try c.decodeIfPresent(String.self, forKey: .displayName) ?? ""
+    }
+}
+
+/// 注册表 CPMS 条目 — 对齐 types/dag.ts:196-202 RegistryCpmsEntry
+struct RegistryCpmsEntry: Codable, Equatable {
+    let cpmsNodeKey: String
+    let cpmsSubKeys: [DagLinkageSubKey]
+    let promptMode: String
+    let category: String
+    let displayName: String
+
+    enum CodingKeys: String, CodingKey {
+        case cpmsNodeKey = "cpms_node_key"
+        case cpmsSubKeys = "cpms_sub_keys"
+        case promptMode = "prompt_mode"
+        case category
+        case displayName = "display_name"
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.cpmsNodeKey = try c.decodeIfPresent(String.self, forKey: .cpmsNodeKey) ?? ""
+        self.cpmsSubKeys = try c.decodeIfPresent([DagLinkageSubKey].self, forKey: .cpmsSubKeys) ?? []
+        self.promptMode = try c.decodeIfPresent(String.self, forKey: .promptMode) ?? ""
+        self.category = try c.decodeIfPresent(String.self, forKey: .category) ?? ""
+        self.displayName = try c.decodeIfPresent(String.self, forKey: .displayName) ?? ""
+    }
+}
+
+/// 注册表缺口 — 对齐 types/dag.ts:204-207 DagRegistryGaps
+struct DagRegistryGaps: Codable, Equatable {
+    let complete: Bool
+    let missing: [DagRegistryGapItem]
+
+    enum CodingKeys: String, CodingKey {
+        case complete
+        case missing
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.complete = try c.decodeIfPresent(Bool.self, forKey: .complete) ?? true
+        self.missing = try c.decodeIfPresent([DagRegistryGapItem].self, forKey: .missing) ?? []
+    }
+}
+
+/// 缺口项 — types/dag.ts:206
+struct DagRegistryGapItem: Codable, Equatable, Identifiable {
+    let nodeId: String
+    let nodeType: String
+
+    enum CodingKeys: String, CodingKey {
+        case nodeId = "node_id"
+        case nodeType = "node_type"
+    }
+
+    var id: String { nodeId }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.nodeId = try c.decodeIfPresent(String.self, forKey: .nodeId) ?? ""
+        self.nodeType = try c.decodeIfPresent(String.self, forKey: .nodeType) ?? ""
+    }
+}
+
+/// DAG ↔ CPMS 联动响应 — 对齐 types/dag.ts:209-215 DagRegistryLinkageResponse
+struct DagRegistryLinkageResponse: Codable, Equatable {
+    let pipelineNodeIds: [String]
+    let nodes: [DagLinkageNodeRow]
+    let registryCpmsByType: [String: RegistryCpmsEntry]
+    let registryGaps: DagRegistryGaps?
+
+    enum CodingKeys: String, CodingKey {
+        case pipelineNodeIds = "pipeline_node_ids"
+        case nodes
+        case registryCpmsByType = "registry_cpms_by_type"
+        case registryGaps = "registry_gaps"
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.pipelineNodeIds = try c.decodeIfPresent([String].self, forKey: .pipelineNodeIds) ?? []
+        self.nodes = try c.decodeIfPresent([DagLinkageNodeRow].self, forKey: .nodes) ?? []
+        self.registryCpmsByType = try c.decodeIfPresent([String: RegistryCpmsEntry].self, forKey: .registryCpmsByType) ?? [:]
+        self.registryGaps = try c.decodeIfPresent(DagRegistryGaps.self, forKey: .registryGaps)
+    }
+}
+
+// MARK: - 节点分类标签映射（对齐 types/dag.ts:226-231 CATEGORY_LABELS）
+
+/// 节点分类 → 中文标签映射 — 对齐 types/dag.ts:226-231
+let CATEGORY_LABELS: [String: String] = [
+    "context": "上下文注入",
+    "execution": "执行与生成",
+    "validation": "校验与监控",
+    "gateway": "网关与熔断",
+]

@@ -10,10 +10,43 @@ import Foundation
 
 // MARK: - 题材包模型（builtin_cn_v1.bundle.json:1-16, cnMarket.ts:12-36）
 
+/// 题材包元数据 — 对齐 types.ts:28-37 TaxonomyBundleMeta
+/// schema_version 类型为 Int（对齐 types.ts:30 和 bundle.json:3，T01 遗留 bug 修复）
+struct TaxonomyBundleMeta: Codable, Equatable {
+    let schemaKind: String
+    let schemaVersion: Int
+    let id: String
+    let locale: String
+    let domain: String
+    let title: String?
+    let description: String?
+    let facetKeysSemantics: [String: AnyCodable]?
+
+    enum CodingKeys: String, CodingKey {
+        case schemaKind = "schema_kind"
+        case schemaVersion = "schema_version"
+        case id, locale, domain, title, description
+        case facetKeysSemantics = "facet_keys_semantics"
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.schemaKind = try c.decodeIfPresent(String.self, forKey: .schemaKind) ?? ""
+        self.schemaVersion = try c.decodeIfPresent(Int.self, forKey: .schemaVersion) ?? 1
+        self.id = try c.decodeIfPresent(String.self, forKey: .id) ?? ""
+        self.locale = try c.decodeIfPresent(String.self, forKey: .locale) ?? ""
+        self.domain = try c.decodeIfPresent(String.self, forKey: .domain) ?? ""
+        self.title = try c.decodeIfPresent(String.self, forKey: .title)
+        self.description = try c.decodeIfPresent(String.self, forKey: .description)
+        self.facetKeysSemantics = try c.decodeIfPresent([String: AnyCodable].self, forKey: .facetKeysSemantics)
+    }
+}
+
 /// 题材包 — builtin_cn_v1.bundle.json:1-16
+/// 继承 TaxonomyBundleMeta 的字段 + roots
 struct TaxonomyBundle: Codable, Equatable {
     let schemaKind: String
-    let schemaVersion: String
+    let schemaVersion: Int
     let id: String
     let locale: String
     let domain: String
@@ -33,7 +66,8 @@ struct TaxonomyBundle: Codable, Equatable {
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.schemaKind = try c.decodeIfPresent(String.self, forKey: .schemaKind) ?? ""
-        self.schemaVersion = try c.decodeIfPresent(String.self, forKey: .schemaVersion) ?? ""
+        // 【T04 修复】schemaVersion: String → Int，对齐 types.ts:30 和 bundle.json:3
+        self.schemaVersion = try c.decodeIfPresent(Int.self, forKey: .schemaVersion) ?? 1
         self.id = try c.decodeIfPresent(String.self, forKey: .id) ?? ""
         self.locale = try c.decodeIfPresent(String.self, forKey: .locale) ?? ""
         self.domain = try c.decodeIfPresent(String.self, forKey: .domain) ?? ""
@@ -106,5 +140,13 @@ struct TaxonomyWritingProfile: Codable, Equatable {
         self.pacingControl = try c.decodeIfPresent(String.self, forKey: .pacingControl)
         self.writingStyle = try c.decodeIfPresent(String.self, forKey: .writingStyle)
         self.specialRequirements = try c.decodeIfPresent(String.self, forKey: .specialRequirements)
+    }
+
+    /// Memberwise init（TaxonomyStore.writingProfileForSelection 合并 root+leaf profile 用）
+    init(storyStructure: String?, pacingControl: String?, writingStyle: String?, specialRequirements: String?) {
+        self.storyStructure = storyStructure
+        self.pacingControl = pacingControl
+        self.writingStyle = writingStyle
+        self.specialRequirements = specialRequirements
     }
 }
