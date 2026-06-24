@@ -2,18 +2,16 @@
 //  RootView.swift
 //  Cangjie
 //
-//  根视图三栏 NavigationSplitView（Sidebar/Content/Detail）。
-//  iPad 横屏全展开，竖屏自适应。首次启动若无服务器配置→显示 ServerSetupSheet；
-//  否则根据 AppState.selectedNovel 切换 Home/Workbench。
+//  根视图：HStack 两栏布局（侧边栏 + 内容区），不使用 NavigationSplitView。
+//
+//  【修复】原实现用 NavigationSplitView，其 content 闭包里用 switch 切换不同类型视图
+//  （HomeView/WorkbenchView/SettingsView 等），iOS 16 AttributeGraph 在视图类型切换时
+//  assertion 崩溃（EXC_BREAKPOINT）。改为 HStack + NavigationStack 彻底避免。
 //
 
 import SwiftUI
 
-/// 根视图，管理三栏布局与全局导航。
-///
-/// - 三栏 NavigationSplitView：侧边栏 + 内容区 + 详情区
-/// - 首次启动检查服务器配置，未配置时弹出 ServerSetupSheet
-/// - 根据 AppState.currentNovelId 决定显示书架或工作台
+/// 根视图，管理两栏布局与全局导航。
 struct RootView: View {
 
     // MARK: - 环境对象
@@ -21,9 +19,6 @@ struct RootView: View {
     @EnvironmentObject var appState: AppState
 
     // MARK: - 状态
-
-    /// 是否显示服务器配置 Sheet
-    @State private var showServerSetup = false
 
     /// 是否显示新建小说 Sheet
     @State private var showCreateNovel = false
@@ -39,20 +34,23 @@ struct RootView: View {
     // MARK: - Body
 
     var body: some View {
-        NavigationSplitView {
-            // 左栏：侧边栏导航
+        // 【修复】用 HStack + NavigationStack 代替 NavigationSplitView
+        // NavigationSplitView 的 content 闭包 switch 不同视图类型会触发
+        // iOS 16 AttributeGraph assertion 崩溃
+        HStack(spacing: 0) {
+            // 左栏：侧边栏导航（固定宽度）
             SidebarView()
-        } content: {
-            // 中栏：内容区
-            contentColumn
-        } detail: {
-            // 右栏：详情区（iPad 横屏显示，竖屏由系统自动管理）
-            detailColumn
-        }
-        .navigationSplitViewStyle(.balanced)
-        .sheet(isPresented: $showServerSetup) {
-            ServerConfigGuideView()
                 .environmentObject(appState)
+                .frame(width: 240)
+                .background(Theme.secondaryBackground)
+
+            Divider()
+
+            // 右栏：内容区（NavigationStack 包裹，根据 sidebarSelection 切换）
+            NavigationStack {
+                contentColumn
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .sheet(isPresented: $showCreateNovel) {
             CreateNovelSheet(
@@ -60,17 +58,15 @@ struct RootView: View {
                     showCreateNovel = false
                     appState.selectNovel(novel.id)
                     novelStore.selectNovel(novel)
-                    // 延迟到下一个 RunLoop 打开向导，确保 currentNovel 已更新，
-                    // 避免 sheet 关闭与 fullScreenCover 弹出同时发生导致状态传播延迟引发崩溃
                     DispatchQueue.main.async {
                         showOnboardingWizard = true
                     }
                 }
             )
             .environmentObject(appState)
+            .environmentObject(novelStore)
         }
         .fullScreenCover(isPresented: $showOnboardingWizard) {
-            // 确保 currentNovel 有值才显示向导，避免 nil 导致空内容崩溃
             if let novel = novelStore.currentNovel {
                 OnboardingWizardView(novel: novel) {
                     showOnboardingWizard = false
@@ -78,7 +74,6 @@ struct RootView: View {
                 }
                 .environmentObject(appState)
             } else {
-                // currentNovel 为 nil 时关闭向导并回到书架
                 Color.clear
                     .onAppear {
                         showOnboardingWizard = false
@@ -87,23 +82,16 @@ struct RootView: View {
             }
         }
         .task {
-            // 启动时加载小说列表
             if appState.needsServerConfig {
-                showServerSetup = true
-            } else {
-                await novelStore.loadNovels()
+                appState.needsServerConfig = false
             }
-        }
-        .onChange(of: appState.needsServerConfig) { newValue in
-            if newValue {
-                showServerSetup = true
-            }
+            await novelStore.loadNovels()
         }
         .environmentObject(novelStore)
         .environmentObject(settingsStore)
     }
 
-    // MARK: - 中栏内容
+    // MARK: - 内容区
 
     /// 根据 sidebarSelection 显示对应内容
     @ViewBuilder
@@ -124,8 +112,6 @@ struct RootView: View {
             if appState.currentNovelId != nil {
                 WorkbenchView()
                     .environmentObject(novelStore)
-                    // 【修复】显式注入 appState，WorkbenchView 用 @EnvironmentObject var appState
-                    // NavigationSplitView content 闭包可能不继承父环境，需要显式注入
                     .environmentObject(appState)
             } else {
                 emptyWorkbenchPlaceholder
@@ -212,24 +198,8 @@ struct RootView: View {
         }
     }
 
-    // MARK: - 右栏详情
-
-    /// 右栏详情内容
-    @ViewBuilder
-    private var detailColumn: some View {
-        if appState.sidebarSelection == .workbench, appState.currentNovelId != nil {
-            // 工作台模式下右栏显示上下文面板
-            ContextPanelTabView()
-                .environmentObject(novelStore)
-        } else {
-            // 默认显示空占位
-            Color.clear
-        }
-    }
-
     // MARK: - 占位视图
 
-    /// 工作台无小说选中时的占位
     private var emptyWorkbenchPlaceholder: some View {
         VStack(spacing: Theme.Spacing.lg) {
             Image(systemName: "book.closed")
@@ -249,7 +219,6 @@ struct RootView: View {
         .background(Theme.background)
     }
 
-    /// 未选择小说时的占位
     private func noNovelSelectedPlaceholder(_ message: String) -> some View {
         VStack(spacing: Theme.Spacing.lg) {
             Image(systemName: "books.vertical")
@@ -268,20 +237,11 @@ struct RootView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Theme.background)
     }
-
 }
 
 // MARK: - 快照容器视图
 
-/// 快照容器：检查点时间线 + 世界线 DAG 双视图切换。
-///
-/// 侧边栏「快照」入口承载两个 T05 视图：
-/// - 检查点时间线（CheckpointTimelineView）
-/// - 世界线 DAG（WorldlineDAGView）
-/// 通过顶部分段选择器切换，两者均通过 @EnvironmentObject 获取 AppState。
 private struct SnapshotContainerView: View {
-
-    /// 0 = 检查点时间线，1 = 世界线 DAG
     @State private var mode: Int = 0
 
     var body: some View {
