@@ -104,10 +104,12 @@ struct PromptVariable: Codable, Equatable {
     /// 是否必填（llmControl.ts:133，可选）
     let required: Bool?
     /// 默认值（llmControl.ts:134，可选，动态 JSON）
-    let default: AnyCodable?
+    /// 注：原版字段名为 default，Swift 关键字，属性名用 defaultValue，CodingKey 映射为 default
+    let defaultValue: AnyCodable?
 
     enum CodingKeys: String, CodingKey {
-        case name, desc, type, required, `default`
+        case name, desc, type, required
+        case defaultValue = "default"
     }
 
     init(from decoder: Decoder) throws {
@@ -116,7 +118,7 @@ struct PromptVariable: Codable, Equatable {
         self.desc = try c.decodeIfPresent(String.self, forKey: .desc) ?? ""
         self.type = try c.decodeIfPresent(String.self, forKey: .type) ?? ""
         self.required = try c.decodeIfPresent(Bool.self, forKey: .required)
-        self.default = try c.decodeIfPresent(AnyCodable.self, forKey: .default)
+        self.defaultValue = try c.decodeIfPresent(AnyCodable.self, forKey: .defaultValue)
     }
 }
 
@@ -124,7 +126,7 @@ struct PromptVariable: Codable, Equatable {
 
 /// 提示词节点（列表项），对应原版 llmControl.ts:138-159 PromptNode
 /// 主理人决策：用原版 id 字段作 Identifiable.id，nodeKey 独立保留
-struct PromptNode: Codable, Identifiable, Equatable, Hashable {
+struct PromptNode: Codable, Identifiable, Equatable {
     /// 节点 ID（llmControl.ts:139，主理人决策：用原版 id 字段作 Identifiable.id）
     let id: String
     /// 节点 key（llmControl.ts:140）
@@ -748,10 +750,12 @@ struct ChainVariable: Codable, Equatable {
     let type: String
     let source: String
     let required: Bool
-    let default: AnyCodable
+    /// 原版字段名为 default，Swift 关键字，属性名用 defaultValue，CodingKey 映射为 default
+    let defaultValue: AnyCodable
 
     enum CodingKeys: String, CodingKey {
-        case name, type, source, required, `default`
+        case name, type, source, required
+        case defaultValue = "default"
     }
 
     init(from decoder: Decoder) throws {
@@ -760,7 +764,7 @@ struct ChainVariable: Codable, Equatable {
         self.type = try c.decodeIfPresent(String.self, forKey: .type) ?? ""
         self.source = try c.decodeIfPresent(String.self, forKey: .source) ?? ""
         self.required = try c.decodeIfPresent(Bool.self, forKey: .required) ?? false
-        self.default = try c.decodeIfPresent(AnyCodable.self, forKey: .default) ?? AnyCodable("")
+        self.defaultValue = try c.decodeIfPresent(AnyCodable.self, forKey: .defaultValue) ?? AnyCodable("")
     }
 }
 
@@ -902,7 +906,8 @@ struct VariableSchema: Codable, Identifiable, Equatable {
     /// 是否必填（llmControl.ts:293）
     let required: Bool
     /// 默认值（llmControl.ts:294，动态 JSON）
-    let default: AnyCodable
+    /// 原版字段名为 default，Swift 关键字，属性名用 defaultValue，CodingKey 映射为 default
+    let defaultValue: AnyCodable
     /// 描述（llmControl.ts:295）
     let description: String
     /// 来源（llmControl.ts:296）
@@ -913,7 +918,8 @@ struct VariableSchema: Codable, Identifiable, Equatable {
     let enumValues: [String]
 
     enum CodingKeys: String, CodingKey {
-        case name, type, required, `default`, description, source, scope
+        case name, type, required, description, source, scope
+        case defaultValue = "default"
         case displayName = "display_name"
         case enumValues = "enum_values"
     }
@@ -924,7 +930,7 @@ struct VariableSchema: Codable, Identifiable, Equatable {
         self.displayName = try c.decodeIfPresent(String.self, forKey: .displayName) ?? ""
         self.type = try c.decodeIfPresent(String.self, forKey: .type) ?? ""
         self.required = try c.decodeIfPresent(Bool.self, forKey: .required) ?? false
-        self.default = try c.decodeIfPresent(AnyCodable.self, forKey: .default) ?? AnyCodable("")
+        self.defaultValue = try c.decodeIfPresent(AnyCodable.self, forKey: .defaultValue) ?? AnyCodable("")
         self.description = try c.decodeIfPresent(String.self, forKey: .description) ?? ""
         self.source = try c.decodeIfPresent(String.self, forKey: .source) ?? ""
         self.scope = try c.decodeIfPresent(String.self, forKey: .scope) ?? ""

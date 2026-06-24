@@ -358,7 +358,12 @@ final class PromptPlazaStore: ObservableObject {
     func exportAll() async {
         do {
             let raw: AnyCodable = try await apiClient.request(APIEndpoint.LLMControl.exportPrompts)
-            exportData = raw.dictionaryValue ?? [:]
+            // raw.dictionaryValue 是 [String: Any]，需转为 [String: AnyCodable]
+            if let dict = raw.value as? [String: Any] {
+                exportData = dict.mapValues { AnyCodable($0) }
+            } else {
+                exportData = [:]
+            }
         } catch {
             errorMessage = error.localizedDescription
         }
