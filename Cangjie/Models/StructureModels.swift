@@ -208,6 +208,29 @@ struct MacroPlanEvent: Codable, Equatable {
         self.generationTime = try c.decodeIfPresent(Double.self, forKey: .generationTime)
         self.error = try c.decodeIfPresent(String.self, forKey: .error)
     }
+
+    /// 便利构造器（用于代码内构造进度事件）
+    init(type: String, message: String? = nil, percent: Double? = nil,
+         structure: [AnyCodable]? = nil, error: String? = nil) {
+        self.type = type
+        self.phase = nil
+        self.message = message
+        self.current = nil
+        self.total = nil
+        self.percent = percent
+        self.text = nil
+        self.nodeType = nil
+        self.partIndex = nil
+        self.volumeIndex = nil
+        self.actIndex = nil
+        self.title = nil
+        self.description = nil
+        self.estimatedChapters = nil
+        self.structure = structure
+        self.qualityMetrics = nil
+        self.generationTime = nil
+        self.error = error
+    }
 }
 
 // MARK: - 宏观规划请求

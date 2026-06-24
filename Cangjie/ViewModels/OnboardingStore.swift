@@ -254,12 +254,7 @@ final class OnboardingStore: ObservableObject {
 
                 // 更新进度事件
                 macroPlanEvents.append(MacroPlanEvent(
-                    type: "status", phase: nil, message: message,
-                    current: nil, total: nil, percent: percent,
-                    text: nil, nodeType: nil, partIndex: nil, volumeIndex: nil,
-                    actIndex: nil, title: nil, description: nil,
-                    estimatedChapters: nil, structure: nil, qualityMetrics: nil,
-                    generationTime: nil, error: nil
+                    type: "status", message: message, percent: percent
                 ))
 
                 if status == "completed" || status == "done" {
@@ -294,12 +289,8 @@ final class OnboardingStore: ObservableObject {
             macroPlanStructure = decoded
 
             macroPlanEvents.append(MacroPlanEvent(
-                type: "done", phase: nil, message: "宏观规划完成",
-                current: nil, total: nil, percent: 100,
-                text: nil, nodeType: nil, partIndex: nil, volumeIndex: nil,
-                actIndex: nil, title: nil, description: nil,
-                estimatedChapters: nil, structure: decoded, qualityMetrics: nil,
-                generationTime: nil, error: nil
+                type: "done", message: "宏观规划完成", percent: 100,
+                structure: decoded
             ))
 
             // 4. 确认大纲（关键！没这步 DB 里没结构 → autopilot 409）
