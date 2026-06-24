@@ -18,10 +18,10 @@ struct AutopilotControlPanel: View {
 
     @EnvironmentObject var autopilotStore: AutopilotStore
 
-    // 启动配置
+    // 启动配置（默认值对齐原版 AutopilotPanel.vue:358-363）
     @State private var targetChapters: Int = 100
     @State private var targetWordsPerChapter: Int = 2500
-    @State private var maxAutoChapters: Int = 9999
+    @State private var maxAutoChapters: Int = 120
     @State private var autoApproveMode: Bool = false
     @State private var showStartSheet: Bool = false
     @State private var showMacroGuidance: Bool = false
@@ -156,7 +156,7 @@ struct AutopilotControlPanel: View {
                 Section("启动参数") {
                     Stepper("目标章数：\(targetChapters)", value: $targetChapters, in: 1...9999, step: 10)
                     Stepper("每章字数：\(targetWordsPerChapter)", value: $targetWordsPerChapter, in: 500...20000, step: 500)
-                    Stepper("保护上限：\(maxAutoChapters) 章", value: $maxAutoChapters, in: targetChapters...9999, step: 10)
+                    Stepper("保护上限：\(maxAutoChapters) 章", value: $maxAutoChapters, in: (targetChapters + 20)...9999, step: 10)
                 }
 
                 Section("全自动模式") {
@@ -181,7 +181,9 @@ struct AutopilotControlPanel: View {
                             await autopilotStore.startAutopilot(
                                 novelId: novelId,
                                 targetChapters: targetChapters,
-                                targetWordsPerChapter: targetWordsPerChapter
+                                targetWordsPerChapter: targetWordsPerChapter,
+                                maxAutoChapters: maxAutoChapters,
+                                autoApproveMode: autoApproveMode
                             )
                             showStartSheet = false
                             // 检查是否因宏观结构未生成而启动失败（HTTP 409）

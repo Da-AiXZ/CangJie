@@ -224,6 +224,21 @@ final class AppState: ObservableObject {
         return themeMode.colorScheme
     }
 
+    /// 是否为深色模式（themeStore.ts:24-27 isDark）
+    /// light → false; dark → true; anchor → true; system → 跟随系统
+    var isDark: Bool {
+        if themeMode == .system {
+            // system 模式跟随系统偏好
+            return UITraitCollection.current.userInterfaceStyle == .dark
+        }
+        return themeMode.isDark
+    }
+
+    /// 是否为黑金模式（themeStore.ts:30 isAnchor）
+    var isAnchor: Bool {
+        return themeMode.isAnchor
+    }
+
     // MARK: - 小说选择
 
     /// 选择小说

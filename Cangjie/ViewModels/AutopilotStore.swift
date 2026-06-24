@@ -18,7 +18,7 @@ final class AutopilotStore: ObservableObject {
     @Published var status: AutopilotStatus?
 
     /// 熔断器状态
-    @Published var circuitBreaker: CircuitBreakerStatus?
+    @Published var circuitBreaker: AutopilotCircuitBreakerData?
 
     /// 日志流（最近 N 条）
     @Published var logs: [LogStreamEvent] = []
@@ -45,6 +45,15 @@ final class AutopilotStore: ObservableObject {
 
     private var statusPollingTask: Task<Void, Never>?
 
+    /// 轮询失败计数（对齐原版 useAssistedAutopilotStatus.ts:14 failureCount）
+    private var failureCount: Int = 0
+
+    /// 是否因 404 停止轮询（对齐原版 useAssistedAutopilotStatus.ts:13 stoppedForNotFound）
+    private var stoppedForNotFound: Bool = false
+
+    /// 当前轮询的 novelId（用于检测变化时 resetBackoff）
+    private var pollingNovelId: String?
+
     // MARK: - 初始化
 
     init(apiClient: APIClient = .shared, sseRegistry: SSEStreamRegistry = .shared, novelStore: NovelStore? = nil) {
@@ -60,26 +69,49 @@ final class AutopilotStore: ObservableObject {
     ///   - novelId: 小说 ID
     ///   - targetChapters: 目标章数
     ///   - targetWordsPerChapter: 每章字数
+    ///   - maxAutoChapters: 保护上限（最大自动章节数）
+    ///   - autoApproveMode: 全自动模式（与 start 并行 PATCH auto-approve-mode，仅当值变化时发送）
     func startAutopilot(
         novelId: String,
-        targetChapters: Int? = nil,
-        targetWordsPerChapter: Int? = nil
+        targetChapters: Int = 100,
+        targetWordsPerChapter: Int = 2500,
+        maxAutoChapters: Int = 120,
+        autoApproveMode: Bool = false
     ) async {
         isControlling = true
         errorMessage = nil
 
         let request = AutopilotStartRequest(
+            maxAutoChapters: maxAutoChapters,
             targetChapters: targetChapters,
             targetWordsPerChapter: targetWordsPerChapter
         )
 
+        // 获取当前 autoApproveMode 状态，判断是否需要发送 PATCH（主理人决策：仅当值变化时发送）
+        let currentAutoApprove = status?.autoApproveMode ?? false
+        let needsAutoApprovePatch = autoApproveMode != currentAutoApprove
+
         do {
-            // 后端返回 dict，用 AnyCodable 接收
-            let _: AnyCodable = try await apiClient.request(
-                APIEndpoint.Autopilot.start(novelId: novelId),
-                body: request
-            )
-            Logger.engine.info("自动驾驶已启动: \(novelId)")
+            // 并行发起 start 和 autoApproveMode PATCH（主理人决策：与start并行）
+            if needsAutoApprovePatch {
+                async let startResult: AnyCodable = apiClient.request(
+                    APIEndpoint.Autopilot.start(novelId: novelId),
+                    body: request
+                )
+                async let patchResult: AnyCodable = apiClient.request(
+                    APIEndpoint.Novels.updateAutoApproveMode(novelId: novelId),
+                    body: AnyCodable(["auto_approve_mode": autoApproveMode])
+                )
+                _ = try await (startResult, patchResult)
+            } else {
+                // 仅 start
+                let _: AnyCodable = try await apiClient.request(
+                    APIEndpoint.Autopilot.start(novelId: novelId),
+                    body: request
+                )
+            }
+
+            Logger.engine.info("自动驾驶已启动: \(novelId), maxAutoChapters=\(maxAutoChapters)")
             await refreshStatus(novelId: novelId)
             startSSEStreams(novelId: novelId)
         } catch {
@@ -147,7 +179,7 @@ final class AutopilotStore: ObservableObject {
             // 【修复】使用配置微秒日期格式的共享解码器
             let raw: AnyCodable = try await apiClient.request(APIEndpoint.Autopilot.circuitBreaker(novelId: novelId))
             if let data = try? JSONSerialization.data(withJSONObject: raw.value) {
-                circuitBreaker = try? CangjieDecoder.shared.decode(CircuitBreakerStatus.self, from: data)
+                circuitBreaker = try? CangjieDecoder.shared.decode(AutopilotCircuitBreakerData.self, from: data)
             }
         } catch {
             Logger.engine.error("刷新熔断器状态失败: \(error.localizedDescription)")
@@ -243,15 +275,53 @@ final class AutopilotStore: ObservableObject {
         stopStatusPolling()
     }
 
-    /// 启动状态轮询
+    /// 启动状态轮询（自适应退避，对齐原版 useAssistedAutopilotStatus.ts + autopilotStatus.ts:112-120）
     private func startStatusPolling(novelId: String) {
         stopStatusPolling()
+
+        // novelId 变化时 resetBackoff（对齐原版 useAssistedAutopilotStatus.ts:72-78）
+        if pollingNovelId != novelId {
+            failureCount = 0
+            stoppedForNotFound = false
+            pollingNovelId = novelId
+        }
+
         statusPollingTask = Task {
-            while !Task.isCancelled {
-                try? await Task.sleep(nanoseconds: 3_000_000_000) // 3 秒
-                if Task.isCancelled { break }
-                await self.refreshStatus(novelId: novelId)
+            while !Task.isCancelled && !stoppedForNotFound {
+                // 计算退避间隔（对齐原版 autopilotStatus.ts:112-120 assistedAutopilotPollDelayMs）
+                let delayMs = assistedAutopilotPollDelay(failureCount: failureCount)
+                try? await Task.sleep(nanoseconds: UInt64(delayMs) * 1_000_000)
+                if Task.isCancelled || stoppedForNotFound { break }
+
+                await self.refreshStatusWithBackoff(novelId: novelId)
             }
+        }
+    }
+
+    /// 带退避逻辑的状态刷新（对齐原版 useAssistedAutopilotStatus.ts:21-35 loadStatus）
+    private func refreshStatusWithBackoff(novelId: String) async {
+        do {
+            let raw: AnyCodable = try await apiClient.request(APIEndpoint.Autopilot.status(novelId: novelId))
+            // 成功 → failureCount=0（对齐原版 useAssistedAutopilotStatus.ts:25）
+            failureCount = 0
+            if let data = try? JSONSerialization.data(withJSONObject: raw.value) {
+                status = try? CangjieDecoder.shared.decode(AutopilotStatus.self, from: data)
+            }
+        } catch let error as APIError {
+            if case .notFound = error {
+                // 404 → stoppedForNotFound=true, 停止轮询（对齐原版 useAssistedAutopilotStatus.ts:28-32）
+                stoppedForNotFound = true
+                failureCount = 0
+                Logger.engine.info("自动驾驶状态 404，停止轮询: \(novelId)")
+            } else {
+                // 其他错误 → failureCount+=1, 继续轮询（对齐原版 useAssistedAutopilotStatus.ts:33-34）
+                failureCount += 1
+                Logger.engine.error("刷新自动驾驶状态失败(failureCount=\(failureCount)): \(error.localizedDescription)")
+            }
+        } catch {
+            // 其他错误 → failureCount+=1
+            failureCount += 1
+            Logger.engine.error("刷新自动驾驶状态失败(failureCount=\(failureCount)): \(error.localizedDescription)")
         }
     }
 
@@ -446,4 +516,31 @@ final class AutopilotStore: ObservableObject {
     var currentChapterNumber: Int? {
         return status?.currentChapterNumber
     }
+}
+
+// MARK: - 轮询退避算法
+
+/// 自适应轮询退避延迟，对齐原版 autopilotStatus.ts:112-120 assistedAutopilotPollDelayMs
+///
+/// 算法：base=4000ms, max=60000ms, mult=2^min(failureCount,8) 上限128
+/// 结果 = min(base × mult, max)
+///
+/// 退避表：
+/// | failureCount | mult | delay |
+/// |---|---|---|
+/// | 0 | 1 | 4s |
+/// | 1 | 2 | 8s |
+/// | 2 | 4 | 16s |
+/// | 3 | 8 | 32s |
+/// | 4 | 16 | 60s(cap) |
+/// | 5+ | 32-128 | 60s(cap) |
+///
+/// - Parameters:
+///   - failureCount: 失败计数
+///   - baseMs: 基础延迟（毫秒），默认 4000
+///   - maxMs: 最大延迟（毫秒），默认 60000
+/// - Returns: 退避延迟（毫秒）
+func assistedAutopilotPollDelay(failureCount: Int, baseMs: Int = 4000, maxMs: Int = 60000) -> Int {
+    let mult = min(1 << min(failureCount, 8), 128)  // 2^min(fc,8), cap 128
+    return min(baseMs * mult, maxMs)
 }

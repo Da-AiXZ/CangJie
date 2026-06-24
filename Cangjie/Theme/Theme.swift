@@ -8,10 +8,12 @@
 
 import SwiftUI
 
-/// 主题模式
+/// 主题模式，对齐原版 themeStore.ts:6 ThemeMode = 'light' | 'dark' | 'anchor' | 'auto'
+/// 主理人决策：保持 system（不改 auto）
 enum ThemeMode: String, CaseIterable, Codable {
     case light = "浅色"
     case dark = "深色"
+    case anchor = "黑金"
     case system = "跟随系统"
 
     /// 转换为 ColorScheme
@@ -21,27 +23,54 @@ enum ThemeMode: String, CaseIterable, Codable {
             return .light
         case .dark:
             return .dark
+        case .anchor:
+            // anchor 是黑金模式，使用深色 ColorScheme（themeStore.ts:24-27 isDark=true）
+            return .dark
         case .system:
             return nil
         }
     }
+
+    /// 是否为深色模式（themeStore.ts:24-27 isDark computed）
+    /// light → false; dark → true; anchor → true; auto → 跟随系统（这里返回 false，实际由 colorScheme=nil 时系统决定）
+    var isDark: Bool {
+        switch self {
+        case .light:
+            return false
+        case .dark:
+            return true
+        case .anchor:
+            return true
+        case .system:
+            return false
+        }
+    }
+
+    /// 是否为黑金（主播限定色）模式（themeStore.ts:30 isAnchor computed）
+    var isAnchor: Bool {
+        return self == .anchor
+    }
 }
 
-/// 字号档位
+/// 字号档位，对齐原版 ThemeAppearanceSection.vue:101-106 SCALE_MAP
+/// small=0.875, medium=1, large=1.125, xlarge=1.25
 enum FontSizeScale: String, CaseIterable, Codable {
-    case small = "小"
-    case medium = "中"
-    case large = "大"
+    case small = "较小"
+    case medium = "默认"
+    case large = "较大"
+    case xlarge = "特大"
 
-    /// 缩放因子
+    /// 缩放因子（原版 SCALE_MAP: small=0.875, medium=1, large=1.125, xlarge=1.25）
     var scaleFactor: CGFloat {
         switch self {
         case .small:
-            return 0.85
+            return 0.875
         case .medium:
             return 1.0
         case .large:
-            return 1.2
+            return 1.125
+        case .xlarge:
+            return 1.25
         }
     }
 }
@@ -232,4 +261,27 @@ struct Theme {
     static let cardShadowRadius: CGFloat = 8
     static let cardShadowX: CGFloat = 0
     static let cardShadowY: CGFloat = 2
+
+    // MARK: - Anchor 黑金色系（ThemeAppearanceSection.vue:266 CSS）
+
+    /// Anchor 金色主色（原版 #d4a843，ThemeAppearanceSection.vue:250,282,302,336,380,384,457）
+    static let anchorGold = Color(red: 0xD4/255.0, green: 0xA8/255.0, blue: 0x43/255.0)
+
+    /// Anchor 金色亮色（原版 #f5d485，ThemeAppearanceSection.vue:148 SVG渐变stop）
+    static let anchorGoldLight = Color(red: 0xF5/255.0, green: 0xD4/255.0, blue: 0x85/255.0)
+
+    /// Anchor 深色背景1（原版 #0d0e14，ThemeAppearanceSection.vue:266 linear-gradient stop1）
+    static let anchorBackgroundDark = Color(red: 0x0D/255.0, green: 0x0E/255.0, blue: 0x14/255.0)
+
+    /// Anchor 深色背景2（原版 #12141c，ThemeAppearanceSection.vue:266 linear-gradient stop2）
+    static let anchorBackgroundDark2 = Color(red: 0x12/255.0, green: 0x14/255.0, blue: 0x1C/255.0)
+
+    /// Anchor 背景渐变
+    static var anchorBackground: LinearGradient {
+        LinearGradient(
+            gradient: Gradient(colors: [anchorBackgroundDark, anchorBackgroundDark2]),
+            startPoint: .topLeading,
+            endPoint: .bottomTrailing
+        )
+    }
 }

@@ -207,35 +207,54 @@ struct BibleDTO: Codable, Identifiable, Equatable {
 
 // MARK: - Bible 生成状态
 
-/// Bible 生成状态响应（GET /bible/novels/{id}/bible/status）
+/// Bible 生成状态响应，对应原版 bible.ts:252-256 getBibleStatus 返回类型
+/// GET /bible/novels/{id}/bible/status 返回 { exists, ready, novel_id }
 struct BibleGenerationStatus: Codable, Equatable {
-    let status: String
-    let stage: String?
-    let progress: Double?
-    let message: String?
+    /// Bible 是否存在（bible.ts:253）
+    let exists: Bool
+    /// Bible 是否就绪（bible.ts:253）
+    let ready: Bool
+    /// 小说 ID（bible.ts:253）
+    let novelId: String
+
+    enum CodingKeys: String, CodingKey {
+        case exists, ready
+        case novelId = "novel_id"
+    }
 
     init(from decoder: Decoder) throws {
-        let c = try decoder.singleValueContainer()
-        let dict = try c.decode([String: AnyCodable].self)
-        self.status = dict["status"]?.stringStringValue ?? "idle"
-        self.stage = dict["stage"]?.stringStringValue
-        self.progress = dict["progress"]?.doubleValue
-        self.message = dict["message"]?.stringStringValue
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.exists = try c.decodeIfPresent(Bool.self, forKey: .exists) ?? false
+        self.ready = try c.decodeIfPresent(Bool.self, forKey: .ready) ?? false
+        self.novelId = try c.decodeIfPresent(String.self, forKey: .novelId) ?? ""
     }
 }
 
 // MARK: - Bible 生成反馈
 
-/// Bible 生成反馈（GET /bible/novels/{id}/bible/generation-feedback）
+/// Bible 生成反馈，对应原版 bible.ts:262-275 getBibleGenerationFeedback 返回类型
+/// GET /bible/novels/{id}/bible/generation-feedback 返回 { novel_id, error, stage, at }
 struct BibleGenerationFeedback: Codable, Equatable {
-    let feedback: String?
-    let suggestions: [String]?
+    /// 小说 ID（bible.ts:264）
+    let novelId: String
+    /// 错误信息，成功或未失败时为 null（bible.ts:265）
+    let error: String?
+    /// 生成阶段，失败时为当前阶段，成功时为 null（bible.ts:266）
+    let stage: String?
+    /// 时间戳（bible.ts:267）
+    let at: String?
+
+    enum CodingKeys: String, CodingKey {
+        case error, stage, at
+        case novelId = "novel_id"
+    }
 
     init(from decoder: Decoder) throws {
-        let c = try decoder.singleValueContainer()
-        let dict = try c.decode([String: AnyCodable].self)
-        self.feedback = dict["feedback"]?.stringStringValue
-        self.suggestions = (dict["suggestions"]?.arrayValue ?? []).compactMap { $0 as? String }
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.novelId = try c.decodeIfPresent(String.self, forKey: .novelId) ?? ""
+        self.error = try c.decodeIfPresent(String.self, forKey: .error)
+        self.stage = try c.decodeIfPresent(String.self, forKey: .stage)
+        self.at = try c.decodeIfPresent(String.self, forKey: .at)
     }
 }
 

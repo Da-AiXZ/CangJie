@@ -218,6 +218,8 @@ enum APIEndpoint {
         case promptsCategoriesInfo
         /// 提示词模板列表 — `GET /llm-control/prompts/templates`
         case promptsTemplates
+        /// 创建模板包 — `POST /llm-control/prompts/templates`（与 .promptsTemplates GET 不冲突，独立 case）
+        case createTemplate
         /// 提示词列表 — `GET /llm-control/prompts`
         case prompts
         /// 按分类获取提示词 — `GET /llm-control/prompts/by-category`
@@ -908,6 +910,8 @@ extension APIEndpoint.LLMControl: APIEndpoint.EndpointInfo {
             return "/llm-control/prompts/categories-info"
         case .promptsTemplates:
             return "/llm-control/prompts/templates"
+        case .createTemplate:
+            return "/llm-control/prompts/templates"
         case .prompts:
             return "/llm-control/prompts"
         case .promptsByCategory:
@@ -955,7 +959,8 @@ extension APIEndpoint.LLMControl: APIEndpoint.EndpointInfo {
              .promptBindings, .exportPrompts, .comparePrompts:
             return .get
         case .createPromptNode, .test, .models, .rollbackPrompt,
-             .renderPrompt, .debugPrompt, .promptSandbox, .importPrompts:
+             .renderPrompt, .debugPrompt, .promptSandbox, .importPrompts,
+             .createTemplate:
             return .post
         case .update, .updatePrompt:
             return .put

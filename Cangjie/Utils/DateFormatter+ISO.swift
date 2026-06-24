@@ -144,7 +144,7 @@ enum DateEncodingStrategyHelper {
 ///
 /// 修复前，多个 Store 在通过 apiClient.download() 获取原始 Data 后，
 /// 使用裸 JSONDecoder() 解码，缺少微秒日期格式支持，导致含日期字段的
-/// 模型（如 AutopilotStatus.daemonHeartbeatAt、CircuitBreakerStatus.lastFailureAt
+/// 模型（如 AutopilotStatus.daemonHeartbeatAt、AutopilotCircuitBreakerData.lastError.timestamp
 /// 等）解码失败。
 enum CangjieDecoder {
     /// 共享 JSONDecoder 实例，配置微秒日期解码策略

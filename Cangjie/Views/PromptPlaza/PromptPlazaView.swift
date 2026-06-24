@@ -2,9 +2,9 @@
 //  PromptPlazaView.swift
 //  Cangjie
 //
-//  提示词广场三栏（左：分类树 / 中：模板列表 / 右：详情）。
+//  提示词广场三栏（左：分类树 / 中：节点列表 / 右：详情）。
 //  HStack 布局，调 PromptPlazaStore。
-//  对齐 Vue3 提示词广场的交互布局。
+//  对齐原版 llmControl.ts:138-159 PromptNode + llmControl.ts:350-354 PlazaInitResult。
 //
 //  【修复】原用 NavigationSplitView，但 RootView 已有 NavigationSplitView，
 //  嵌套会导致 iOS 16 崩溃。改为 HStack 布局。
@@ -21,7 +21,7 @@ struct PromptPlazaView: View {
     @State private var selectedNode: PromptNode?
 
     var body: some View {
-        // 【修复】用 HStack 代替 NavigationSplitView，避免嵌套崩溃
+        // 用 HStack 代替 NavigationSplitView，避免嵌套崩溃
         HStack(spacing: 0) {
             // 左栏：分类树
             List(selection: $selectedCategory) {
@@ -29,15 +29,18 @@ struct PromptPlazaView: View {
                     ForEach(store.categories) { category in
                         Label {
                             HStack {
-                                Text(category.label)
-                                if category.promptCount ?? 0 > 0 {
-                                    Text("\(category.promptCount!)")
+                                // llmControl.ts:106 name（原 label→name）
+                                Text(category.name)
+                                // llmControl.ts:110 count（原 promptCount→count）
+                                if category.count > 0 {
+                                    Text("\(category.count)")
                                         .font(.system(size: 10))
                                         .foregroundColor(Theme.textTertiary)
                                 }
                             }
                         } icon: {
-                            Image(systemName: category.icon ?? "folder")
+                            // llmControl.ts:107 icon
+                            Image(systemName: category.icon.isEmpty ? "folder" : category.icon)
                         }
                         .tag(category.key)
                     }
@@ -48,22 +51,25 @@ struct PromptPlazaView: View {
 
             Divider()
 
-            // 中栏：模板列表
+            // 中栏：节点列表
             List(selection: $selectedNode) {
                 ForEach(filteredNodes) { node in
                     VStack(alignment: .leading, spacing: 4) {
-                        Text(node.title ?? node.nodeKey)
+                        // llmControl.ts:141 name（原 title→name）
+                        Text(node.name.isEmpty ? node.nodeKey : node.name)
                             .font(Theme.bodyFont())
 
-                        if let category = node.category {
-                            Text(category)
+                        // llmControl.ts:143 category
+                        if !node.category.isEmpty {
+                            Text(node.category)
                                 .font(.system(size: 10))
                                 .foregroundColor(Theme.textTertiary)
                         }
 
-                        if let tags = node.tags, !tags.isEmpty {
+                        // llmControl.ts:148 tags
+                        if !node.tags.isEmpty {
                             HStack {
-                                ForEach(tags.prefix(3), id: \.self) { tag in
+                                ForEach(node.tags.prefix(3), id: \.self) { tag in
                                     Text("#\(tag)")
                                         .font(.system(size: 9))
                                         .foregroundColor(Theme.primary)
@@ -76,7 +82,7 @@ struct PromptPlazaView: View {
             }
             .frame(maxWidth: .infinity)
 
-            Divider();
+            Divider()
 
             // 右栏：详情
             rightPanel

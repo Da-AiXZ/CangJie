@@ -3,6 +3,7 @@
 //  Cangjie
 //
 //  版本对比：左右两版并排，差异高亮。
+//  对齐原版 llmControl.ts:197-204 VersionCompareResult（v1/v2 为对象，diff 为嵌套 Bool）。
 //
 
 import SwiftUI
@@ -12,7 +13,8 @@ struct PromptVersionCompareView: View {
 
     let versions: [PromptVersion]
     var onCompare: (String, String) -> Void
-    let comparison: PromptComparison?
+    /// llmControl.ts:197-204 VersionCompareResult（原 PromptComparison→VersionCompareResult）
+    let comparison: VersionCompareResult?
 
     @State private var v1Id: String = ""
     @State private var v2Id: String = ""
@@ -37,48 +39,26 @@ struct PromptVersionCompareView: View {
                 .padding(Theme.Spacing.md)
                 .background(Theme.secondaryBackground)
 
-                // 对比结果
+                // 对比结果（llmControl.ts:197-204 VersionCompareResult）
                 if let comparison = comparison {
                     ScrollView {
                         HStack(alignment: .top, spacing: 0) {
-                            // 版本 A
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text("版本 A")
-                                    .font(Theme.headlineFont())
-                                Text(comparison.v1Content)
-                                    .font(.system(size: 12, design: .monospaced))
-                                    .foregroundColor(Theme.textSecondary)
-                            }
-                            .frame(maxWidth: .infinity)
-                            .padding(Theme.Spacing.md)
+                            // llmControl.ts:198 v1 — PromptVersionDetail 对象
+                            versionDetailPanel(title: "版本 A", detail: comparison.v1)
+                                .frame(maxWidth: .infinity)
+                                .padding(Theme.Spacing.md)
 
                             Divider()
 
-                            // 版本 B
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text("版本 B")
-                                    .font(Theme.headlineFont())
-                                Text(comparison.v2Content)
-                                    .font(.system(size: 12, design: .monospaced))
-                                    .foregroundColor(Theme.textSecondary)
-                            }
-                            .frame(maxWidth: .infinity)
-                            .padding(Theme.Spacing.md)
+                            // llmControl.ts:199 v2 — PromptVersionDetail 对象
+                            versionDetailPanel(title: "版本 B", detail: comparison.v2)
+                                .frame(maxWidth: .infinity)
+                                .padding(Theme.Spacing.md)
                         }
                     }
 
-                    // 差异
-                    if let diff = comparison.diff, !diff.isEmpty {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text("差异")
-                                .font(Theme.headlineFont())
-                            Text(diff)
-                                .font(.system(size: 11, design: .monospaced))
-                                .foregroundColor(Theme.textSecondary)
-                        }
-                        .padding(Theme.Spacing.md)
-                        .background(Theme.tertiaryBackground)
-                    }
+                    // llmControl.ts:200-203 diff — 嵌套 Bool（原 diff: String? → diff: VersionDiff）
+                    diffSection(comparison.diff)
                 } else {
                     VStack {
                         Image(systemName: "arrow.left.and.right.square")
@@ -105,6 +85,62 @@ struct PromptVersionCompareView: View {
                 }
             }
         }
+    }
+
+    // MARK: - 版本详情面板
+
+    /// 展示 PromptVersionDetail 的 system_prompt + user_template
+    private func versionDetailPanel(title: String, detail: PromptVersionDetail) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(title)
+                .font(Theme.headlineFont())
+            Text("v\(detail.versionNumber)")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundColor(Theme.textSecondary)
+
+            // llmControl.ts:192 system_prompt
+            Text("System:")
+                .font(.system(size: 11, weight: .medium))
+                .foregroundColor(Theme.textTertiary)
+            Text(detail.systemPrompt)
+                .font(.system(size: 12, design: .monospaced))
+                .foregroundColor(Theme.textSecondary)
+
+            // llmControl.ts:193 user_template
+            Text("User:")
+                .font(.system(size: 11, weight: .medium))
+                .foregroundColor(Theme.textTertiary)
+            Text(detail.userTemplate)
+                .font(.system(size: 12, design: .monospaced))
+                .foregroundColor(Theme.textSecondary)
+        }
+    }
+
+    // MARK: - 差异展示（llmControl.ts:200-203 diff: VersionDiff）
+
+    private func diffSection(_ diff: VersionDiff) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("差异")
+                .font(Theme.headlineFont())
+
+            // llmControl.ts:201 system_changed
+            HStack {
+                Image(systemName: diff.systemChanged ? "checkmark.circle.fill" : "xmark.circle")
+                    .foregroundColor(diff.systemChanged ? Theme.warning : Theme.success)
+                Text("系统提示\(diff.systemChanged ? "已变更" : "无变更")")
+                    .font(.system(size: 12))
+            }
+
+            // llmControl.ts:202 user_changed
+            HStack {
+                Image(systemName: diff.userChanged ? "checkmark.circle.fill" : "xmark.circle")
+                    .foregroundColor(diff.userChanged ? Theme.warning : Theme.success)
+                Text("用户模板\(diff.userChanged ? "已变更" : "无变更")")
+                    .font(.system(size: 12))
+            }
+        }
+        .padding(Theme.Spacing.md)
+        .background(Theme.tertiaryBackground)
     }
 
     // MARK: - 版本选择器

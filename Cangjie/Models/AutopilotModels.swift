@@ -171,11 +171,15 @@ struct AutopilotStatus: Codable, Equatable {
 
 // MARK: - 启动自动驾驶请求
 
-/// 启动自动驾驶请求，对应后端 StartRequest
+/// 启动自动驾驶请求，对应原版 autopilot.ts:12-16 AutopilotStartRequest
+/// 三字段全部 required（非 Optional），默认值对齐原版 AutopilotPanel.vue:358-363
 struct AutopilotStartRequest: Codable {
-    let maxAutoChapters: Int?
-    let targetChapters: Int?
-    let targetWordsPerChapter: Int?
+    /// 最大自动章节数（autopilot.ts:13，原版默认 120）
+    let maxAutoChapters: Int
+    /// 目标章数（autopilot.ts:14，原版默认 100）
+    let targetChapters: Int
+    /// 每章目标字数（autopilot.ts:15，原版默认 2500）
+    let targetWordsPerChapter: Int
 
     enum CodingKeys: String, CodingKey {
         case maxAutoChapters = "max_auto_chapters"
@@ -183,38 +187,67 @@ struct AutopilotStartRequest: Codable {
         case targetWordsPerChapter = "target_words_per_chapter"
     }
 
-    init(maxAutoChapters: Int? = 9999, targetChapters: Int? = nil, targetWordsPerChapter: Int? = nil) {
+    init(maxAutoChapters: Int = 120, targetChapters: Int = 100, targetWordsPerChapter: Int = 2500) {
         self.maxAutoChapters = maxAutoChapters
         self.targetChapters = targetChapters
         self.targetWordsPerChapter = targetWordsPerChapter
     }
 }
 
-// MARK: - 熔断器状态
+// MARK: - 熔断器错误记录
 
-/// 熔断器状态（GET /autopilot/{id}/circuit-breaker）
-struct CircuitBreakerStatus: Codable, Equatable {
-    let state: String
-    let failureCount: Int
-    let threshold: Int
-    let lastFailureAt: String?
-    let resetTimeoutSeconds: Int?
+/// 熔断器错误记录，对应原版 autopilot.ts:24-28 AutopilotErrorRecord
+struct AutopilotErrorRecord: Codable, Equatable {
+    /// 错误消息（autopilot.ts:25）
+    let message: String
+    /// 错误时间戳（autopilot.ts:26）
+    let timestamp: String
+    /// 错误上下文（autopilot.ts:27，可选）
+    let context: String?
 
     enum CodingKeys: String, CodingKey {
-        case state
-        case failureCount = "failure_count"
-        case threshold
-        case lastFailureAt = "last_failure_at"
-        case resetTimeoutSeconds = "reset_timeout_seconds"
+        case message, timestamp, context
     }
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
-        self.state = try c.decodeIfPresent(String.self, forKey: .state) ?? "closed"
-        self.failureCount = try c.decodeIfPresent(Int.self, forKey: .failureCount) ?? 0
-        self.threshold = try c.decodeIfPresent(Int.self, forKey: .threshold) ?? 5
-        self.lastFailureAt = try c.decodeIfPresent(String.self, forKey: .lastFailureAt)
-        self.resetTimeoutSeconds = try c.decodeIfPresent(Int.self, forKey: .resetTimeoutSeconds)
+        self.message = try c.decodeIfPresent(String.self, forKey: .message) ?? ""
+        self.timestamp = try c.decodeIfPresent(String.self, forKey: .timestamp) ?? ""
+        self.context = try c.decodeIfPresent(String.self, forKey: .context)
+    }
+}
+
+// MARK: - 熔断器状态
+
+/// 熔断器状态，对应原版 autopilot.ts:30-36 AutopilotCircuitBreakerData
+/// GET /autopilot/{id}/circuit-breaker 返回
+struct AutopilotCircuitBreakerData: Codable, Equatable {
+    /// 熔断状态：closed/open/half_open（autopilot.ts:31）
+    let status: String
+    /// 错误计数（autopilot.ts:32）
+    let errorCount: Int
+    /// 最大错误数阈值（autopilot.ts:33）
+    let maxErrors: Int
+    /// 最近一次错误记录（autopilot.ts:34，可选嵌套对象）
+    let lastError: AutopilotErrorRecord?
+    /// 错误历史记录（autopilot.ts:35，可选数组）
+    let errorHistory: [AutopilotErrorRecord]?
+
+    enum CodingKeys: String, CodingKey {
+        case status
+        case errorCount = "error_count"
+        case maxErrors = "max_errors"
+        case lastError = "last_error"
+        case errorHistory = "error_history"
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.status = try c.decodeIfPresent(String.self, forKey: .status) ?? "closed"
+        self.errorCount = try c.decodeIfPresent(Int.self, forKey: .errorCount) ?? 0
+        self.maxErrors = try c.decodeIfPresent(Int.self, forKey: .maxErrors) ?? 5
+        self.lastError = try c.decodeIfPresent(AutopilotErrorRecord.self, forKey: .lastError)
+        self.errorHistory = try c.decodeIfPresent([AutopilotErrorRecord].self, forKey: .errorHistory)
     }
 }
 
