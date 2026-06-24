@@ -2,19 +2,8 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-    <!-- TrollStore 特权：脱离沙盒，赋予完整网络与文件访问权限 -->
-    <key>com.apple.private.security.no-sandbox</key>
-    <true/>
-
-    <key>platform-application</key>
-    <true/>
-
     <!-- 网络客户端权限：连接云端后端 -->
     <key>com.apple.security.network.client</key>
-    <true/>
-
-    <!-- 网络服务端权限：备用（本地 SSE 代理等场景）-->
-    <key>com.apple.security.network.server</key>
     <true/>
 
     <!-- iTunes 文件共享：导出 DOCX/EPUB -->

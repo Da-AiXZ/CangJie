@@ -2,9 +2,13 @@
 //  WorkbenchView.swift
 //  Cangjie
 //
-//  工作台三栏 NavigationSplitView：
+//  工作台三栏布局（HStack 实现，不嵌套 NavigationSplitView）：
 //  左：章节树导航 / 中：正文编辑或生成流 / 右：上下文面板 TabView。
 //  对齐 Vue3 Workbench.vue 的 n-split 三栏布局。
+//
+//  【修复】原实现用 NavigationSplitView，但 RootView 已经有一个 NavigationSplitView，
+//  在其 content 闭包里再嵌套 NavigationSplitView 会导致 iOS 16 AttributeGraph
+//  assertion 崩溃（EXC_BREAKPOINT）。改为 HStack 三栏布局避免嵌套。
 //
 
 import SwiftUI
@@ -23,34 +27,31 @@ struct WorkbenchView: View {
     @State private var showChapterStream = false
 
     var body: some View {
-        NavigationSplitView {
-            // 左栏：章节导航
+        // 【修复】用 HStack 代替 NavigationSplitView，避免嵌套 NavigationSplitView
+        // 导致 iOS 16 AttributeGraph assertion 崩溃
+        HStack(spacing: 0) {
+            // 左栏：章节导航（固定宽度）
             StoryNavigatorView()
                 .environmentObject(novelStore)
                 .environmentObject(structureStore)
-        } content: {
+                .frame(width: 260)
+
+            Divider()
+
             // 中栏：正文编辑 / 生成流
-            if showChapterStream {
-                ChapterStreamView()
-                    .environmentObject(autopilotStore)
-            } else if let chapter = novelStore.currentChapter {
-                ChapterContentPanel(chapter: chapter)
-                    .environmentObject(workbenchStore)
-                    .environmentObject(novelStore)
-            } else {
-                emptyContentPlaceholder
-            }
-        } detail: {
-            // 右栏：上下文面板
+            centerColumn
+                .frame(maxWidth: .infinity)
+
+            Divider()
+
+            // 右栏：上下文面板（固定宽度，仅当选中章节时显示）
             if novelStore.currentChapter != nil {
                 ContextPanelTabView()
                     .environmentObject(novelStore)
                     .environmentObject(workbenchStore)
-            } else {
-                Color.clear
+                    .frame(width: 320)
             }
         }
-        .navigationSplitViewStyle(.balanced)
         .navigationTitle(novelStore.currentNovel?.title ?? "工作台")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
@@ -77,6 +78,22 @@ struct WorkbenchView: View {
             if isRunning {
                 showChapterStream = true
             }
+        }
+    }
+
+    // MARK: - 中栏内容
+
+    @ViewBuilder
+    private var centerColumn: some View {
+        if showChapterStream {
+            ChapterStreamView()
+                .environmentObject(autopilotStore)
+        } else if let chapter = novelStore.currentChapter {
+            ChapterContentPanel(chapter: chapter)
+                .environmentObject(workbenchStore)
+                .environmentObject(novelStore)
+        } else {
+            emptyContentPlaceholder
         }
     }
 
