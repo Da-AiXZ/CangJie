@@ -220,28 +220,88 @@ struct CircuitBreakerStatus: Codable, Equatable {
 
 // MARK: - SSE 流事件
 
-/// 章节生成流事件（data-only 格式，type 字段在 JSON data 中）
-struct ChapterStreamEvent: Codable, Equatable {
-    let type: String
+/// 章节生成流元数据，对应 ChapterStreamEvent.metadata（config.ts:316-325）
+struct ChapterStreamMetadata: Codable, Equatable {
+    /// 章节号
     let chapterNumber: Int?
+    /// 流式增量 chunk
+    let chunk: String?
+    /// 节拍索引
+    let beatIndex: Int?
+    /// 完整内容快照
     let content: String?
-    let done: Bool?
-    let error: String?
+    /// 字数
+    let wordCount: Int?
+    /// 节拍列表
+    let beats: [AnyCodable]?
+    /// 大纲规划模式
+    let outlinePlanMode: String?
+    /// 总节拍数
+    let totalBeats: Int?
 
     enum CodingKeys: String, CodingKey {
-        case type
         case chapterNumber = "chapter_number"
-        case content, done, error
+        case chunk
+        case beatIndex = "beat_index"
+        case content
+        case wordCount = "word_count"
+        case beats
+        case outlinePlanMode = "outline_plan_mode"
+        case totalBeats = "total_beats"
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.chapterNumber = try c.decodeIfPresent(Int.self, forKey: .chapterNumber)
+        self.chunk = try c.decodeIfPresent(String.self, forKey: .chunk)
+        self.beatIndex = try c.decodeIfPresent(Int.self, forKey: .beatIndex)
+        self.content = try c.decodeIfPresent(String.self, forKey: .content)
+        self.wordCount = try c.decodeIfPresent(Int.self, forKey: .wordCount)
+        self.beats = try c.decodeIfPresent([AnyCodable].self, forKey: .beats)
+        self.outlinePlanMode = try c.decodeIfPresent(String.self, forKey: .outlinePlanMode)
+        self.totalBeats = try c.decodeIfPresent(Int.self, forKey: .totalBeats)
+    }
+}
+
+/// 章节生成流事件（data-only 格式，type 字段在 JSON data 中）
+/// 对应 config.ts:303-326 的 ChapterStreamEvent 接口
+/// 9 类事件：connected/outline_planning/beats_planned/chapter_start/chapter_chunk/chapter_content/autopilot_stopped/paused_for_review/heartbeat
+struct ChapterStreamEvent: Codable, Equatable {
+    /// 事件类型（9种值之一）
+    let type: String
+    /// 消息
+    let message: String
+    /// 时间戳
+    let timestamp: String
+    /// 元数据
+    let metadata: ChapterStreamMetadata?
+
+    enum CodingKeys: String, CodingKey {
+        case type, message, timestamp, metadata
     }
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.type = try c.decodeIfPresent(String.self, forKey: .type) ?? ""
-        self.chapterNumber = try c.decodeIfPresent(Int.self, forKey: .chapterNumber)
-        self.content = try c.decodeIfPresent(String.self, forKey: .content)
-        self.done = try c.decodeIfPresent(Bool.self, forKey: .done)
-        self.error = try c.decodeIfPresent(String.self, forKey: .error)
+        self.message = try c.decodeIfPresent(String.self, forKey: .message) ?? ""
+        self.timestamp = try c.decodeIfPresent(String.self, forKey: .timestamp) ?? ""
+        self.metadata = try c.decodeIfPresent(ChapterStreamMetadata.self, forKey: .metadata)
     }
+}
+
+// MARK: - ChapterStreamEvent 类型常量（config.ts:304-313）
+
+extension ChapterStreamEvent {
+    /// 事件类型常量（config.ts:304-313）
+    static let typeConnected = "connected"
+    static let typeOutlinePlanning = "outline_planning"
+    static let typeBeatsPlanned = "beats_planned"
+    static let typeChapterStart = "chapter_start"
+    static let typeChapterChunk = "chapter_chunk"
+    static let typeChapterContent = "chapter_content"
+    static let typeAutopilotStopped = "autopilot_stopped"
+    static let typePausedForReview = "paused_for_review"
+    static let typeHeartbeat = "heartbeat"
 }
 
 /// 日志流事件（data-only 格式）

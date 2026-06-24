@@ -165,11 +165,13 @@ struct ChapterStreamView: View {
                 let events = autopilotStore.chapterEvents
                 for index in (lastProcessedIndex + 1)..<events.count {
                     let event = events[index]
-                    if let content = event.content {
+                    // 新模型：content 在 metadata 中（config.ts:409-415 chapter_content 事件）
+                    if let content = event.metadata?.content, !content.isEmpty {
                         accumulatedContent.append(content)
                     }
-                    if event.done == true {
-                        // 章节生成完成
+                    // 新模型：用 type 判断章节完成（config.ts:311 autopilot_stopped 事件）
+                    if event.type == ChapterStreamEvent.typeAutopilotStopped || event.type == ChapterStreamEvent.typePausedForReview {
+                        // 章节生成完成或暂停
                         break
                     }
                 }

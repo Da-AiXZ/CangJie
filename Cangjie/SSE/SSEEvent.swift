@@ -107,6 +107,35 @@ struct SSEEvent: Equatable {
         return false
     }
 
+    // MARK: - Bible SSE 事件类型（bible.ts:400-413）
+
+    /// Bible SSE 事件大类（从 event 行获取，值为 phase/data/done/error）。
+    /// Bible 生成流的 event 行值为 phase/data/done/error，子类型在 data JSON 的 type 字段中。
+    /// 对齐 bible.ts:400-413 parseSseBlock 逻辑。
+    var bibleEventType: String? {
+        return event
+    }
+
+    /// Bible SSE data 子类型（从 data JSON 的 type 字段获取）。
+    /// 当 event 行值为 "data" 时，data JSON 中的 type 字段确定具体子类型：
+    /// style / style_chunk / worldbuilding_chunk / worldbuilding_field /
+    /// worldbuilding_dimension / character / character_chunk / location / location_chunk /
+    /// approval_required
+    /// 对齐 bible.ts:436 `const dataType = String(payload?.type ?? '')`
+    var bibleDataSubType: String? {
+        guard let dict = decodeAsDictionary() else { return nil }
+        return dict["type"] as? String
+    }
+
+    // MARK: - generate-chapter-stream 事件类型（workflow.ts:362-369）
+
+    /// 单章生成 SSE 事件类型（data-only 格式，从 data JSON 的 type 字段获取）。
+    /// 7类事件：phase / llm_chunk / beats_generated / approval_required / chunk / done / error
+    /// 对齐 workflow.ts:417 `const typ = o.type as string`
+    var generateChapterEventType: String? {
+        return typeFromData
+    }
+
     /// 默认 JSON 解码器（配置微秒日期格式）
     private static let defaultDecoder: JSONDecoder = {
         let decoder = JSONDecoder()

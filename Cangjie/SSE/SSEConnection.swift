@@ -75,6 +75,12 @@ final class SSEConnection: ObservableObject {
     /// 错误回调
     private var onError: ((Error) -> Void)?
 
+    /// HTTP 方法（POST 用于单章生成流，GET 用于其他流）
+    private let httpMethod: String
+
+    /// POST 请求体数据（仅 httpMethod == "POST" 时使用）
+    private let postBody: Data?
+
     // MARK: - 初始化
 
     /// 初始化 SSE 连接。
@@ -83,10 +89,14 @@ final class SSEConnection: ObservableObject {
     ///   - streamType: 流类型
     ///   - url: 连接 URL
     ///   - client: SSE 客户端实例
-    init(streamType: SSEStreamType, url: URL, client: SSEClient = SSEClient()) {
+    ///   - method: HTTP 方法（"GET" 或 "POST"，默认 "GET"）
+    ///   - body: POST 请求体数据（仅 method == "POST" 时使用，已编码为 JSON Data）
+    init(streamType: SSEStreamType, url: URL, client: SSEClient = SSEClient(), method: String = "GET", body: Data? = nil) {
         self.streamType = streamType
         self.url = url
         self.client = client
+        self.httpMethod = method
+        self.postBody = body
     }
 
     // MARK: - 状态控制
@@ -156,8 +166,11 @@ final class SSEConnection: ObservableObject {
                 let stream: AsyncThrowingStream<SSEEvent, Error>
 
                 if self.streamType == .bibleGenerateStream {
-                    // Bible 生成流使用 POST
+                    // Bible 生成流使用 POST（空 body）
                     stream = self.client.connectPOST(url: self.url)
+                } else if self.httpMethod == "POST" {
+                    // 单章生成流等需要 POST body 的流
+                    stream = self.client.connectPOST(url: self.url, body: self.postBody)
                 } else {
                     // 其他流使用 GET，带 after_seq 断点续传
                     let connectUrl = self.urlWithAfterSeq()

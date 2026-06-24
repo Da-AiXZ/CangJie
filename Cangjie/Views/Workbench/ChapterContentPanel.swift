@@ -24,6 +24,14 @@ struct ChapterContentPanel: View {
             // 顶部工具栏
             ChapterToolbar(chapter: chapter)
                 .environmentObject(workbenchStore)
+                .environmentObject(novelStore)
+
+            // M5 单章生成面板（phase 进度 + 正文流式 + 一致性报告）
+            if workbenchStore.isGeneratingChapter || workbenchStore.generateChapterConsistencyReport != nil {
+                ChapterGenerationPanel(chapter: chapter)
+                    .environmentObject(workbenchStore)
+                    .environmentObject(novelStore)
+            }
 
             // 正文编辑器
             ScrollView {

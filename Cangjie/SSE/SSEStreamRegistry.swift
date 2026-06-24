@@ -513,4 +513,111 @@ extension SSEStreamRegistry {
             onError: onError
         )
     }
+
+    // MARK: - 单章生成 SSE 流（M5, workflow.ts:392）
+
+    /// 构建 generate-chapter-stream SSE URL（POST /api/v1/novels/{novelId}/generate-chapter-stream）
+    /// 对齐 workflow.ts:392 `fetch(resolveHttpUrl('/api/v1/novels/${novelId}/generate-chapter-stream'))`
+    ///
+    /// - Parameters:
+    ///   - novelId: 小说 ID
+    ///   - payload: 生成请求载荷（GenerateChapterWithContextPayload）
+    /// - Returns: SSE 端点 URL
+    func generateChapterStreamURL(novelId: String) -> URL? {
+        let path = "/novels/\(novelId)/generate-chapter-stream"
+        return config.fullURL(path: path, prefix: APIConfig.apiV1Prefix)
+    }
+
+    /// 启动单章生成 SSE 流（M5, workflow.ts:375-511）
+    /// POST /api/v1/novels/{novelId}/generate-chapter-stream
+    /// data-only 格式，7类事件：phase/llm_chunk/beats_generated/approval_required/chunk/done/error
+    ///
+    /// - Parameters:
+    ///   - novelId: 小说 ID
+    ///   - payload: 生成请求载荷（GenerateChapterWithContextPayload）
+    ///   - onEvent: 事件回调
+    ///   - onError: 错误回调
+    /// - Returns: 是否成功启动
+    @discardableResult
+    func startGenerateChapterStream(
+        novelId: String,
+        payload: GenerateChapterWithContextPayload,
+        onEvent: @escaping (SSEEvent) -> Void,
+        onError: ((Error) -> Void)? = nil
+    ) -> Bool {
+        Logger.sse.info("启动单章生成 SSE 流 [novel: \(novelId), chapter: \(payload.chapterNumber)]")
+
+        // 构建 SSE URL（POST 请求，body 为 JSON）
+        guard let url = generateChapterStreamURL(novelId: novelId) else {
+            Logger.sse.error("SSE URL 构建失败: 单章生成流")
+            onError?(APIError.invalidURL)
+            return false
+        }
+
+        // 使用专门的流类型标识（复用 chapterStream 的 key 前缀但加 generate 前缀区分）
+        let key = "generateChapterStream:\(novelId)"
+
+        lock.lock()
+
+        // 取消旧连接
+        if let oldConnection = connections[key] {
+            oldConnection.cancel()
+            connections.removeValue(forKey: key)
+        }
+
+        // 将 payload 编码为 JSON Data
+        let bodyData = try? JSONEncoder().encode(payload)
+
+        // 创建新连接 — 单章生成是 POST 请求，需要特殊处理
+        let connection = SSEConnection(
+            streamType: .chapterStream,  // 复用 chapterStream 类型（同为章节生成相关）
+            url: url,
+            client: client,
+            method: "POST",
+            body: bodyData
+        )
+        connections[key] = connection
+        eventHandlers[key] = onEvent
+        stateHandlers[key] = nil
+        errorHandlers[key] = onError
+
+        // 记录活跃流
+        activeNovelIds.insert(novelId)
+        if activeStreams[novelId] == nil {
+            activeStreams[novelId] = []
+        }
+        activeStreams[novelId]?.insert(.chapterStream)
+
+        lock.unlock()
+
+        // 启动连接
+        connection.start(
+            onEvent: { [weak self] event in
+                self?.handleEvent(event, key: key)
+            },
+            onStateChange: { [weak self] state in
+                self?.handleStateChange(state, key: key)
+            },
+            onError: { [weak self] error in
+                self?.handleError(error, key: key)
+            }
+        )
+
+        return true
+    }
+
+    /// 取消单章生成 SSE 流
+    /// - Parameter novelId: 小说 ID
+    func cancelGenerateChapterStream(novelId: String) {
+        let key = "generateChapterStream:\(novelId)"
+        Logger.sse.info("取消单章生成 SSE 流: [novel: \(novelId)]")
+
+        lock.lock()
+        connections[key]?.cancel()
+        connections.removeValue(forKey: key)
+        eventHandlers.removeValue(forKey: key)
+        stateHandlers.removeValue(forKey: key)
+        errorHandlers.removeValue(forKey: key)
+        lock.unlock()
+    }
 }
