@@ -126,7 +126,8 @@ struct PromptVariable: Codable, Equatable {
 
 /// 提示词节点（列表项），对应原版 llmControl.ts:138-159 PromptNode
 /// 主理人决策：用原版 id 字段作 Identifiable.id，nodeKey 独立保留
-struct PromptNode: Codable, Identifiable, Equatable {
+struct PromptNode: Codable, Identifiable, Equatable, Hashable {
+    // Hashable 自定义实现：用 id 做 hash（避免 AnyCodable 字段不符合 Hashable 的问题）
     /// 节点 ID（llmControl.ts:139，主理人决策：用原版 id 字段作 Identifiable.id）
     let id: String
     /// 节点 key（llmControl.ts:140）
@@ -240,6 +241,14 @@ struct PromptNode: Codable, Identifiable, Equatable {
         self.systemPreview = systemPreview
         self.userTemplatePreview = userTemplatePreview
         self.hasUserEdit = hasUserEdit
+    }
+
+    // MARK: Hashable（用 id 做 hash，避免 AnyCodable 字段不符合 Hashable）
+    func hash(into hasher: inout Hasher) {
+        hasher.combine(id)
+    }
+    static func == (lhs: PromptNode, rhs: PromptNode) -> Bool {
+        return lhs.id == rhs.id
     }
 }
 
