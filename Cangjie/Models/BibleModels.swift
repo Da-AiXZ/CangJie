@@ -838,8 +838,11 @@ func mapCharacterToEditable(_ character: CharacterDTO, fallback: EditableCharact
 
     // relationships: 优先用 character 自带，否则用 fallback
     let charRelationships: [Any]? = character.relationships.isEmpty ? nil : character.relationships.map { $0.value }
+    let fallbackRelationships: [Any]? = fallback?.relationships.map { rel -> [String: Any] in
+        ["target": rel.target, "relation": rel.relation, "description": rel.description] as [String: Any]
+    }
     let relationships = normalizeRelationships(
-        (charRelationships != nil) ? charRelationships : (fallback?.relationships.map { ["target": $0.target, "relation": $0.relation, "description": $0.description] } as [Any])
+        (charRelationships != nil) ? charRelationships : fallbackRelationships
     )
 
     // moralTaboos: 优先用 character 自带，否则用 fallback
@@ -852,7 +855,11 @@ func mapCharacterToEditable(_ character: CharacterDTO, fallback: EditableCharact
     let voiceProfile = normalizeVoiceProfile(voiceProfileRaw)
 
     // activeWounds: 优先用 character 自带，否则用 fallback
-    let woundsRaw = (!character.activeWounds.isEmpty) ? character.activeWounds.map { $0.value } : (fallback?.activeWounds.map { ["description": $0.description, "trigger": $0.trigger, "effect": $0.effect] } as [Any])
+    let woundsRaw: [Any]? = (!character.activeWounds.isEmpty)
+        ? character.activeWounds.map { $0.value }
+        : fallback?.activeWounds.map { w -> [String: Any] in
+            ["description": w.description, "trigger": w.trigger, "effect": w.effect] as [String: Any]
+        }
     let activeWounds = normalizeWounds(woundsRaw)
 
     return EditableCharacter(
