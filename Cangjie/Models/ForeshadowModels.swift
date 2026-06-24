@@ -51,36 +51,48 @@ struct ForeshadowEntry: Codable, Identifiable, Equatable {
 
 // MARK: - 创建伏笔请求
 
-/// 创建伏笔请求，对应后端 CreateSubtextEntryRequest
+/// 创建伏笔请求，对应后端 CreateSubtextEntryRequest — foreshadow.ts:22-30
 struct CreateForeshadowRequest: Codable {
     let entryId: String
     let chapter: Int
     let characterId: String
     let question: String
+    var suggestedResolveChapter: Int?
+    var resolveChapterWindow: Int?
+    var importance: String?
 
     enum CodingKeys: String, CodingKey {
         case entryId = "entry_id"
         case chapter
         case characterId = "character_id"
         case question
+        case suggestedResolveChapter = "suggested_resolve_chapter"
+        case resolveChapterWindow = "resolve_chapter_window"
+        case importance
     }
 }
 
 // MARK: - 更新伏笔请求
 
-/// 更新伏笔请求，对应后端 UpdateSubtextEntryRequest
+/// 更新伏笔请求，对应后端 UpdateSubtextEntryRequest — foreshadow.ts:32-42
 struct UpdateForeshadowRequest: Codable {
     let chapter: Int?
     let characterId: String?
     let question: String?
     let status: String?
     let consumedAtChapter: Int?
+    let suggestedResolveChapter: Int?
+    let resolveChapterWindow: Int?
+    let importance: String?
     let isPriorityForChapter: Bool?
 
     enum CodingKeys: String, CodingKey {
         case chapter, question, status
         case characterId = "character_id"
         case consumedAtChapter = "consumed_at_chapter"
+        case suggestedResolveChapter = "suggested_resolve_chapter"
+        case resolveChapterWindow = "resolve_chapter_window"
+        case importance
         case isPriorityForChapter = "is_priority_for_chapter"
     }
 }

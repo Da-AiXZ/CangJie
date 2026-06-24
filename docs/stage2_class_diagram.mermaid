@@ -1,0 +1,326 @@
+classDiagram
+    direction TB
+
+    class AutopilotErrorRecord {
+        +String message
+        +String timestamp
+        +String? context
+    }
+
+    class AutopilotCircuitBreakerData {
+        +String status
+        +Int errorCount
+        +Int maxErrors
+        +AutopilotErrorRecord? lastError
+        +[AutopilotErrorRecord]? errorHistory
+    }
+
+    class AutopilotStartRequest {
+        +Int maxAutoChapters
+        +Int targetChapters
+        +Int targetWordsPerChapter
+    }
+
+    class AutopilotStore {
+        +AutopilotStatus? status
+        +AutopilotCircuitBreakerData? circuitBreaker
+        +Int failureCount
+        +Bool stoppedForNotFound
+        +startAutopilot(novelId, targetChapters, targetWordsPerChapter, maxAutoChapters, autoApproveMode)
+        +refreshCircuitBreaker(novelId)
+        -startStatusPolling(novelId)
+        -assistedAutopilotPollDelay(failureCount) Int
+    }
+
+    AutopilotCircuitBreakerData --> AutopilotErrorRecord : lastError
+    AutopilotCircuitBreakerData --> AutopilotErrorRecord : errorHistory[]
+    AutopilotStore --> AutopilotCircuitBreakerData
+
+    class BibleGenerationStatus {
+        +Bool exists
+        +Bool ready
+        +String novelId
+    }
+
+    class BibleGenerationFeedback {
+        +String novelId
+        +String? error
+        +String? stage
+        +String? at
+    }
+
+    class PromptVariable {
+        +String name
+        +String desc
+        +String type
+        +Bool? required
+        +AnyCodable? default
+    }
+
+    class PromptNode {
+        +String id
+        +String nodeKey
+        +String name
+        +String description
+        +String category
+        +String source
+        +String outputFormat
+        +String? contractModule
+        +String? contractModel
+        +[String] tags
+        +[PromptVariable] variables
+        +[String] variableNames
+        +String? systemFile
+        +Bool isBuiltin
+        +Int sortOrder
+        +String templateId
+        +Int versionCount
+        +String systemPreview
+        +String userTemplatePreview
+        +Bool hasUserEdit
+    }
+
+    class PromptNodeDetail {
+        +String system
+        +String userTemplate
+        +[DagBinding]? dagBindings
+        +[DagRegistryBinding]? dagRegistryBindings
+    }
+
+    class PromptVersion {
+        +String id
+        +Int versionNumber
+        +String changeSummary
+        +String createdBy
+        +String createdAt
+        +String systemPreview
+        +String userPreview
+    }
+
+    class PromptVersionDetail {
+        +String systemPrompt
+        +String userTemplate
+    }
+
+    class VersionCompareResult {
+        +PromptVersionDetail v1
+        +PromptVersionDetail v2
+        +VersionDiff diff
+    }
+
+    class VersionDiff {
+        +Bool systemChanged
+        +Bool userChanged
+    }
+
+    class PromptStats {
+        +Int totalNodes
+        +Int totalTemplates
+        +Int totalVersions
+        +Int builtinCount
+        +Int customCount
+        +[String:Int] categories
+    }
+
+    class RenderResult {
+        +String system
+        +String user
+    }
+
+    class DebugDiagnostics {
+        +[String] errors
+        +[String] warnings
+        +[String] missingVariables
+        +[String] renderedVariables
+        +[String] missingRequired
+    }
+
+    class DebugResult {
+        +Bool success
+        +String system
+        +String user
+        +DebugDiagnostics diagnostics
+        +String nodeKey
+        +String nodeName
+        +[String] variablesProvided
+        +Int elapsedMs
+        +String? error
+    }
+
+    class PromptChainResult {
+        +String nodeKey
+        +String nodeName
+        +String category
+        +String source
+        +[ChainBinding] bindings
+        +[ReverseDep] reverseDependencies
+        +[ChainVariable] variables
+        +Int versionCount
+    }
+
+    class SandboxResult {
+        +Bool valid
+        +[String] errors
+        +[String] warnings
+        +[String] missingVariables
+        +[String] missingRequired
+        +String systemPreview
+        +String userPreview
+        +TemplateVariables templateVariables
+        +[String] providedVariables
+        +Int elapsedMs
+        +String? error
+    }
+
+    class VariableSchema {
+        +String name
+        +String displayName
+        +String type
+        +Bool required
+        +AnyCodable default
+        +String description
+        +String source
+        +String scope
+        +[String] enumValues
+    }
+
+    class NodeBindingsResult {
+        +String nodeKey
+        +String nodeName
+        +[NodeBinding] bindings
+        +Int bindingCount
+    }
+
+    class PlazaInitResult {
+        +PromptStats stats
+        +[PromptCategoryInfo] categories
+        +[String:[PromptNode]] nodesByCategory
+    }
+
+    class PromptTemplate {
+        +String id
+        +String name
+        +String description
+        +String category
+        +String version
+        +String author
+        +String icon
+        +String color
+        +Bool isBuiltin
+        +AnyCodable metadata
+        +Int nodeCount
+    }
+
+    class PromptCategoryInfo {
+        +String key
+        +String name
+        +String icon
+        +String description
+        +String color
+        +Int count
+    }
+
+    class PromptUpdatePayload {
+        +String? system
+        +String? userTemplate
+        +String? name
+        +String? description
+        +[String]? tags
+        +String? changeSummary
+    }
+
+    class CreateNodePayload {
+        +String? templateId
+        +String? nodeKey
+        +String name
+        +String? description
+        +String? category
+        +String? system
+        +String? userTemplate
+    }
+
+    class CreateTemplatePayload {
+        +String name
+        +String? description
+        +String? category
+    }
+
+    class RenderPayload {
+        +[String:AnyCodable] variables
+    }
+
+    PromptNode --> PromptVariable : variables[]
+    PromptNodeDetail --|> PromptNode : extends
+    PromptVersionDetail --|> PromptVersion : extends
+    VersionCompareResult --> PromptVersionDetail : v1, v2
+    VersionCompareResult --> VersionDiff : diff
+    DebugResult --> DebugDiagnostics : diagnostics
+    PlazaInitResult --> PromptStats : stats
+    PlazaInitResult --> PromptCategoryInfo : categories
+    PlazaInitResult --> PromptNode : nodesByCategory
+
+    class PromptPlazaStore {
+        +PlazaInitResult? plazaInit
+        +[PromptCategoryInfo] categories
+        +[PromptNode] nodes
+        +PromptStats? stats
+        +PromptNodeDetail? currentNode
+        +[PromptVersion] versions
+        +RenderResult? renderResult
+        +DebugResult? debugResult
+        +VersionCompareResult? comparison
+        +[PromptTemplate] templates
+        +loadPlazaInit()
+        +loadNode(nodeKey)
+        +loadVersions(nodeKey)
+        +updateNode(nodeKey, PromptUpdatePayload)
+        +renderPrompt(nodeKey, [String:AnyCodable])
+        +debugNode(nodeKey, [String:AnyCodable])
+        +compareVersions(v1Id, v2Id)
+        +rollbackNode(nodeKey, versionId)
+        +loadTemplates()
+        +getPromptChain(nodeKey)
+        +sandboxRender(nodeKey, system, userTemplate, variables)
+        +listVariables(nodeKey?)
+        +getNodeBindings(nodeKey)
+        +createNode(CreateNodePayload)
+        +deleteNode(nodeId)
+        +createTemplate(CreateTemplatePayload)
+        +getVersionDetail(versionId)
+        +listNodesByCategory()
+        +getCategoriesInfo()
+        +exportAll()
+        +importData(payload)
+    }
+
+    class ThemeMode {
+        <<enum>>
+        light
+        dark
+        anchor
+        system
+        +ColorScheme? colorScheme
+        +Bool isDark
+        +Bool isAnchor
+    }
+
+    class FontSizeScale {
+        <<enum>>
+        small
+        medium
+        large
+        xlarge
+        +CGFloat scaleFactor
+    }
+
+    PromptPlazaStore --> PlazaInitResult
+    PromptPlazaStore --> PromptNodeDetail
+    PromptPlazaStore --> PromptVersion
+    PromptPlazaStore --> RenderResult
+    PromptPlazaStore --> DebugResult
+    PromptPlazaStore --> VersionCompareResult
+    PromptPlazaStore --> PromptTemplate
+    PromptPlazaStore --> PromptChainResult
+    PromptPlazaStore --> SandboxResult
+    PromptPlazaStore --> VariableSchema
+    PromptPlazaStore --> NodeBindingsResult

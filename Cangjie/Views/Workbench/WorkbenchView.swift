@@ -115,6 +115,12 @@ struct WorkbenchView: View {
         }) {
             MacroPlanModal(novelId: appState.currentNovelId ?? "")
         }
+        // 阶段3：AI 审批面板（单章生成 approval_required 接线）
+        .sheet(isPresented: $workbenchStore.aiInvocationStore.visible) {
+            NavigationStack {
+                AIInvocationReviewPanel(store: workbenchStore.aiInvocationStore)
+            }
+        }
     }
 
     // MARK: - 中栏内容

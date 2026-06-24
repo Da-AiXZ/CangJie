@@ -546,6 +546,54 @@ enum APIEndpoint {
         case openingProfiles
     }
 
+    // MARK: - AI Invocation（AI 审批系统）
+    enum AIInvocation {
+        /// 创建 session — `POST /ai-invocations` — aiInvocation.ts:221-223
+        case create
+        /// 获取 session 详情 — `GET /ai-invocations/{sessionId}` — aiInvocation.ts:224-226
+        case get(sessionId: String)
+        /// 采纳 — `POST /ai-invocations/{sessionId}/accept` — aiInvocation.ts:227-229
+        case accept(sessionId: String)
+        /// 拒绝 — `POST /ai-invocations/{sessionId}/reject` — aiInvocation.ts:230-232
+        case reject(sessionId: String)
+        /// 恢复（批准生成）— `POST /ai-invocations/{sessionId}/resume` — aiInvocation.ts:233-235
+        case resume(sessionId: String)
+        /// 重新生成 — `POST /ai-invocations/{sessionId}/retry` — aiInvocation.ts:236-238
+        case retry(sessionId: String)
+        /// 预览提示词草稿 — `POST /ai-invocations/{sessionId}/prompt-draft/preview` — aiInvocation.ts:239-244
+        case previewPromptDraft(sessionId: String)
+        /// 保存提示词草稿 — `PUT /ai-invocations/{sessionId}/prompt-draft` — aiInvocation.ts:245-247
+        case savePromptDraft(sessionId: String)
+        /// 更新变量 — `PUT /ai-invocations/{sessionId}/variables` — aiInvocation.ts:248-250
+        case updateVariables(sessionId: String)
+        /// 提交 — `POST /ai-invocations/{sessionId}/commits` — aiInvocation.ts:251-255
+        case commit(sessionId: String)
+    }
+
+    // MARK: - Workflow（向导工作流）
+    enum Workflow {
+        /// 获取剧情总纲 — `GET /novels/{novelId}/setup/plot-outline` — workflow.ts:790-793
+        case getPlotOutline(novelId: String)
+        /// 保存剧情总纲 — `PUT /novels/{novelId}/setup/plot-outline` — workflow.ts:795-799
+        case savePlotOutline(novelId: String)
+        /// 剧情总纲生成（POST 降级）— `POST /novels/{novelId}/setup/generate-plot-outline` — workflow.ts:801-806
+        case generatePlotOutline(novelId: String)
+    }
+
+    // MARK: - ChapterElement（章节元素）
+    enum ChapterElement {
+        /// 获取章节元素列表 — `GET /chapters/{chapterId}/elements` — chapterElement.ts:38-44
+        case list(chapterId: String)
+        /// 添加章节元素 — `POST /chapters/{chapterId}/elements` — chapterElement.ts:46-52
+        case create(chapterId: String)
+        /// 批量更新 — `PUT /chapters/{chapterId}/elements` — chapterElement.ts:54-60
+        case batchUpdate(chapterId: String)
+        /// 删除章节元素 — `DELETE /chapters/{chapterId}/elements/{elementId}` — chapterElement.ts:62-66
+        case delete(chapterId: String, elementId: String)
+        /// 反查元素出现章节 — `GET /chapters/elements/{elementType}/{elementId}/chapters` — chapterElement.ts:69-74
+        case chaptersByElement(elementType: String, elementId: String)
+    }
+
     // MARK: - Stats（统计 API，前缀 /api/stats）
     enum Stats {
         /// 全局统计 — `GET /`
@@ -1465,6 +1513,115 @@ extension APIEndpoint.KnowledgeGraph: APIEndpoint.EndpointInfo {
             return .delete
         case .starTriple:
             return .patch
+        }
+    }
+}
+
+// MARK: - AIInvocation 端点信息 — aiInvocation.ts:221-255
+
+extension APIEndpoint.AIInvocation: APIEndpoint.EndpointInfo {
+    var path: String {
+        switch self {
+        case .create:
+            return "/ai-invocations"
+        case .get(let sessionId):
+            return "/ai-invocations/\(sessionId)"
+        case .accept(let sessionId):
+            return "/ai-invocations/\(sessionId)/accept"
+        case .reject(let sessionId):
+            return "/ai-invocations/\(sessionId)/reject"
+        case .resume(let sessionId):
+            return "/ai-invocations/\(sessionId)/resume"
+        case .retry(let sessionId):
+            return "/ai-invocations/\(sessionId)/retry"
+        case .previewPromptDraft(let sessionId):
+            return "/ai-invocations/\(sessionId)/prompt-draft/preview"
+        case .savePromptDraft(let sessionId):
+            return "/ai-invocations/\(sessionId)/prompt-draft"
+        case .updateVariables(let sessionId):
+            return "/ai-invocations/\(sessionId)/variables"
+        case .commit(let sessionId):
+            return "/ai-invocations/\(sessionId)/commits"
+        }
+    }
+
+    var method: HTTPMethod {
+        switch self {
+        case .get:
+            return .get
+        case .create, .accept, .reject, .resume, .retry,
+             .previewPromptDraft, .commit:
+            return .post
+        case .savePromptDraft, .updateVariables:
+            return .put
+        }
+    }
+}
+
+// MARK: - Workflow 端点信息 — workflow.ts:790-806
+
+extension APIEndpoint.Workflow: APIEndpoint.EndpointInfo {
+    var path: String {
+        switch self {
+        case .getPlotOutline(let novelId):
+            return "/novels/\(novelId)/setup/plot-outline"
+        case .savePlotOutline(let novelId):
+            return "/novels/\(novelId)/setup/plot-outline"
+        case .generatePlotOutline(let novelId):
+            return "/novels/\(novelId)/setup/generate-plot-outline"
+        }
+    }
+
+    var method: HTTPMethod {
+        switch self {
+        case .getPlotOutline:
+            return .get
+        case .savePlotOutline:
+            return .put
+        case .generatePlotOutline:
+            return .post
+        }
+    }
+}
+
+// MARK: - ChapterElement 端点信息 — chapterElement.ts:38-74
+
+extension APIEndpoint.ChapterElement: APIEndpoint.EndpointInfo {
+    var path: String {
+        switch self {
+        case .list(let chapterId):
+            return "/chapters/\(chapterId)/elements"
+        case .create(let chapterId):
+            return "/chapters/\(chapterId)/elements"
+        case .batchUpdate(let chapterId):
+            return "/chapters/\(chapterId)/elements"
+        case .delete(let chapterId, let elementId):
+            return "/chapters/\(chapterId)/elements/\(elementId)"
+        case .chaptersByElement(let elementType, let elementId):
+            return "/chapters/elements/\(elementType)/\(elementId)/chapters"
+        }
+    }
+
+    var method: HTTPMethod {
+        switch self {
+        case .list, .chaptersByElement:
+            return .get
+        case .create:
+            return .post
+        case .batchUpdate:
+            return .put
+        case .delete:
+            return .delete
+        }
+    }
+
+    var queryItems: [URLQueryItem] {
+        switch self {
+        case .list:
+            // element_type 可选查询参数，由调用方通过 URL 注入
+            return []
+        default:
+            return []
         }
     }
 }

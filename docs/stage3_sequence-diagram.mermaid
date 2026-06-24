@@ -1,0 +1,129 @@
+%% 仓颉 iOS 阶段3 — 时序图
+%% 架构师：高见远
+
+%% 5.1 AI Invocation 审批流程
+sequenceDiagram
+    participant SSE as SSE流(Bible/Chapter/PlotOutline)
+    participant OS as OnboardingStore/WorkbenchStore
+    participant AIS as AIInvocationStore
+    participant API as 后端API
+    participant UI as AIInvocationReviewPanel
+
+    SSE->>OS: approval_required事件(session_id)
+    OS->>AIS: openFromResponse(payload) 或 open(sessionId)
+    AIS->>API: GET /ai-invocations/{sessionId}
+    API-->>AIS: InvocationResponseDTO
+    AIS->>AIS: applyResponse(payload)
+    AIS->>UI: @Published session/attempt/decision/commit 更新
+    UI->>UI: 显示会话状态卡片 + 审批按钮
+
+    Note over AIS,API: awaiting_pre_call_review 状态
+    UI->>AIS: resume() (用户点"批准生成")
+    Note right of AIS: isDraftEditable时先savePromptDraft<br/>有缺失变量时先updateVariables
+    AIS->>API: POST /ai-invocations/{sessionId}/resume
+    API-->>AIS: InvocationResponseDTO (status=generating)
+    AIS->>AIS: syncGenerationPolling() 启动2000ms轮询
+
+    Note over AIS,API: generating 状态（轮询）
+    loop 每2000ms
+        AIS->>API: GET /ai-invocations/{sessionId} (silent)
+        API-->>AIS: InvocationResponseDTO (更新attempt.content)
+        AIS->>UI: @Published liveAttemptContent 更新
+    end
+
+    Note over AIS,API: awaiting_acceptance 状态
+    UI->>AIS: accept() (用户点"采纳")
+    AIS->>API: POST /ai-invocations/{sessionId}/accept
+    API-->>AIS: InvocationResponseDTO (status=awaiting_commit, decision已创建)
+
+    Note over AIS,API: awaiting_commit 状态
+    UI->>AIS: runCommit() (用户点"提交")
+    AIS->>API: POST /ai-invocations/{sessionId}/commits {decision_id}
+    API-->>AIS: InvocationResponseDTO (status=completed, commit.steps[])
+    AIS->>UI: 显示提交步骤时间线
+
+    AIS->>OS: onSessionUpdate listener 通知
+    OS->>OS: handlePlotOutlineInvocationUpdate(payload)
+    OS->>OS: refreshPlotOutlineFromApi() 或 applyPlotOutlineFromResult()
+
+%% 5.2 向导第4步剧情总纲流程
+sequenceDiagram
+    participant User as 用户
+    participant OS as OnboardingStore
+    participant UD as UserDefaults
+    participant SSE as PlotOutline SSE
+    participant API as 后端API
+    participant AIS as AIInvocationStore
+    participant UI as PlotOutlineStep
+
+    User->>UI: 进入第4步
+    UI->>OS: loadPlotOutline()
+
+    OS->>UD: readWizardUiCache(novelId)
+    alt 缓存有效
+        UD-->>OS: plotOutline + invocationSessionId
+        OS->>OS: 恢复plotOutline + sessionId
+        alt 有未完成session
+            OS->>AIS: openPlotOutlineReviewPanel(sessionId)
+        end
+    else 无缓存
+        OS->>SSE: consumePlotOutlineStream(novelId)
+        SSE-->>OS: phase事件 → 更新phaseMessage
+        alt approval_required事件
+            SSE-->>OS: session_id
+            OS->>AIS: openPlotOutlineReviewPanel(sessionId)
+            AIS->>API: GET /ai-invocations/{sessionId}
+            API-->>AIS: InvocationResponseDTO
+            AIS->>UI: 显示审批面板
+            Note over AIS: 用户审批 → accept → commit → completed
+            AIS->>OS: onSessionUpdate 通知
+            OS->>OS: handlePlotOutlineInvocationUpdate
+            OS->>API: GET /novels/{id}/setup/plot-outline
+            API-->>OS: PlotOutlineDTO
+        else done事件
+            SSE-->>OS: plot_outline
+            OS->>OS: 设plotOutline + syncEditable
+        else error事件
+            SSE-->>OS: error message
+            OS->>API: POST /novels/{id}/setup/generate-plot-outline (降级)
+            API-->>OS: GeneratePlotOutlineResponse
+            alt 降级也有invocation_session_id
+                OS->>AIS: openPlotOutlineReviewPanel(sessionId)
+            end
+        end
+    end
+
+    OS->>UD: writeWizardUiCache(plotOutline, sessionId)
+    OS->>UI: @Published plotOutline 更新
+    UI->>UI: 显示可编辑卡片
+
+    User->>UI: 编辑剧情总纲
+    User->>UI: 点"确认修改并继续"
+    UI->>OS: savePlotOutlineEdits()
+    OS->>API: PUT /novels/{id}/setup/plot-outline {plot_outline}
+    API-->>OS: GeneratePlotOutlineResponse
+    OS->>OS: plotOutlineCommitted = true
+    OS->>OS: currentStep = .completed (第5步)
+
+%% 5.3 QualityGuardrailPanel 质量检查流程
+sequenceDiagram
+    participant UI as QualityGuardrailPanel
+    participant MS as MonitorStore
+    participant API as 后端API
+
+    UI->>MS: loadGuardrailCheck(novelId, text: chapterContent)
+    MS->>API: POST /novels/{novelId}/guardrail/check {text, character_names?, mode:"advise"}
+    API-->>MS: GuardrailCheckResponse {overall_score, passed, dimensions[], violations[]}
+    MS->>UI: @Published guardrailResponse 更新
+    UI->>UI: 雷达图从 dimensions[].score 取值
+    UI->>UI: 违规列表从 violations[] 显示
+
+    par 并行加载监控数据
+        UI->>MS: loadTensionCurve(novelId)
+        MS->>API: GET /novels/{novelId}/monitor/tension-curve
+        API-->>MS: TensionCurveResponse {points[], stats?}
+    and
+        UI->>MS: loadVoiceDrift(novelId)
+        MS->>API: GET /novels/{novelId}/monitor/voice-drift
+        API-->>MS: [VoiceDriftApiItem]
+    end

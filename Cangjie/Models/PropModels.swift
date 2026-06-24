@@ -9,7 +9,7 @@ import Foundation
 
 // MARK: - 道具 DTO
 
-/// 道具 DTO，对应后端 PropDTO
+/// 道具 DTO，对应后端 PropDTO — propApi.ts:3-17
 struct PropDTO: Codable, Identifiable, Equatable {
     let id: String
     let novelId: String
@@ -22,6 +22,7 @@ struct PropDTO: Codable, Identifiable, Equatable {
     let resolvedChapter: Int?
     let holderCharacterId: String?
     let attributes: [String: AnyCodable]
+    let isPriorityForChapter: Bool?
     let createdAt: String
     let updatedAt: String
 
@@ -35,6 +36,7 @@ struct PropDTO: Codable, Identifiable, Equatable {
         case resolvedChapter = "resolved_chapter"
         case holderCharacterId = "holder_character_id"
         case attributes
+        case isPriorityForChapter = "is_priority_for_chapter"
         case createdAt = "created_at"
         case updatedAt = "updated_at"
     }
@@ -52,9 +54,31 @@ struct PropDTO: Codable, Identifiable, Equatable {
         self.resolvedChapter = try c.decodeIfPresent(Int.self, forKey: .resolvedChapter)
         self.holderCharacterId = try c.decodeIfPresent(String.self, forKey: .holderCharacterId)
         self.attributes = try c.decodeIfPresent([String: AnyCodable].self, forKey: .attributes) ?? [:]
+        self.isPriorityForChapter = try c.decodeIfPresent(Bool.self, forKey: .isPriorityForChapter)
         self.createdAt = try c.decodeIfPresent(String.self, forKey: .createdAt) ?? ""
         self.updatedAt = try c.decodeIfPresent(String.self, forKey: .updatedAt) ?? ""
     }
+}
+
+// MARK: - 道具分类枚举（propApi.ts:3-17）
+
+/// 道具分类 — propApi.ts:3-17
+enum PropCategory: String, Codable, CaseIterable {
+    case weapon = "WEAPON"
+    case artifact = "ARTIFACT"
+    case tool = "TOOL"
+    case consumable = "CONSUMABLE"
+    case token = "TOKEN"
+    case other = "OTHER"
+}
+
+/// 道具生命周期状态 — propApi.ts:3-17
+enum PropLifecycleState: String, Codable, CaseIterable {
+    case dormant = "DORMANT"
+    case introduced = "INTRODUCED"
+    case active = "ACTIVE"
+    case damaged = "DAMAGED"
+    case resolved = "RESOLVED"
 }
 
 // MARK: - 道具事件 DTO

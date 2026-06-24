@@ -137,6 +137,88 @@ struct ForeshadowStats: Codable, Equatable {
     }
 }
 
+// MARK: - 质量护栏（engineCore.ts:100-131）
+
+/// 质量护栏检查请求 — engineCore.ts:100-107
+struct GuardrailCheckRequest: Codable {
+    let text: String
+    var characterNames: [String]?
+    var chapterGoal: String?
+    var era: String?
+    var sceneType: String?
+    var mode: String? // "advise" | "enforce"
+
+    enum CodingKeys: String, CodingKey {
+        case text
+        case characterNames = "character_names"
+        case chapterGoal = "chapter_goal"
+        case era
+        case sceneType = "scene_type"
+        case mode
+    }
+}
+
+/// 质量护栏维度评分 — engineCore.ts:109-114
+struct GuardrailDimensionScore: Codable, Identifiable, Equatable {
+    var id: String { key }
+    let name: String
+    let key: String
+    let score: Double
+    let weight: Double
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.name = try c.decodeIfPresent(String.self, forKey: .name) ?? ""
+        self.key = try c.decodeIfPresent(String.self, forKey: .key) ?? ""
+        self.score = try c.decodeIfPresent(Double.self, forKey: .score) ?? 0.0
+        self.weight = try c.decodeIfPresent(Double.self, forKey: .weight) ?? 1.0
+    }
+}
+
+/// 质量护栏违规 — engineCore.ts:116-124
+struct GuardrailViolationDTO: Codable, Identifiable, Equatable {
+    var id: String { "\(dimension)_\(type)_\(severity)" }
+    let dimension: String
+    let type: String
+    let severity: String
+    let description: String
+    let original: String
+    let suggestion: String
+    let character: String
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.dimension = try c.decodeIfPresent(String.self, forKey: .dimension) ?? ""
+        self.type = try c.decodeIfPresent(String.self, forKey: .type) ?? ""
+        self.severity = try c.decodeIfPresent(String.self, forKey: .severity) ?? ""
+        self.description = try c.decodeIfPresent(String.self, forKey: .description) ?? ""
+        self.original = try c.decodeIfPresent(String.self, forKey: .original) ?? ""
+        self.suggestion = try c.decodeIfPresent(String.self, forKey: .suggestion) ?? ""
+        self.character = try c.decodeIfPresent(String.self, forKey: .character) ?? ""
+    }
+}
+
+/// 质量护栏检查响应 — engineCore.ts:126-131
+struct GuardrailCheckResponse: Codable, Equatable {
+    let overallScore: Double
+    let passed: Bool
+    let dimensions: [GuardrailDimensionScore]
+    let violations: [GuardrailViolationDTO]
+
+    enum CodingKeys: String, CodingKey {
+        case overallScore = "overall_score"
+        case passed, dimensions, violations
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.overallScore = try c.decodeIfPresent(Double.self, forKey: .overallScore) ?? 0.0
+        self.passed = try c.decodeIfPresent(Bool.self, forKey: .passed) ?? false
+        self.dimensions = try c.decodeIfPresent([GuardrailDimensionScore].self, forKey: .dimensions) ?? []
+        self.violations = try c.decodeIfPresent([GuardrailViolationDTO].self, forKey: .violations) ?? []
+    }
+}
+
 // MARK: - 监控快照
 
 /// 监控快照，聚合所有监控数据用于展示

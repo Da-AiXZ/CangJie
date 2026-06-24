@@ -2,10 +2,10 @@
 //  OnboardingWizardView.swift
 //  Cangjie
 //
-//  全屏 TabView(.page) 三步向导：Bible 流式生成 → 角色创建 → 地点创建。
-//  顶部进度指示，底部上一步/下一步按钮，调 OnboardingStore。
+//  全屏 TabView(.page) 五步向导：Bible 流式生成 → 角色创建 → 地点创建 → 剧情总纲 → 完成。
 //  对齐 Vue3 NovelSetupGuide.vue:12-18 的 Steps + 向导交互。
-//  Q4决策：去掉 macroPlanning 步骤的 UI 入口，保留 Store 中 macroPlanning 逻辑供工作台 MacroPlanModal 使用。
+//  阶段3：新增第4步剧情总纲（PlotOutlineStep）。
+//  Q4决策：maxVisitedStep 模式（顺序前进+后退到已到步骤）。
 //
 
 import SwiftUI
@@ -21,8 +21,8 @@ struct OnboardingWizardView: View {
 
     @StateObject private var store = OnboardingStore()
 
-    /// 向导步骤列表（Q4决策：3步，不含 macroPlanning）
-    private let wizardSteps: [OnboardingStep] = [.bibleGeneration, .characterSetup, .locationSetup]
+    /// 向导步骤列表（5步：设定→角色→地点→剧情总纲→完成）
+    private let wizardSteps: [OnboardingStep] = [.bibleGeneration, .characterSetup, .locationSetup, .plotOutline]
 
     var body: some View {
         NavigationStack {
@@ -30,7 +30,7 @@ struct OnboardingWizardView: View {
                 // 顶部进度指示
                 progressIndicator
 
-                // 步骤内容（Q4决策：3步 worldbuilding → characters → locations）
+                // 步骤内容
                 TabView(selection: $store.currentStep) {
                     BibleStreamingStep()
                         .tag(OnboardingStep.bibleGeneration)
@@ -40,6 +40,30 @@ struct OnboardingWizardView: View {
 
                     LocationSetupStep()
                         .tag(OnboardingStep.locationSetup)
+
+                    PlotOutlineStep()
+                        .tag(OnboardingStep.plotOutline)
+
+                    // 第5步：完成页
+                    VStack(spacing: 20) {
+                        Image(systemName: "checkmark.circle.fill")
+                            .font(.system(size: 60))
+                            .foregroundColor(.green)
+                        Text("向导已完成")
+                            .font(.title2)
+                            .fontWeight(.semibold)
+                        Text("你可以进入工作台开始写作了。")
+                            .foregroundColor(.secondary)
+                        Button("进入工作台") {
+                            if let novelId = store.createdNovel?.id {
+                                WizardUiCache.markCompleted(novelId: novelId)
+                            }
+                            onComplete()
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.large)
+                    }
+                    .tag(OnboardingStep.completed)
                 }
                 .tabViewStyle(.page(indexDisplayMode: .never))
 
@@ -58,18 +82,24 @@ struct OnboardingWizardView: View {
             .onAppear {
                 store.createdNovel = novel
                 store.currentStep = .bibleGeneration
+                store.maxVisitedStep = 1
             }
             .alert("错误", isPresented: .constant(store.errorMessage != nil)) {
                 Button("确定") { store.errorMessage = nil }
             } message: {
                 Text(store.errorMessage ?? "")
             }
-            // 【修复】必须将 store 注入环境，否则子视图的 @EnvironmentObject 找不到 store
+            // AI 审批面板（Sheet）
+            .sheet(isPresented: $store.aiInvocationStore.visible) {
+                NavigationStack {
+                    AIInvocationReviewPanel(store: store.aiInvocationStore)
+                }
+            }
             .environmentObject(store)
         }
     }
 
-    // MARK: - 进度指示
+    // MARK: - 进度指示（5步）
 
     private var progressIndicator: some View {
         HStack(spacing: Theme.Spacing.xs) {
@@ -109,59 +139,52 @@ struct OnboardingWizardView: View {
         HStack {
             if store.currentStep != .bibleGeneration {
                 Button("上一步") {
-                    goToPreviousStep()
+                    store.handlePrev()
                 }
                 .buttonStyle(.bordered)
+                .disabled(store.isWizardGenerating)
             }
 
             Spacer()
 
-            if store.currentStep == .locationSetup {
-                // 最后一步：完成按钮
-                Button("完成") {
+            if store.currentStep == .plotOutline {
+                // 第4步：确认修改并继续
+                Button("确认修改并继续") {
                     Task {
-                        // 保存最终 Bible（NovelSetupGuide.vue:1912-1931 updateBible）
-                        await store.updateBible()
-                        onComplete()
+                        let success = await store.savePlotOutlineEdits()
+                        if success {
+                            store.handleNext()
+                        }
                     }
                 }
                 .buttonStyle(.borderedProminent)
                 .controlSize(.large)
-                .disabled(store.isProcessing || store.generatingLocations)
-            } else {
-                Button("下一步") {
-                    goToNextStep()
+                .disabled(store.isProcessing || store.plotOutlineBusy || store.plotOutline == nil)
+            } else if store.currentStep == .completed {
+                // 第5步：进入工作台
+                Button("进入工作台") {
+                    if let novelId = store.createdNovel?.id {
+                        WizardUiCache.markCompleted(novelId: novelId)
+                    }
+                    onComplete()
                 }
                 .buttonStyle(.borderedProminent)
                 .controlSize(.large)
-                .disabled(store.isProcessing || store.generatingBible || store.generatingCharacters)
+            } else {
+                Button("下一步") {
+                    Task {
+                        // 保存当前编辑（Q4决策：向导每步"下一步"时调用保存）
+                        await store.updateBible()
+                        store.handleNext()
+                    }
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.large)
+                .disabled(store.isProcessing || store.isWizardGenerating)
             }
         }
         .padding(Theme.Spacing.lg)
         .background(Theme.secondaryBackground)
-    }
-
-    // MARK: - 步骤导航
-
-    /// 上一步
-    private func goToPreviousStep() {
-        guard let currentIndex = wizardSteps.firstIndex(of: store.currentStep) else { return }
-        if currentIndex > 0 {
-            store.currentStep = wizardSteps[currentIndex - 1]
-        }
-    }
-
-    /// 下一步（每步"下一步"时调 updateBible 保存，NovelSetupGuide.vue:2076-2114 handleNext）
-    private func goToNextStep() {
-        Task {
-            // 保存当前编辑（Q4决策：向导每步"下一步"时调用保存）
-            await store.updateBible()
-
-            guard let currentIndex = wizardSteps.firstIndex(of: store.currentStep) else { return }
-            if currentIndex < wizardSteps.count - 1 {
-                store.currentStep = wizardSteps[currentIndex + 1]
-            }
-        }
     }
 
     // MARK: - 辅助
@@ -174,5 +197,19 @@ struct OnboardingWizardView: View {
         } else {
             return Theme.textTertiary.opacity(0.3)
         }
+    }
+}
+
+// MARK: - 辅助类型
+
+/// 空请求体（用于 POST body: {}）
+struct EmptyBody: Codable {}
+
+/// 剧情总纲保存请求
+struct PlotOutlineSaveRequest: Codable {
+    let plotOutline: PlotOutlineDTO
+
+    enum CodingKeys: String, CodingKey {
+        case plotOutline = "plot_outline"
     }
 }

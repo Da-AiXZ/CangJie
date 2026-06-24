@@ -631,4 +631,99 @@ extension SSEStreamRegistry {
         errorHandlers.removeValue(forKey: key)
         lock.unlock()
     }
+
+    // MARK: - 剧情总纲 SSE 流（阶段3, workflow.ts:682-771）
+
+    /// 构建剧情总纲 SSE URL — workflow.ts:682-771
+    /// POST /api/v1/novels/{novelId}/setup/generate-plot-outline-stream
+    ///
+    /// - Parameter novelId: 小说 ID
+    /// - Returns: SSE 端点 URL
+    func plotOutlineStreamURL(novelId: String) -> URL? {
+        let path = "/novels/\(novelId)/setup/generate-plot-outline-stream"
+        return config.fullURL(path: path, prefix: APIConfig.apiV1Prefix)
+    }
+
+    /// 启动剧情总纲 SSE 流 — workflow.ts:682-771 consumePlotOutlineStream
+    /// data-only 格式，4类事件：phase/approval_required/done/error
+    ///
+    /// - Parameters:
+    ///   - novelId: 小说 ID
+    ///   - onEvent: 事件回调
+    ///   - onError: 错误回调
+    /// - Returns: 是否成功启动
+    @discardableResult
+    func startPlotOutlineStream(
+        novelId: String,
+        onEvent: @escaping (SSEEvent) -> Void,
+        onError: ((Error) -> Void)? = nil
+    ) -> Bool {
+        Logger.sse.info("启动剧情总纲 SSE 流 [novel: \(novelId)]")
+
+        guard let url = plotOutlineStreamURL(novelId: novelId) else {
+            Logger.sse.error("SSE URL 构建失败: 剧情总纲流")
+            onError?(APIError.invalidURL)
+            return false
+        }
+
+        let key = "plotOutlineStream:\(novelId)"
+
+        lock.lock()
+
+        if let oldConnection = connections[key] {
+            oldConnection.cancel()
+            connections.removeValue(forKey: key)
+        }
+
+        let bodyData = try? JSONSerialization.data(withJSONObject: [String: Any](), options: [])
+
+        let connection = SSEConnection(
+            streamType: .bibleGenerateStream, // 复用 POST SSE 类型
+            url: url,
+            client: client,
+            method: "POST",
+            body: bodyData
+        )
+        connections[key] = connection
+        eventHandlers[key] = onEvent
+        stateHandlers[key] = nil
+        errorHandlers[key] = onError
+
+        activeNovelIds.insert(novelId)
+        if activeStreams[novelId] == nil {
+            activeStreams[novelId] = []
+        }
+        activeStreams[novelId]?.insert(.bibleGenerateStream)
+
+        lock.unlock()
+
+        connection.start(
+            onEvent: { [weak self] event in
+                self?.handleEvent(event, key: key)
+            },
+            onStateChange: { [weak self] state in
+                self?.handleStateChange(state, key: key)
+            },
+            onError: { [weak self] error in
+                self?.handleError(error, key: key)
+            }
+        )
+
+        return true
+    }
+
+    /// 取消剧情总纲 SSE 流
+    /// - Parameter novelId: 小说 ID
+    func cancelPlotOutlineStream(novelId: String) {
+        let key = "plotOutlineStream:\(novelId)"
+        Logger.sse.info("取消剧情总纲 SSE 流: [novel: \(novelId)]")
+
+        lock.lock()
+        connections[key]?.cancel()
+        connections.removeValue(forKey: key)
+        eventHandlers.removeValue(forKey: key)
+        stateHandlers.removeValue(forKey: key)
+        errorHandlers.removeValue(forKey: key)
+        lock.unlock()
+    }
 }

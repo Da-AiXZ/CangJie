@@ -1,0 +1,46 @@
+sequenceDiagram
+    participant UI as AutopilotControlPanel
+    participant Store as AutopilotStore
+    participant API as APIClient
+    participant CB as CircuitBreaker API
+
+    Note over UI,Store: 模块 2.4 — 启动参数补全
+    UI->>UI: 用户配置 targetChapters / maxAutoChapters / autoApproveMode
+    UI->>Store: startAutopilot(novelId, targetChapters, targetWordsPerChapter, maxAutoChapters, autoApproveMode)
+    
+    par 与 start 并行
+        Store->>API: POST /autopilot/{id}/start {max_auto_chapters, target_chapters, target_words_per_chapter}
+        API-->>Store: 200 OK
+    and 仅当值变化时
+        Store->>API: PATCH /novels/{id}/auto-approve-mode {auto_approve_mode: Bool}
+        API-->>Store: 200 OK
+    end
+    
+    Store->>Store: startSSEStreams(novelId)
+    Store->>Store: startStatusPolling(novelId) ← 自适应退避
+
+    Note over Store,API: 模块 2.5 — 自适应轮询
+    loop 轮询循环
+        Store->>API: GET /autopilot/{id}/status
+        alt 成功
+            API-->>Store: 200 status JSON
+            Store->>Store: failureCount = 0
+            Store->>Store: delay = 4s × 2^min(0,8) = 4s
+        alt 404 Not Found
+            API-->>Store: 404
+            Store->>Store: stoppedForNotFound = true, 停止轮询
+        else 其他错误
+            API-->>Store: 5xx / 网络错误
+            Store->>Store: failureCount += 1
+            Store->>Store: delay = 4s × 2^min(fc,8), 上限60s
+        end
+        Store->>Store: sleep(delay)
+    end
+
+    Note over UI,CB: 模块 2.1 — 熔断器字段重写
+    UI->>Store: refreshCircuitBreaker(novelId)
+    Store->>CB: GET /autopilot/{id}/circuit-breaker
+    CB-->>Store: {status, error_count, max_errors, last_error:{message,timestamp,context?}, error_history:[...]}
+    Store->>Store: decode AutopilotCircuitBreakerData
+    Store-->>UI: circuitBreaker 更新
+    UI->>UI: 显示 status / errorCount/maxErrors / lastError.message / errorHistory

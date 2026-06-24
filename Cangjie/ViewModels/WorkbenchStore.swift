@@ -71,6 +71,10 @@ final class WorkbenchStore: ObservableObject {
     /// 原版 workflow.ts:446,489 在这些事件中 return true 终止流，iOS 需显式调用 cancel
     private var currentGenerateNovelId: String?
 
+    /// 阶段3：AI Invocation Store（审批面板）
+    /// 用于单章生成 approval_required 事件接线
+    @Published var aiInvocationStore: AIInvocationStore = AIInvocationStore()
+
     // MARK: - 依赖
 
     private let apiClient: APIClient
@@ -355,17 +359,29 @@ final class WorkbenchStore: ObservableObject {
 
         case "approval_required":
             // approval_required 事件（workflow.ts:437-446）：终止流
+            // 阶段3接线：打开 AI 审批面板 — aiInvocationStore.openFromResponse
             let sessionId = dict["session_id"] as? String ?? ""
             let status = dict["status"] as? String
             let nextAction = dict["next_action"] as? String
             Logger.engine.info("单章生成需要审批: sessionId=\(sessionId)")
-            // 阶段1：显示提示，不阻塞
-            errorMessage = "需要AI审批（审批面板后续实现）"
-            if let status = status {
-                errorMessage = "需要AI审批 [\(status)]"
+            // 阶段3：接线到 AI 审批面板
+            if !sessionId.isEmpty {
+                // 先用 GET 获取完整 session 数据，再 openFromResponse
+                Task {
+                    do {
+                        let payload: InvocationResponseDTO = try await APIClient.shared.request(
+                            APIEndpoint.AIInvocation.get(sessionId: sessionId)
+                        )
+                        await MainActor.run {
+                            aiInvocationStore.openFromResponse(payload)
+                        }
+                    } catch {
+                        Logger.engine.error("审批面板打开失败: \(error.localizedDescription)")
+                    }
+                }
             }
             isGeneratingChapter = false
-            // 【返工M5】显式 cancel SSE（原版 workflow.ts:446 return true 终止流）
+            // 显式 cancel SSE（原版 workflow.ts:446 return true 终止流）
             if let nid = currentGenerateNovelId {
                 sseRegistry.cancelGenerateChapterStream(novelId: nid)
             }

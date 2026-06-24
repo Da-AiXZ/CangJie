@@ -10,13 +10,14 @@
 import SwiftUI
 import Foundation
 
-/// 新书向导步骤（Q4决策：3步，去掉 macroPlanning UI 入口）
+/// 新书向导步骤 — NovelSetupGuide.vue:16-17
+/// Q4决策：maxVisitedStep 模式（顺序前进+后退到已到步骤）
 enum OnboardingStep: Int, CaseIterable, Comparable {
     case novelInfo = 0
     case bibleGeneration = 1
     case characterSetup = 2
     case locationSetup = 3
-    case macroPlanning = 4  // 保留枚举值（工作台 MacroPlanModal 仍在用），向导 UI 不走此步
+    case plotOutline = 4    // 阶段3新增：剧情总纲（替换 macroPlanning 的向导 UI 入口）
     case completed = 5
 
     static func < (lhs: OnboardingStep, rhs: OnboardingStep) -> Bool {
@@ -29,7 +30,7 @@ enum OnboardingStep: Int, CaseIterable, Comparable {
         case .bibleGeneration: return "设定生成"
         case .characterSetup: return "角色确认"
         case .locationSetup: return "地点确认"
-        case .macroPlanning: return "宏观规划"
+        case .plotOutline: return "剧情总纲"
         case .completed: return "完成"
         }
     }
@@ -154,6 +155,41 @@ final class OnboardingStore: ObservableObject {
 
     /// 错误信息
     @Published var errorMessage: String?
+
+    // MARK: - 阶段3新增：剧情总纲状态（NovelSetupGuide.vue:1068-1076）
+
+    /// Q4决策：maxVisitedStep 模式 — NovelSetupGuide.vue:2055
+    @Published var maxVisitedStep: Int = 1
+
+    /// 剧情总纲 — NovelSetupGuide.vue:1068
+    @Published var plotOutline: PlotOutlineDTO? = nil
+
+    /// 剧情总纲编辑副本 — NovelSetupGuide.vue:1074
+    @Published var editablePlotOutline: PlotOutlineDTO = createEmptyPlotOutline()
+
+    /// 是否正在生成剧情总纲 — NovelSetupGuide.vue:1069
+    @Published var plotOutlineGenerating: Bool = false
+
+    /// 剧情总纲错误 — NovelSetupGuide.vue:1070
+    @Published var plotOutlineError: String = ""
+
+    /// 剧情总纲是否已提交 — NovelSetupGuide.vue:1071
+    @Published var plotOutlineCommitted: Bool = false
+
+    /// 剧情总纲审批 session ID — NovelSetupGuide.vue:1072
+    @Published var plotOutlineSessionId: String = ""
+
+    /// 是否从缓存恢复 — NovelSetupGuide.vue:1073
+    @Published var step4RestoredFromCache: Bool = false
+
+    /// 是否正在同步草稿 — NovelSetupGuide.vue:1075
+    @Published var syncingPlotOutlineDraft: Bool = false
+
+    /// 剧情总纲状态 — NovelSetupGuide.vue:1076
+    @Published var plotOutlineStatus: PlotOutlineStatus = .idle
+
+    /// AI Invocation Store（审批面板）
+    @Published var aiInvocationStore: AIInvocationStore = AIInvocationStore()
 
     // MARK: - 依赖
 
@@ -424,18 +460,17 @@ final class OnboardingStore: ObservableObject {
 
         case "approval_required":
             // data→approval_required（bible.ts:463-474）
-            // Q1/Q2决策：显示提示，不阻塞流程
+            // 阶段3接线：打开 AI 审批面板 — NovelSetupGuide.vue:1548-1550
             let sessionId = dict["session_id"] as? String ?? ""
             let status = dict["status"] as? String
             let nextAction = dict["next_action"] as? String
             let stageStr = dict["stage"] as? String
 
             if !sessionId.isEmpty {
-                approvalMessage = "需要AI审批（审批面板后续实现）"
-                if let status = status {
-                    approvalMessage += " [\(status)]"
-                }
+                approvalMessage = ""
                 Logger.engine.info("Bible SSE approval_required: sessionId=\(sessionId), status=\(status ?? ""), nextAction=\(nextAction ?? ""), stage=\(stageStr ?? "")")
+                // 阶段3：接线到 AI 审批面板
+                handleBibleApprovalRequired(sessionId: sessionId, stage: stage)
             }
 
         default:
@@ -704,6 +739,523 @@ final class OnboardingStore: ObservableObject {
         currentStep = .completed
     }
 
+    // MARK: - 阶段3：步骤导航（Q4 maxVisitedStep 模式）— NovelSetupGuide.vue:2054-2074
+
+    /// 跳转到指定步骤 — NovelSetupGuide.vue:2058-2065
+    /// Q4决策：只允许跳到 ≤ maxVisitedStep 的步骤；生成中禁止切换
+    func goToStep(_ step: OnboardingStep) {
+        guard step.rawValue >= 1 && step.rawValue <= 5 else { return }
+        guard step.rawValue <= maxVisitedStep else { return }
+        if step == currentStep { return }
+        if isWizardGenerating { return }
+        currentStep = step
+    }
+
+    /// 上一步 — NovelSetupGuide.vue:2068-2074
+    func handlePrev() {
+        if currentStep.rawValue > 1 && !isWizardGenerating {
+            if let prev = OnboardingStep(rawValue: currentStep.rawValue - 1) {
+                currentStep = prev
+            }
+        }
+    }
+
+    /// 下一步 — NovelSetupGuide.vue:2076-2114 handleNext
+    func handleNext() {
+        if isWizardGenerating { return }
+        let nextRaw = currentStep.rawValue + 1
+        guard let nextStep = OnboardingStep(rawValue: nextRaw) else { return }
+        currentStep = nextStep
+        maxVisitedStep = max(maxVisitedStep, nextRaw)
+        WizardUiCache.setLastStep(novelId: createdNovel?.id ?? "", step: nextRaw)
+    }
+
+    /// 是否正在生成（包含剧情总纲） — NovelSetupGuide.vue:1093-1095
+    var isWizardGenerating: Bool {
+        return generatingBible || generatingCharacters || generatingLocations || plotOutlineBusy
+    }
+
+    /// 剧情总纲是否忙 — NovelSetupGuide.vue:1089-1092
+    var plotOutlineBusy: Bool {
+        return plotOutlineGenerating || (plotOutlineStatus != .idle && plotOutlineStatus != .done && plotOutlineStatus != .error)
+    }
+
+    /// 剧情总纲状态消息 — NovelSetupGuide.vue:1096-1105
+    var plotOutlineStatusMessage: String {
+        if !phaseMessage.isEmpty { return phaseMessage }
+        switch plotOutlineStatus {
+        case .creating: return "正在创建剧情总纲任务..."
+        case .reviewing: return "正在确认剧情总纲生成..."
+        case .generating: return "AI 正在生成剧情总纲..."
+        case .committing: return "正在写入剧情总纲..."
+        case .done: return ""
+        case .error: return plotOutlineError
+        case .idle: return ""
+        }
+    }
+
+    /// 剧情总纲实时预览 — NovelSetupGuide.vue:1106-1112
+    var plotOutlineLivePreview: String {
+        guard !plotOutlineSessionId.isEmpty else { return "" }
+        guard aiInvocationStore.session?.id == plotOutlineSessionId else { return "" }
+        let text = aiInvocationStore.liveAttemptDisplay.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return "" }
+        return text.count > 1000 ? String(text.suffix(1000)) : text
+    }
+
+    /// 剧情总纲进度项 — NovelSetupGuide.vue:1120-1132
+    var plotOutlineProgressItems: [PlotOutlineProgressItem] {
+        let current = plotOutlineProgressIndex
+        let items = [
+            PlotOutlineProgressItem(key: "context", label: "汇总设定", desc: "读取世界观、人物与地图", state: .pending),
+            PlotOutlineProgressItem(key: "outline", label: "推演主线", desc: "生成核心冲突与故事走向", state: .pending),
+            PlotOutlineProgressItem(key: "stage", label: "拆分阶段", desc: "规划阶段任务与章节范围", state: .pending),
+            PlotOutlineProgressItem(key: "commit", label: "写入结果", desc: "回填可编辑的剧情总纲", state: .pending),
+        ]
+        return items.enumerated().map { (index, item) in
+            var modified = item
+            if current > index + 1 { modified.state = .done }
+            else if current == index + 1 { modified.state = .active }
+            else { modified.state = .pending }
+            return modified
+        }
+    }
+
+    /// 剧情总纲进度索引 — NovelSetupGuide.vue:1113-1119
+    private var plotOutlineProgressIndex: Int {
+        if plotOutlineStatus == .done { return 4 }
+        if plotOutlineStatus == .committing { return 3 }
+        if plotOutlineStatus == .generating || plotOutlineStatus == .reviewing { return 2 }
+        if plotOutlineStatus == .creating { return 1 }
+        return plotOutlineBusy ? 1 : 0
+    }
+
+    // MARK: - 阶段3：剧情总纲核心方法（NovelSetupGuide.vue:1068-1454）
+
+    /// 加载剧情总纲 — NovelSetupGuide.vue:1328-1422
+    func loadPlotOutline(forceNew: Bool = false) async {
+        guard let novelId = createdNovel?.id else { return }
+        step4RestoredFromCache = false
+        plotOutlineError = ""
+        plotOutlineStatus = .creating
+        phaseMessage = "正在创建剧情总纲任务..."
+
+        // 读取缓存
+        let cached = forceNew ? nil : WizardUiCache.read(novelId: novelId)
+        let cachedPlotOutline = (!forceNew && cached != nil && WizardUiCache.isPlotOutlineFresh(cached)) ? cached?.plotOutline : nil
+
+        if let cachedPlotOutline = cachedPlotOutline {
+            // 缓存有效：恢复
+            let normalized = normalizePlotOutlineShape(cachedPlotOutline, totalChapters: targetChapters) ?? cachedPlotOutline
+            plotOutline = normalized
+            syncEditablePlotOutline(normalized)
+            plotOutlineSessionId = cached?.invocationSessionId ?? ""
+            step4RestoredFromCache = true
+            resetPlotOutlineInvocationState()
+            if !plotOutlineSessionId.isEmpty && !plotOutlineCommitted {
+                await openPlotOutlineReviewPanel(sessionId: plotOutlineSessionId)
+            }
+            return
+        }
+
+        plotOutlineGenerating = true
+        if forceNew {
+            plotOutline = nil
+            syncEditablePlotOutline(nil)
+            plotOutlineCommitted = false
+            plotOutlineSessionId = ""
+            WizardUiCache.write(novelId: novelId, patch: WizardUiCachePatch(clearPlotOutline: true, clearInvocationSessionId: true))
+        }
+
+        // 尝试 SSE 流式生成
+        do {
+            try await consumePlotOutlineStream(novelId: novelId)
+            if let outline = plotOutline {
+                WizardUiCache.write(novelId: novelId, patch: WizardUiCachePatch(plotOutline: outline))
+            }
+        } catch {
+            // 降级 POST
+            do {
+                let response: GeneratePlotOutlineResponse = try await apiClient.request(
+                    APIEndpoint.Workflow.generatePlotOutline(novelId: novelId),
+                    body: EmptyBody()
+                )
+                if let outline = response.plotOutline {
+                    let normalized = normalizePlotOutlineShape(outline, totalChapters: targetChapters) ?? outline
+                    plotOutline = normalized
+                    syncEditablePlotOutline(normalized)
+                }
+                if let sessionId = response.invocationSessionId, !sessionId.isEmpty {
+                    plotOutlineSessionId = sessionId
+                    await openPlotOutlineReviewPanel(sessionId: sessionId)
+                }
+                if let outline = plotOutline {
+                    WizardUiCache.write(novelId: novelId, patch: WizardUiCachePatch(plotOutline: outline))
+                }
+            } catch {
+                plotOutlineError = "生成失败: \(error.localizedDescription)"
+                plotOutlineGenerating = false
+                plotOutlineStatus = .error
+            }
+        }
+
+        if plotOutline != nil || !plotOutlineError.isEmpty || plotOutlineSessionId.isEmpty {
+            resetPlotOutlineInvocationState()
+        }
+    }
+
+    /// 刷新剧情总纲 — NovelSetupGuide.vue:1424-1426
+    func refreshPlotOutline() async {
+        await loadPlotOutline(forceNew: true)
+    }
+
+    /// SSE 流式消费剧情总纲 — workflow.ts:682-771 consumePlotOutlineStream
+    private func consumePlotOutlineStream(novelId: String) async throws {
+        return try await withCheckedThrowingContinuation { continuation in
+            // 构建 SSE URL
+            guard let url = APIConfig.shared.fullURL(
+                path: "/novels/\(novelId)/setup/generate-plot-outline-stream",
+                prefix: APIConfig.apiV1Prefix
+            ) else {
+                continuation.resume(throwing: APIError.invalidURL)
+                return
+            }
+
+            let bodyData = try? JSONSerialization.data(withJSONObject: [String: Any](), options: [])
+            let request = APIClient.shared.makeSSEPostRequest(url: url, body: bodyData)
+            let session = URLSession(configuration: APIConfig.makeSSEURLSessionConfiguration())
+
+            var streamError: String = ""
+            var didResume = false
+
+            let task = session.dataTask(with: request) { [weak self] data, response, error in
+                guard let self = self else {
+                    if !didResume { continuation.resume(); didResume = true }
+                    return
+                }
+                if let error = error {
+                    streamError = error.localizedDescription
+                    if !didResume { continuation.resume(); didResume = true }
+                    return
+                }
+                // 解析 SSE 帧从 data
+                guard let data = data, let responseString = String(data: data, encoding: .utf8) else {
+                    if !didResume { continuation.resume(); didResume = true }
+                    return
+                }
+                // 按 \n\n 分帧
+                let frames = responseString.components(separatedBy: "\n\n")
+                Task { @MainActor in
+                    for frame in frames {
+                        self.handlePlotOutlineSSEFrame(frame, novelId: novelId)
+                    }
+                    if !streamError.isEmpty && self.plotOutline == nil {
+                        if !didResume { continuation.resume(throwing: APIError.unknown(streamError)); didResume = true }
+                    } else {
+                        if !didResume { continuation.resume(); didResume = true }
+                    }
+                }
+            }
+            task.resume()
+        }
+    }
+
+    /// 处理剧情总纲 SSE 帧 — workflow.ts:717-751
+    private func handlePlotOutlineSSEFrame(_ frame: String, novelId: String) {
+        let lines = frame.components(separatedBy: "\n")
+        var dataLines: [String] = []
+        for line in lines {
+            if line.hasPrefix("data:") {
+                let value = String(line.dropFirst(5)).trimmingCharacters(in: .whitespaces)
+                dataLines.append(value)
+            }
+        }
+        guard !dataLines.isEmpty else { return }
+        let dataString = dataLines.joined(separator: "\n")
+        guard let data = dataString.data(using: .utf8),
+              let dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return }
+        let type = dict["type"] as? String ?? ""
+
+        switch type {
+        case "phase":
+            // workflow.ts:717-724
+            let message = dict["message"] as? String ?? ""
+            phaseMessage = message
+
+        case "approval_required":
+            // workflow.ts:725-736
+            let sessionId = dict["session_id"] as? String ?? ""
+            let status = dict["status"] as? String
+            let nextAction = dict["next_action"] as? String
+            if !sessionId.isEmpty {
+                plotOutlineSessionId = sessionId
+                Task { await openPlotOutlineReviewPanel(sessionId: sessionId) }
+            }
+
+        case "done":
+            // workflow.ts:737-744
+            if let outlineDict = dict["plot_outline"] as? [String: Any] {
+                let normalized = normalizePlotOutlineShape(outlineDict, totalChapters: targetChapters)
+                if let normalized = normalized {
+                    plotOutline = normalized
+                    syncEditablePlotOutline(normalized)
+                }
+            }
+
+        case "error":
+            // workflow.ts:745-751
+            let message = dict["message"] as? String ?? "流式生成失败"
+            plotOutlineError = message
+
+        default:
+            break
+        }
+    }
+
+    /// 打开审批面板 — NovelSetupGuide.vue:1296-1326
+    func openPlotOutlineReviewPanel(sessionId: String) async {
+        guard !sessionId.isEmpty else { return }
+        plotOutlineSessionId = sessionId
+        plotOutlineGenerating = true
+        if plotOutlineStatus == .idle || plotOutlineStatus == .done || plotOutlineStatus == .error {
+            plotOutlineStatus = .creating
+            phaseMessage = "正在创建剧情总纲任务..."
+        }
+        // 写入缓存
+        if let novelId = createdNovel?.id {
+            WizardUiCache.write(novelId: novelId, patch: WizardUiCachePatch(invocationSessionId: sessionId))
+        }
+        // 注册监听
+        let unsub = aiInvocationStore.onSessionUpdate(sessionId: sessionId) { [weak self] payload in
+            Task { @MainActor in
+                await self?.handlePlotOutlineInvocationUpdate(payload)
+            }
+        }
+        _ = unsub // 保留取消闭包
+        do {
+            try await aiInvocationStore.open(sessionId: sessionId)
+            if aiInvocationStore.session?.id == sessionId {
+                let payload = InvocationResponseDTO(
+                    session: aiInvocationStore.session ?? InvocationSessionDTO(),
+                    attempt: aiInvocationStore.attempt,
+                    decision: aiInvocationStore.decision,
+                    commit: aiInvocationStore.commit,
+                    nextAction: aiInvocationStore.nextAction
+                )
+                await handlePlotOutlineInvocationUpdate(payload)
+            }
+        } catch {
+            failPlotOutlineInvocation(error.localizedDescription)
+        }
+    }
+
+    /// 处理审批更新 — NovelSetupGuide.vue:1271-1294
+    private func handlePlotOutlineInvocationUpdate(_ payload: InvocationResponseDTO) async {
+        updatePlotOutlineStatusFromInvocation(payload)
+
+        // commit.result 有值时尝试提取
+        if let result = payload.commit?.result {
+            if let resultDict = result as? [String: Any] {
+                let bindings = payload.session.outputBindings ?? []
+                if applyPlotOutlineFromResult(result: resultDict, bindings: bindings) {
+                    return
+                }
+            }
+        }
+
+        let commitStatus = payload.commit?.status ?? ""
+        let sessionStatus = payload.session.status
+
+        if commitStatus == "failed" || sessionStatus == "failed" || sessionStatus == "cancelled" || sessionStatus == "blocked" {
+            failPlotOutlineInvocation(payload.commit?.error ?? "剧情总纲生成失败，请重试")
+            return
+        }
+
+        if commitStatus == "succeeded" || sessionStatus == "completed" {
+            let refreshed = await refreshPlotOutlineFromApi()
+            if refreshed {
+                finishPlotOutlineInvocation()
+            } else {
+                failPlotOutlineInvocation("剧情总纲生成完成，但未能读取结果，请重试")
+            }
+        }
+    }
+
+    /// 从审批状态更新剧情总纲状态 — NovelSetupGuide.vue:1205-1238
+    private func updatePlotOutlineStatusFromInvocation(_ payload: InvocationResponseDTO) {
+        let commitStatus = payload.commit?.status ?? ""
+        let sessionStatus = payload.session.status
+
+        if commitStatus == "succeeded" || sessionStatus == "completed" {
+            plotOutlineStatus = .committing
+            phaseMessage = "正在写入剧情总纲..."
+            return
+        }
+        if commitStatus == "failed" || sessionStatus == "failed" || sessionStatus == "cancelled" || sessionStatus == "blocked" {
+            return
+        }
+        if sessionStatus == "awaiting_commit" || sessionStatus == "committing" || commitStatus == "running" {
+            plotOutlineStatus = .committing
+            phaseMessage = "正在写入剧情总纲..."
+            return
+        }
+        if sessionStatus == "generating" {
+            plotOutlineStatus = .generating
+            phaseMessage = "AI 正在生成剧情总纲..."
+            return
+        }
+        if sessionStatus == "awaiting_acceptance" {
+            plotOutlineStatus = .generating // Q8: aiInvocationDebug=false → generating
+            phaseMessage = "正在确认剧情总纲生成..."
+            return
+        }
+        if sessionStatus == "awaiting_pre_call_review" {
+            plotOutlineStatus = .creating // Q8: aiInvocationDebug=false → creating
+            phaseMessage = "正在准备剧情总纲生成..."
+            return
+        }
+        plotOutlineStatus = .creating
+        phaseMessage = "正在创建剧情总纲任务..."
+    }
+
+    /// 从 API 刷新剧情总纲 — NovelSetupGuide.vue:1240-1254
+    private func refreshPlotOutlineFromApi() async -> Bool {
+        guard let novelId = createdNovel?.id else { return false }
+        do {
+            let response: GeneratePlotOutlineResponse = try await apiClient.request(
+                APIEndpoint.Workflow.getPlotOutline(novelId: novelId)
+            )
+            guard let outline = response.plotOutline else { return false }
+            let normalized = normalizePlotOutlineShape(outline, totalChapters: targetChapters) ?? outline
+            plotOutline = normalized
+            syncEditablePlotOutline(normalized)
+            plotOutlineCommitted = true
+            if let novelId = createdNovel?.id {
+                WizardUiCache.write(novelId: novelId, patch: WizardUiCachePatch(plotOutline: normalized))
+            }
+            return true
+        } catch {
+            return false
+        }
+    }
+
+    /// 从审批结果提取剧情总纲 — NovelSetupGuide.vue:1256-1269
+    private func applyPlotOutlineFromResult(result: [String: Any], bindings: [InvocationVariableBinding]) -> Bool {
+        guard let outline = extractPlotOutlineFromResult(result, outputBindings: bindings, totalChapters: targetChapters) else {
+            return false
+        }
+        plotOutline = outline
+        syncEditablePlotOutline(outline)
+        plotOutlineCommitted = true
+        if let novelId = createdNovel?.id {
+            WizardUiCache.write(novelId: novelId, patch: WizardUiCachePatch(plotOutline: outline))
+        }
+        finishPlotOutlineInvocation()
+        return true
+    }
+
+    /// 完成剧情总纲审批 — NovelSetupGuide.vue:1182-1188
+    private func finishPlotOutlineInvocation() {
+        plotOutlineGenerating = false
+        plotOutlineStatus = .done
+        phaseMessage = ""
+    }
+
+    /// 失败 — NovelSetupGuide.vue:1190-1197
+    private func failPlotOutlineInvocation(_ message: String) {
+        plotOutlineError = message
+        plotOutlineGenerating = false
+        plotOutlineStatus = .error
+        phaseMessage = ""
+    }
+
+    /// 重置状态 — NovelSetupGuide.vue:1199-1203
+    private func resetPlotOutlineInvocationState() {
+        plotOutlineGenerating = false
+        plotOutlineStatus = .idle
+        phaseMessage = ""
+    }
+
+    /// 同步编辑副本 — NovelSetupGuide.vue:1134-1140
+    private func syncEditablePlotOutline(_ outline: PlotOutlineDTO?) {
+        syncingPlotOutlineDraft = true
+        editablePlotOutline = clonePlotOutline(outline, totalChapters: targetChapters)
+        DispatchQueue.main.async { [weak self] in
+            self?.syncingPlotOutlineDraft = false
+        }
+    }
+
+    /// 更新阶段章节号 — NovelSetupGuide.vue:1146-1154
+    func updateStageChapterNumber(index: Int, key: String, value: Int) {
+        guard index < editablePlotOutline.stagePlan.count else { return }
+        if key == "chapter_start" {
+            editablePlotOutline.stagePlan[index].chapterStart = value > 0 ? value : nil
+        } else if key == "chapter_end" {
+            editablePlotOutline.stagePlan[index].chapterEnd = value > 0 ? value : nil
+        }
+        plotOutlineCommitted = false
+    }
+
+    /// 阶段范围标签 — NovelSetupGuide.vue:1156-1158
+    func stageRangePercentLabel(index: Int) -> String {
+        guard index < editablePlotOutline.stagePlan.count else { return "" }
+        let stage = editablePlotOutline.stagePlan[index]
+        return buildStageRangePercentLabel(stage, totalChapters: targetChapters)
+    }
+
+    /// 保存编辑 — NovelSetupGuide.vue:2033-2052
+    func savePlotOutlineEdits() async -> Bool {
+        guard let novelId = createdNovel?.id else { return false }
+        let payload = buildEditablePlotOutlinePayload(editablePlotOutline, totalChapters: targetChapters)
+        let validationError = validateEditablePlotOutline(payload)
+        if !validationError.isEmpty {
+            errorMessage = validationError
+            return false
+        }
+        do {
+            let response: GeneratePlotOutlineResponse = try await apiClient.request(
+                APIEndpoint.Workflow.savePlotOutline(novelId: novelId),
+                body: PlotOutlineSaveRequest(plotOutline: payload)
+            )
+            let saved = response.plotOutline ?? payload
+            plotOutline = saved
+            syncEditablePlotOutline(saved)
+            plotOutlineCommitted = true
+            WizardUiCache.write(novelId: novelId, patch: WizardUiCachePatch(plotOutline: saved))
+            return true
+        } catch {
+            errorMessage = "保存失败: \(error.localizedDescription)"
+            return false
+        }
+    }
+
+    // MARK: - 阶段3：Bible SSE approval_required 接线 — NovelSetupGuide.vue:1548-1550
+
+    /// 覆写 handleDataEvent 中的 approval_required 分支
+    /// 原版逻辑：openBibleReviewPanel → aiInvocationStore.open + onSessionUpdate
+    /// iOS 接线：aiInvocationStore.openFromResponse
+    private func handleBibleApprovalRequired(sessionId: String, stage: String) {
+        guard !sessionId.isEmpty else { return }
+        // 注册监听
+        let _ = aiInvocationStore.onSessionUpdate(sessionId: sessionId) { [weak self] payload in
+            Task { @MainActor in
+                // Bible 审批完成后的处理
+                if payload.session.status == "completed" || payload.commit?.status == "succeeded" {
+                    // 审批完成，继续流程
+                    self?.approvalMessage = ""
+                }
+            }
+        }
+        // 打开审批面板
+        Task {
+            do {
+                try await aiInvocationStore.open(sessionId: sessionId)
+            } catch {
+                Logger.engine.error("Bible 审批面板打开失败: \(error.localizedDescription)")
+            }
+        }
+    }
+
     // MARK: - 重置
 
     /// 重置向导状态
@@ -749,6 +1301,19 @@ final class OnboardingStore: ObservableObject {
         macroPlanStructure = nil
         isProcessing = false
         errorMessage = nil
+
+        // 重置阶段3状态
+        maxVisitedStep = 1
+        plotOutline = nil
+        editablePlotOutline = createEmptyPlotOutline()
+        plotOutlineGenerating = false
+        plotOutlineError = ""
+        plotOutlineCommitted = false
+        plotOutlineSessionId = ""
+        step4RestoredFromCache = false
+        syncingPlotOutlineDraft = false
+        plotOutlineStatus = .idle
+        aiInvocationStore.close()
 
         // 取消所有 SSE 流
         if let novelId = createdNovel?.id {

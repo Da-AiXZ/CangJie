@@ -1,0 +1,145 @@
+%% 仓颉 iOS 阶段3 — 类图
+%% 架构师：高见远
+
+classDiagram
+    class AIInvocationStore {
+        +visible: Bool
+        +loading: Bool
+        +actionLoading: Bool
+        +error: String
+        +session: InvocationSessionDTO?
+        +attempt: InvocationAttemptDTO?
+        +decision: AdoptionDecisionDTO?
+        +commit: AdoptionCommitDTO?
+        +nextAction: String
+        +promptDraftSystem: String
+        +promptDraftUser: String
+        +promptDraftSavedSystem: String
+        +promptDraftSavedUser: String
+        +promptDraftPreview: InvocationPromptDraftPreviewDTO?
+        +promptDraftLoading: Bool
+        +liveAttemptContent: String
+        +liveAttemptLoading: Bool
+        +hasAttempt: Bool
+        +canAccept: Bool
+        +canCommit: Bool
+        +canRetry: Bool
+        +isGenerating: Bool
+        +open(sessionId:)
+        +openFromResponse(payload:)
+        +accept()
+        +reject()
+        +retry()
+        +resume()
+        +previewPromptDraft(system:user:)
+        +savePromptDraft(system:user:)
+        +updateVariables(values:)
+        +runCommit()
+        +close()
+        +onSessionUpdate(sessionId:listener:)
+    }
+
+    class InvocationSessionDTO {
+        +id: String
+        +operation: String
+        +node_key: String
+        +policy: String
+        +status: String
+        +prompt_snapshot: InvocationPromptSnapshot?
+        +variable_plan: InvocationVariablePlan?
+        +output_bindings: [InvocationVariableBinding]
+    }
+
+    class InvocationPromptSnapshot {
+        +prompt: PromptPair?
+        +template_prompt: PromptPair?
+        +draft_prompt: PromptPair?
+        +missing_variables: [String]?
+        +diagnostics: [String]?
+    }
+
+    class InvocationVariablePlan {
+        +required_missing: [String]?
+        +diagnostics: [String]?
+        +snapshot_groups: [InvocationVariableSnapshotGroup]?
+        +bindings: [InvocationVariableBinding]?
+    }
+
+    class InvocationResponseDTO {
+        +session: InvocationSessionDTO
+        +attempt: InvocationAttemptDTO?
+        +decision: AdoptionDecisionDTO?
+        +commit: AdoptionCommitDTO?
+        +next_action: String?
+    }
+
+    class OnboardingStore {
+        +plotOutline: PlotOutlineDTO?
+        +plotOutlineGenerating: Bool
+        +plotOutlineError: String
+        +plotOutlineCommitted: Bool
+        +plotOutlineSessionId: String
+        +plotOutlineStatus: PlotOutlineStatus
+        +loadPlotOutline(forceNew:)
+        +openPlotOutlineReviewPanel(sessionId:)
+        +savePlotOutlineEdits()
+        +refreshPlotOutline()
+    }
+
+    class PlotOutlineDTO {
+        +main_story_overview: String
+        +stage_plan: [PlotOutlineStageDTO]
+        +expected_ending: String
+        +core_conflict: String
+    }
+
+    class MonitorStore {
+        +guardrailResponse: GuardrailCheckResponse?
+        +tensionCurve: TensionCurveResponse?
+        +voiceDrift: [VoiceDriftApiItem]
+        +loadGuardrailCheck(novelId:text:)
+        +loadTensionCurve(novelId:)
+        +loadVoiceDrift(novelId:)
+    }
+
+    class GuardrailCheckResponse {
+        +overall_score: Double
+        +passed: Bool
+        +dimensions: [GuardrailDimensionScore]
+        +violations: [GuardrailViolationDTO]
+    }
+
+    class ForeshadowEntry {
+        +id: String
+        +chapter: Int
+        +character_id: String
+        +question: String
+        +status: String
+        +importance: String
+        +is_priority_for_chapter: Bool
+    }
+
+    class PropDTO {
+        +id: String
+        +name: String
+        +description: String
+        +prop_category: String
+        +lifecycle_state: String
+        +holder_character_id: String?
+    }
+
+    class TaxonomyBundle {
+        +id: String
+        +locale: String
+        +domain: String
+        +roots: [TaxonomyNode]
+    }
+
+    AIInvocationStore --> InvocationResponseDTO : applyResponse
+    AIInvocationStore --> InvocationSessionDTO : manages
+    InvocationSessionDTO --> InvocationPromptSnapshot : has
+    InvocationSessionDTO --> InvocationVariablePlan : has
+    InvocationResponseDTO --> InvocationSessionDTO : contains
+    OnboardingStore --> AIInvocationStore : uses for approval
+    OnboardingStore --> PlotOutlineDTO : manages
+    MonitorStore --> GuardrailCheckResponse : loads
