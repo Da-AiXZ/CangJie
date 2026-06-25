@@ -624,7 +624,7 @@ struct StoryEvolutionPanel: View {
                         Text("\(snap.deltaActions.count) 个动作 · \(snap.conflicts.count) 个冲突")
                             .font(.system(size: 9)).foregroundColor(Theme.textTertiary)
                         if !snap.deltaActions.isEmpty {
-                            ForEach(Array(snap.deltaActions.prefix(20)).enumerated(), id: \.offset) { _, action in
+                            ForEach(Array(snap.deltaActions.prefix(20)).enumerated().map { $0 }, id: \.offset) { _, action in
                                 let dict = action.value as? [String: Any] ?? [:]
                                 HStack(spacing: 4) {
                                     Text((dict["type"] as? String) ?? "action")
@@ -639,7 +639,7 @@ struct StoryEvolutionPanel: View {
                             }
                         }
                         // 冲突展示
-                        ForEach(Array(snap.conflicts.prefix(10)).enumerated(), id: \.offset) { _, conflict in
+                        ForEach(Array(snap.conflicts.prefix(10)).enumerated().map { $0 }, id: \.offset) { _, conflict in
                             let dict = conflict.value as? [String: Any] ?? [:]
                             HStack(spacing: 4) {
                                 Text((dict["level"] as? String) ?? "warning")

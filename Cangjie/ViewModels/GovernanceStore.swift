@@ -46,7 +46,7 @@ final class GovernanceStore: ObservableObject {
     /// 更新治理契约
     func updateContract(novelId: String, payload: GovernanceContractPayload) async {
         do {
-            let raw: AnyCodable = try await apiClient.request(
+            let _: AnyCodable = try await apiClient.request(
                 APIEndpoint.Governance.contract(novelId: novelId),
                 body: payload
             )

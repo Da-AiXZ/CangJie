@@ -746,7 +746,7 @@ extension APIEndpoint.Novels: APIEndpoint.EndpointInfo {
             return "/novels/\(novelId)/stage"
         case .delete(let novelId):
             return "/novels/\(novelId)"
-        case .generateBibleAlias(let novelId, let stage):
+        case .generateBibleAlias(let novelId, _):
             return "/novels/\(novelId)/bible/generate"
         case .updateAutoApproveMode(let novelId):
             return "/novels/\(novelId)/auto-approve-mode"
