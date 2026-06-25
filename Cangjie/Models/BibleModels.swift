@@ -876,9 +876,11 @@ func mapCharacterToEditable(_ character: CharacterDTO, fallback: EditableCharact
     let moralTaboos = (!character.moralTaboos.isEmpty) ? character.moralTaboos : (fallback?.moralTaboos ?? [])
 
     // voiceProfile: 优先用 character 自带，否则用 fallback
-    let voiceProfileRaw = (character.voiceProfile.value != nil && !(character.voiceProfile.value is [String: Any] && (character.voiceProfile.value as? [String: Any])?.isEmpty == true))
-        ? character.voiceProfile.value
-        : (fallback?.voiceProfile != nil ? ["style": fallback!.voiceProfile.style, "sentence_pattern": fallback!.voiceProfile.sentencePattern, "speech_tempo": fallback!.voiceProfile.speechTempo] : nil)
+    // CI#29 修复：Any 类型不能直接与 nil 比较，改用 NSNull 检查 + 空字典检查
+    let vpVal = character.voiceProfile.value
+    let voiceProfileRaw: Any? = (!(vpVal is NSNull) && !(vpVal is [String: Any] && (vpVal as? [String: Any])?.isEmpty == true))
+        ? vpVal
+        : (fallback?.voiceProfile != nil ? ["style": fallback!.voiceProfile.style, "sentence_pattern": fallback!.voiceProfile.sentencePattern, "speech_tempo": fallback!.voiceProfile.speechTempo] as [String: Any] : nil)
     let voiceProfile = normalizeVoiceProfile(voiceProfileRaw)
 
     // activeWounds: 优先用 character 自带，否则用 fallback

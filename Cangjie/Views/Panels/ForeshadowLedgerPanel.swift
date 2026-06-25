@@ -214,7 +214,7 @@ struct ForeshadowLedgerPanel: View {
                     .font(.system(size: 12))
                     .frame(width: 200)
                     .padding(8)
-                    .presentationCompactAdaptation(.popover)
+                // CI#29 修复：移除 .presentationCompactAdaptation(.popover)（iOS 16.4+ API，项目目标 16.0）
             }
             Spacer()
             Button(action: openCreateModal) {

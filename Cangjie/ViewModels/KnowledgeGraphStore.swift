@@ -261,6 +261,4 @@ final class KnowledgeGraphStore: ObservableObject {
 }
 
 // MARK: - 空请求体
-
-/// 空请求体，用于 POST 请求需要 `{}` body 的场景（如 inferNovel）
-private struct EmptyBody: Codable {}
+// EmptyBody 声明已移至 OnboardingWizardView.swift（模块级），此处直接引用（CI#29 修复：消除重复声明）

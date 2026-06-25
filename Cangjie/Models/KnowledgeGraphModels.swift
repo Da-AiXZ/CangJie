@@ -288,8 +288,9 @@ struct KnowledgeGraphStatistics: Codable, Equatable {
         self.totalTriples = dict["total_triples"]?.intValue ?? 0
 
         // source_distribution: Record<string, number>
+        // CI#29 修复：dictionaryValue 返回 [String: Any]，值类型为 Any，改用 as? Int
         if let srcDict = dict["source_distribution"]?.dictionaryValue {
-            self.sourceDistribution = srcDict.compactMapValues { $0.intValue }
+            self.sourceDistribution = srcDict.compactMapValues { $0 as? Int }
         } else {
             self.sourceDistribution = [:]
         }
@@ -297,9 +298,9 @@ struct KnowledgeGraphStatistics: Codable, Equatable {
         // confidence_distribution: { high, medium, low }
         if let confDict = dict["confidence_distribution"]?.dictionaryValue {
             self.confidenceDistribution = KGConfidenceDistribution(
-                high: confDict["high"]?.intValue ?? 0,
-                medium: confDict["medium"]?.intValue ?? 0,
-                low: confDict["low"]?.intValue ?? 0
+                high: confDict["high"] as? Int ?? 0,
+                medium: confDict["medium"] as? Int ?? 0,
+                low: confDict["low"] as? Int ?? 0
             )
         } else {
             self.confidenceDistribution = KGConfidenceDistribution()
@@ -307,7 +308,7 @@ struct KnowledgeGraphStatistics: Codable, Equatable {
 
         // predicate_distribution: Record<string, number>
         if let predDict = dict["predicate_distribution"]?.dictionaryValue {
-            self.predicateDistribution = predDict.compactMapValues { $0.intValue }
+            self.predicateDistribution = predDict.compactMapValues { $0 as? Int }
         } else {
             self.predicateDistribution = [:]
         }

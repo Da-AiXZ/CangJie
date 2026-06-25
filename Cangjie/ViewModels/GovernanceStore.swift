@@ -107,5 +107,9 @@ final class GovernanceStore: ObservableObject {
     var contract: GovernanceContract? { state?.contract }
     var storylines: [Storyline] { state?.storylines ?? [] }
     var debts: [DebtRecord] { state?.debts ?? [] }
-    var reports: [GovernanceReport] { state?.reports ?? [] }
+    var reports: [GovernanceReport] {
+        // CI#29 修复：GovernanceState.latestReport 是单条，包装为数组供视图使用
+        guard let report = state?.latestReport else { return [] }
+        return [report]
+    }
 }

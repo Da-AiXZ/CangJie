@@ -373,21 +373,4 @@ struct CastScheduleResponse: Codable, Equatable {
 }
 
 // MARK: - 快照回滚响应（chronicles.ts:SnapshotRollbackResponse）
-
-/// 快照回滚响应，对应原版 chronicles.ts `SnapshotRollbackResponse`
-struct SnapshotRollbackResponse: Codable, Equatable {
-    let deletedCount: Int
-
-    enum CodingKeys: String, CodingKey {
-        case deletedCount = "deleted_count"
-    }
-
-    init(from decoder: Decoder) throws {
-        let c = try decoder.container(keyedBy: CodingKeys.self)
-        self.deletedCount = try c.decodeIfPresent(Int.self, forKey: .deletedCount) ?? 0
-    }
-
-    init(deletedCount: Int = 0) {
-        self.deletedCount = deletedCount
-    }
-}
+// 声明已移至 SnapshotModels.swift（CI#29 修复：消除重复声明）

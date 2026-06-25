@@ -560,7 +560,7 @@ struct StorylineGitGraphView: View {
     // MARK: - Branch/Merge 检测（对齐 :573-637）
 
     private func detectBranches(_ commits: inout [CommitDef], _ lines: [StorylineDTO]) {
-        guard let mainLine = lines.first(where: { isMainStoryline($0) }) ) else { return }
+        guard let mainLine = lines.first(where: { isMainStoryline($0) }) else { return }
         let mainStart = mainLine.estimatedChapterStart ?? 0
         let mainEnd = mainLine.estimatedChapterEnd ?? 0
 
@@ -684,8 +684,9 @@ struct StorylineGitGraphView: View {
                 APIEndpoint.Chronicles.get(novelId: novelId)
             )
             // 找到目标快照
+            // CI#29 修复：dictionaryValue 返回 [String: Any]，值类型为 Any，不能用 AnyCodable 扩展方法
             guard let dict = chronicleData.dictionaryValue,
-                  let rowsValue = dict["rows"]?.arrayValue else {
+                  let rowsValue = dict["rows"] as? [Any] else {
                 rollbacking = false
                 return
             }
@@ -693,13 +694,13 @@ struct StorylineGitGraphView: View {
             // 找到 >= chapterIndex 的快照
             var candidateSnapshots: [String] = []
             for row in rowsValue {
-                if let rowDict = row.dictionaryValue,
-                   let chIdx = rowDict["chapter_index"]?.intValue,
+                if let rowDict = row as? [String: Any],
+                   let chIdx = rowDict["chapter_index"] as? Int,
                    chIdx >= cm.chapterIndex {
-                    if let snapshots = rowDict["snapshots"]?.arrayValue {
+                    if let snapshots = rowDict["snapshots"] as? [Any] {
                         for snap in snapshots {
-                            if let snapDict = snap.dictionaryValue,
-                               let snapId = snapDict["id"]?.stringStringValue {
+                            if let snapDict = snap as? [String: Any],
+                               let snapId = snapDict["id"] as? String {
                                 candidateSnapshots.append(snapId)
                             }
                         }

@@ -307,8 +307,8 @@ struct GovernanceCockpitView: View {
                     .foregroundColor(Theme.textTertiary)
             }
 
-            if let violations = report.violations, !violations.isEmpty {
-                Text("违规项：\(violations.count)")
+            if let issues = report.issues, !issues.isEmpty {
+                Text("违规项：\(issues.count)")
                     .font(.system(size: 12))
                     .foregroundColor(Theme.warning)
             }

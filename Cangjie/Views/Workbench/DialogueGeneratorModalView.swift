@@ -204,8 +204,9 @@ struct DialogueGeneratorModalView: View {
                 body: AnyCodable(requestBody)
             )
             if let dict = raw.dictionaryValue {
-                generatedDialogue = dict["dialogue"]?.stringStringValue ?? ""
-                generatedCharacterName = dict["character_name"]?.stringStringValue ?? ""
+                // CI#29 修复：dict 是 [String: Any]，值类型为 Any，不能用 AnyCodable 扩展方法，改用 as? String
+                generatedDialogue = (dict["dialogue"] as? String) ?? ""
+                generatedCharacterName = (dict["character_name"] as? String) ?? ""
             }
         } catch {
             loadError = "生成对话失败"

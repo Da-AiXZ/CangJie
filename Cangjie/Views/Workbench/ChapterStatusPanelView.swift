@@ -325,7 +325,7 @@ struct ChapterStatusPanelView: View {
 
     private func aftermathStepsSection(_ review: AutopilotChapterAudit) -> some View {
         let steps = aftermathSteps(review)
-        VStack(alignment: .leading, spacing: 6) {
+        return VStack(alignment: .leading, spacing: 6) {
             HStack {
                 Text("章后管线")
                     .font(.system(size: 12, weight: .semibold))

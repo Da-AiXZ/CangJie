@@ -118,6 +118,7 @@ struct AntiAIPanel: View {
     // 七层防御定义 — AntiAIDashboard.vue:423-483
     private struct DefenseLayer: Identifiable {
         let key: String
+        var id: String { key }
         let name: String
         let desc: String
         let color: Color
@@ -318,7 +319,7 @@ struct AntiAIPanel: View {
     // MARK: - 规则 Tab — AntiAIDashboard.vue:204-237
     private var rulesTab: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("正向行为映射规则：将"禁止 X"重构为"当遇到场景 Y 时，必须执行 Z"，避免否定指令在 Transformer Self-Attention 中激活被禁止的 Token。")
+            Text("正向行为映射规则：将\"禁止 X\"重构为\"当遇到场景 Y 时，必须执行 Z\"，避免否定指令在 Transformer Self-Attention 中激活被禁止的 Token。")
                 .font(.system(size: 11)).foregroundColor(Theme.textTertiary)
 
             if store.rulesLoading {

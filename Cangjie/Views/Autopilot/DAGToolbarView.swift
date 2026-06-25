@@ -192,6 +192,7 @@ struct DAGStatsSummary: Equatable {
     let version: Int
 
     /// 从 DAGStore 状态构建
+    @MainActor
     static func from(dagStore: DAGStore) -> DAGStatsSummary? {
         guard let dag = dagStore.dagDefinition else { return nil }
         let states = dagStore.nodeStates

@@ -270,9 +270,10 @@ struct ChapterCastManagerView: View {
             }
 
             ForEach(Array(newCharacterCandidates.enumerated()), id: \.offset) { _, candidate in
-                let name = candidate.dictionaryValue?["name"]?.stringStringValue ?? "未知"
-                let recommendation = candidate.dictionaryValue?["recommendation"]?.stringStringValue ?? ""
-                let reason = candidate.dictionaryValue?["reason"]?.stringStringValue ?? "内核已完成准入判断"
+                // CI#29 修复：dictionaryValue 返回 [String: Any]，值类型为 Any，改用 as? String
+                let name = (candidate.dictionaryValue?["name"] as? String) ?? "未知"
+                let recommendation = (candidate.dictionaryValue?["recommendation"] as? String) ?? ""
+                let reason = (candidate.dictionaryValue?["reason"] as? String) ?? "内核已完成准入判断"
                 VStack(alignment: .leading, spacing: 5) {
                     HStack {
                         Text(name)

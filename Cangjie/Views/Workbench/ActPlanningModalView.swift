@@ -47,7 +47,7 @@ struct ActPlanningModalView: View {
     // MARK: - SSE
 
     private let sseClient = SSEClient()
-    private var streamTask: Task<Void, Never>?
+    @State private var streamTask: Task<Void, Never>?
 
     // MARK: - Computed — ActPlanningModal.vue:205-213
 

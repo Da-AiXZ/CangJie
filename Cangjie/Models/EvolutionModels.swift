@@ -424,20 +424,4 @@ struct ActiveSnapshotDTO: Codable, Equatable {
 }
 
 // MARK: - 快照回滚响应 — chronicles.ts:37-40
-
-/// 快照回滚响应
-struct SnapshotRollbackResponse: Codable, Equatable {
-    let deletedChapterIds: [String]
-    let deletedCount: Int
-
-    enum CodingKeys: String, CodingKey {
-        case deletedChapterIds = "deleted_chapter_ids"
-        case deletedCount = "deleted_count"
-    }
-
-    init(from decoder: Decoder) throws {
-        let c = try decoder.container(keyedBy: CodingKeys.self)
-        self.deletedChapterIds = try c.decodeIfPresent([String].self, forKey: .deletedChapterIds) ?? []
-        self.deletedCount = try c.decodeIfPresent(Int.self, forKey: .deletedCount) ?? 0
-    }
-}
+// 声明已移至 SnapshotModels.swift（CI#29 修复：消除重复声明）

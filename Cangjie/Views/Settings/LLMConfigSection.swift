@@ -258,7 +258,7 @@ struct LLMProfileEditView: View {
                                 id: "temp-test",
                                 name: name,
                                 presetKey: "custom",
-                                `protocol`: protocolType,
+                                protocol: protocolType,
                                 baseUrl: baseUrl,
                                 apiKey: apiKey,
                                 model: model,
