@@ -363,7 +363,7 @@ struct AntiAIPanel: View {
     // MARK: - 白名单 Tab — AntiAIDashboard.vue:242-295
     private var allowlistTab: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("在战斗/悬疑/恐怖/告白等特定场景中，部分"AI味"模式是被允许的。白名单不等于滥用——即使在允许的场景中也有密度限制。")
+            Text("在战斗/悬疑/恐怖/告白等特定场景中，部分“AI味”模式是被允许的。白名单不等于滥用——即使在允许的场景中也有密度限制。")
                 .font(.system(size: 11)).foregroundColor(Theme.textTertiary)
 
             if store.allowlistLoading {
