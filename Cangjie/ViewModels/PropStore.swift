@@ -14,6 +14,7 @@ final class PropStore: ObservableObject {
 
     @Published var props: [PropDTO] = []
     @Published var currentPropEvents: [PropEventDTO] = []
+    @Published var chapterMentions: [ChapterEntityMention] = []
     @Published var isLoading: Bool = false
     @Published var errorMessage: String?
 
@@ -97,5 +98,53 @@ final class PropStore: ObservableObject {
         } catch {
             errorMessage = error.localizedDescription
         }
+    }
+
+    // MARK: - 实体索引 — ManuscriptPropsPanel.vue:250-281
+
+    /// 加载章节实体提及 — manuscript.ts:31-34
+    /// - Parameters:
+    ///   - novelId: 小说 ID
+    ///   - chapterNumber: 章节号
+    func loadChapterMentions(novelId: String, chapterNumber: Int) async {
+        do {
+            let response: ChapterMentionsResponse = try await apiClient.request(
+                APIEndpoint.Manuscript.chapterMentions(novelId: novelId, chapterNumber: chapterNumber)
+            )
+            chapterMentions = response.mentions
+        } catch {
+            chapterMentions = []
+        }
+    }
+
+    /// 重建章节实体索引 — manuscript.ts:36-46
+    /// - Parameters:
+    ///   - novelId: 小说 ID
+    ///   - chapterNumber: 章节号
+    func reindexChapterMentions(novelId: String, chapterNumber: Int) async {
+        do {
+            let response: ReindexMentionsResponse = try await apiClient.request(
+                APIEndpoint.Manuscript.reindexMentions(novelId: novelId, chapterNumber: chapterNumber)
+            )
+            chapterMentions = response.mentions
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    /// 切换关键道具标记 — ManuscriptPropsPanel.vue:374-394 togglePropKey
+    /// - Parameters:
+    ///   - novelId: 小说 ID
+    ///   - propId: 道具 ID
+    ///   - currentKeyContext: 当前 key_context 值
+    func togglePropKey(novelId: String, propId: String, currentKeyContext: Bool) async {
+        let newKey = !currentKeyContext
+        let request = PatchPropRequest(
+            name: nil, description: nil, aliases: nil,
+            propCategory: nil, lifecycleState: nil,
+            holderCharacterId: nil, introducedChapter: nil,
+            attributes: ["key_context": AnyCodable(newKey)]
+        )
+        await updateProp(novelId: novelId, propId: propId, request: request)
     }
 }

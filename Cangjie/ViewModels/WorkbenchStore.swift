@@ -12,6 +12,28 @@ import Foundation
 @MainActor
 final class WorkbenchStore: ObservableObject {
 
+    // MARK: - 跨面板刷新通知（对齐原版 workbenchRefreshStore 的 tick 机制）
+
+    /// 刷新通知名 — 对齐原版 foreshadowTick/deskTick/chroniclesTick
+    static let foreshadowTickNotification = Notification.Name("WorkbenchForeshadowTick")
+    static let deskTickNotification = Notification.Name("WorkbenchDeskTick")
+    static let chroniclesTickNotification = Notification.Name("WorkbenchChroniclesTick")
+
+    /// 发布伏笔刷新通知
+    func bumpForeshadowTick() {
+        NotificationCenter.default.post(name: Self.foreshadowTickNotification, object: nil)
+    }
+
+    /// 发布工作台刷新通知
+    func bumpDeskTick() {
+        NotificationCenter.default.post(name: Self.deskTickNotification, object: nil)
+    }
+
+    /// 发布编年史刷新通知
+    func bumpChroniclesTick() {
+        NotificationCenter.default.post(name: Self.chroniclesTickNotification, object: nil)
+    }
+
     // MARK: - 状态
 
     /// 当前编辑的章节内容

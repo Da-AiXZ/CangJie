@@ -28,6 +28,19 @@ struct AutopilotConsoleView: View {
                 CircuitBreakerCard(novelId: novelId)
                     .environmentObject(autopilotStore)
 
+                // StoryPipeline 可观测性 — 对齐 StoryPipelineObservability.vue
+                StoryPipelineObservabilityView(status: autopilotStore.status)
+
+                // 章节写作流 — 对齐 ChapterWriterStream.vue
+                ChapterWriterStreamView(
+                    novelId: novelId,
+                    isWriting: autopilotStore.status?.autopilotStatus == "running"
+                )
+                .environmentObject(autopilotStore)
+
+                // 伏笔雷达 — 对齐 ForeshadowLedger.vue (autopilot只读版)
+                ForeshadowRadarView(novelId: novelId)
+
                 // DAG 画布 — T04 传递 novelId（NodeDetailPanel/NodeContextMenu 需要）
                 DAGCanvasView(novelId: novelId)
                     .environmentObject(dagStore)

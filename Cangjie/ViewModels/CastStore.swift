@@ -102,4 +102,48 @@ final class CastStore: ObservableObject {
     var relationships: [CastRelationship] {
         return castGraph?.relationships ?? []
     }
+
+    // MARK: - 批次2 新增：选角调度（对齐 cast.ts:82-96 ChapterCastManager.vue:191-234）
+
+    /// 选角调度响应（scheduleCast 后存储）
+    @Published var scheduleResponse: CastScheduleResponse?
+    @Published var isScheduling: Bool = false
+
+    /// 选角调度 — 对齐 cast.ts scheduleAndPersist/analyzeOutline
+    ///
+    /// 原版两个方法底层都是 POST /novels/{id}/cast/schedule，区别在 mode 字段：
+    /// - mode="suggest" → analyzeOutline（dry-run，不写库）
+    /// - mode="apply" → scheduleAndPersist（写入 chapter_elements）
+    ///
+    /// - Parameters:
+    ///   - novelId: 小说 ID
+    ///   - chapterNumber: 章节号
+    ///   - mode: .suggest（预览）或 .apply（落库）— 对齐决策3
+    ///   - outline: 大纲文本（可选）
+    func scheduleCast(novelId: String, chapterNumber: Int, mode: CastScheduleMode, outline: String? = nil) async {
+        isScheduling = true
+        errorMessage = nil
+
+        do {
+            let request = CastScheduleRequest(
+                chapterNumber: chapterNumber,
+                outline: outline,
+                mode: mode.rawValue
+            )
+            scheduleResponse = try await apiClient.request(
+                APIEndpoint.Cast.schedule(novelId: novelId),
+                body: request
+            )
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+
+        isScheduling = false
+    }
+
+    /// 选角调度模式 — 对齐决策3
+    enum CastScheduleMode: String {
+        case suggest  // dry-run（对齐 analyzeOutline）
+        case apply    // 落库（对齐 scheduleAndPersist）
+    }
 }

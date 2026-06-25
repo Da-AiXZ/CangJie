@@ -57,7 +57,16 @@ struct DAGCanvasView: View {
     }
 
     var body: some View {
-        GeometryReader { geometry in
+        VStack(spacing: 0) {
+            // DAG 工具栏 — 对齐 DAGToolbar.vue:1-117
+            DAGToolbarView(
+                novelId: novelId,
+                dagStats: DAGStatsSummary.from(dagStore: dagStore),
+                autopilotStatus: dagStore.dagDefinition != nil ? "running" : "idle",
+                sseConnected: dagStore.sseConnected
+            )
+
+            GeometryReader { geometry in
             ZStack {
                 // 背景网格
                 backgroundGrid(in: geometry)
@@ -176,6 +185,7 @@ struct DAGCanvasView: View {
                     .environmentObject(dagStore)
             }
         }
+        } // VStack
     }
 
     // MARK: - 背景网格

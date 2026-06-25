@@ -25,7 +25,7 @@ struct SidebarView: View {
     private let analysisItems: [SidebarDestination] = [.monitor, .promptPlaza, .governance]
 
     /// 工具分组
-    private let toolItems: [SidebarDestination] = [.export, .snapshot, .trace]
+    private let toolItems: [SidebarDestination] = [.export, .snapshot, .trace, .debug]
 
     /// 系统分组
     private let systemItems: [SidebarDestination] = [.settings]
@@ -74,6 +74,9 @@ struct SidebarView: View {
                 ForEach(systemItems, id: \.self) { item in
                     sidebarRow(item)
                 }
+
+                // 全局 LLM 入口按钮，对齐原版 StatsSidebar.vue 中的 GlobalLLMEntryButton appearance="sidebar"
+                GlobalLLMEntryButton()
             }
         }
         .listStyle(.sidebar)

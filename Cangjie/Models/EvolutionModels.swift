@@ -10,13 +10,21 @@ import Foundation
 
 // MARK: - 演化快照
 
-/// 演化快照，后端返回 dict（来自 to_dict()）
+/// 演化快照，字段对齐原版 evolution.ts:3-19 EvolutionSnapshot
 struct EvolutionSnapshot: Codable, Identifiable, Equatable {
     let id: String
     let novelId: String
     let branchId: String
     let chapterNumber: Int
+    let schemaVersion: String
     let status: String
+    let openingState: AnyCodable?
+    let deltaActions: [AnyCodable]
+    let machineState: AnyCodable?
+    let humanOverridePatches: [AnyCodable]
+    let endingState: AnyCodable?
+    let sourceRefs: [AnyCodable]
+    let conflicts: [AnyCodable]
     let snapshotData: AnyCodable
     let violations: [AnyCodable]?
     let createdAt: String?
@@ -26,7 +34,15 @@ struct EvolutionSnapshot: Codable, Identifiable, Equatable {
         case novelId = "novel_id"
         case branchId = "branch_id"
         case chapterNumber = "chapter_number"
+        case schemaVersion = "schema_version"
         case status
+        case openingState = "opening_state"
+        case deltaActions = "delta_actions"
+        case machineState = "machine_state"
+        case humanOverridePatches = "human_override_patches"
+        case endingState = "ending_state"
+        case sourceRefs = "source_refs"
+        case conflicts
         case snapshotData = "snapshot"
         case violations
         case createdAt = "created_at"
@@ -38,10 +54,43 @@ struct EvolutionSnapshot: Codable, Identifiable, Equatable {
         self.novelId = try c.decodeIfPresent(String.self, forKey: .novelId) ?? ""
         self.branchId = try c.decodeIfPresent(String.self, forKey: .branchId) ?? "main"
         self.chapterNumber = try c.decodeIfPresent(Int.self, forKey: .chapterNumber) ?? 0
+        self.schemaVersion = try c.decodeIfPresent(String.self, forKey: .schemaVersion) ?? ""
         self.status = try c.decodeIfPresent(String.self, forKey: .status) ?? "pending"
+        self.openingState = try c.decodeIfPresent(AnyCodable.self, forKey: .openingState)
+        self.deltaActions = try c.decodeIfPresent([AnyCodable].self, forKey: .deltaActions) ?? []
+        self.machineState = try c.decodeIfPresent(AnyCodable.self, forKey: .machineState)
+        self.humanOverridePatches = try c.decodeIfPresent([AnyCodable].self, forKey: .humanOverridePatches) ?? []
+        self.endingState = try c.decodeIfPresent(AnyCodable.self, forKey: .endingState)
+        self.sourceRefs = try c.decodeIfPresent([AnyCodable].self, forKey: .sourceRefs) ?? []
+        self.conflicts = try c.decodeIfPresent([AnyCodable].self, forKey: .conflicts) ?? []
         self.snapshotData = try c.decodeIfPresent(AnyCodable.self, forKey: .snapshotData) ?? AnyCodable([:])
         self.violations = try c.decodeIfPresent([AnyCodable].self, forKey: .violations)
         self.createdAt = try c.decodeIfPresent(String.self, forKey: .createdAt)
+    }
+
+    /// 显式 memberwise init（T04教训8）
+    init(id: String, novelId: String, branchId: String, chapterNumber: Int,
+         schemaVersion: String, status: String,
+         openingState: AnyCodable?, deltaActions: [AnyCodable],
+         machineState: AnyCodable?, humanOverridePatches: [AnyCodable],
+         endingState: AnyCodable?, sourceRefs: [AnyCodable], conflicts: [AnyCodable],
+         snapshotData: AnyCodable, violations: [AnyCodable]?, createdAt: String?) {
+        self.id = id
+        self.novelId = novelId
+        self.branchId = branchId
+        self.chapterNumber = chapterNumber
+        self.schemaVersion = schemaVersion
+        self.status = status
+        self.openingState = openingState
+        self.deltaActions = deltaActions
+        self.machineState = machineState
+        self.humanOverridePatches = humanOverridePatches
+        self.endingState = endingState
+        self.sourceRefs = sourceRefs
+        self.conflicts = conflicts
+        self.snapshotData = snapshotData
+        self.violations = violations
+        self.createdAt = createdAt
     }
 }
 
@@ -119,16 +168,105 @@ struct EvolutionGateReport: Codable, Equatable {
     }
 }
 
-// MARK: - 覆盖请求
+// MARK: - 覆盖请求 — evolution.ts:69-73
 
-/// 覆盖请求，对应后端 OverrideRequest
+/// JSON Patch 操作 — RFC 6902 op: replace/add/remove
+struct JSONPatchOp: Codable, Equatable {
+    let op: String
+    let path: String
+    let value: AnyCodable?
+
+    enum CodingKeys: String, CodingKey {
+        case op, path, value
+    }
+}
+
+/// 覆盖请求，对应原版 evolution.ts:69-73 applyOverrides
+/// body: { branch_id, patches: [{op, path, value}] }
 struct EvolutionOverrideRequest: Codable {
     let branchId: String
-    let patches: [AnyCodable]
+    let patches: [JSONPatchOp]
 
     enum CodingKeys: String, CodingKey {
         case branchId = "branch_id"
         case patches
+    }
+}
+
+// MARK: - 剧情大纲 DTO — workflow.ts:119-124 PlotOutlineDTO
+
+/// 剧情大纲 DTO — workflow.ts:119-124
+/// 用于司令塔引导落点（P0-2 依赖）
+struct PlotOutlineDTO: Codable, Equatable {
+    let mainStoryOverview: String
+    let stagePlan: [PlotOutlineStageDTO]
+    let expectedEnding: String
+    let coreConflict: String
+
+    enum CodingKeys: String, CodingKey {
+        case mainStoryOverview = "main_story_overview"
+        case stagePlan = "stage_plan"
+        case expectedEnding = "expected_ending"
+        case coreConflict = "core_conflict"
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.mainStoryOverview = try c.decodeIfPresent(String.self, forKey: .mainStoryOverview) ?? ""
+        self.stagePlan = try c.decodeIfPresent([PlotOutlineStageDTO].self, forKey: .stagePlan) ?? []
+        self.expectedEnding = try c.decodeIfPresent(String.self, forKey: .expectedEnding) ?? ""
+        self.coreConflict = try c.decodeIfPresent(String.self, forKey: .coreConflict) ?? ""
+    }
+}
+
+/// 剧情大纲阶段 — workflow.ts:109-117 PlotOutlineStageDTO
+struct PlotOutlineStageDTO: Codable, Identifiable, Equatable {
+    var id: String { phase }
+    let phase: String
+    let label: String
+    let rangePercent: String
+    let chapterStart: Int?
+    let chapterEnd: Int?
+    let summary: String
+    let keyGoals: [String]?
+
+    enum CodingKeys: String, CodingKey {
+        case phase, label, summary
+        case rangePercent = "range_percent"
+        case chapterStart = "chapter_start"
+        case chapterEnd = "chapter_end"
+        case keyGoals = "key_goals"
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.phase = try c.decodeIfPresent(String.self, forKey: .phase) ?? ""
+        self.label = try c.decodeIfPresent(String.self, forKey: .label) ?? ""
+        self.rangePercent = try c.decodeIfPresent(String.self, forKey: .rangePercent) ?? ""
+        self.chapterStart = try c.decodeIfPresent(Int.self, forKey: .chapterStart)
+        self.chapterEnd = try c.decodeIfPresent(Int.self, forKey: .chapterEnd)
+        self.summary = try c.decodeIfPresent(String.self, forKey: .summary) ?? ""
+        self.keyGoals = try c.decodeIfPresent([String].self, forKey: .keyGoals)
+    }
+}
+
+/// 剧情大纲响应 — workflow.ts:126-130 GeneratePlotOutlineResponse
+struct GeneratePlotOutlineResponse: Codable, Equatable {
+    let plotOutline: PlotOutlineDTO?
+    let invocationSessionId: String?
+    let invocationNextAction: String?
+
+    enum CodingKeys: String, CodingKey {
+        case plotOutline = "plot_outline"
+        case invocationSessionId = "invocation_session_id"
+        case invocationNextAction = "invocation_next_action"
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.plotOutline = try c.decodeIfPresent(PlotOutlineDTO.self, forKey: .plotOutline)
+        self.invocationSessionId = try c.decodeIfPresent(String.self, forKey: .invocationSessionId)
+        self.invocationNextAction = try c.decodeIfPresent(String.self, forKey: .invocationNextAction)
     }
 }
 
@@ -149,4 +287,230 @@ struct EvolutionReplayRequest: Codable {
 struct EvolutionTimeline: Equatable {
     let snapshots: [EvolutionSnapshot]
     let counts: [String: Int]
+}
+
+// MARK: - StoryEvolutionReadModel — narrativeEngine.ts:9-38
+
+/// 故事演化只读聚合模型，对齐原版 narrativeEngine.ts:9-38
+struct StoryEvolutionReadModel: Codable, Equatable {
+    let novelId: String
+    let schemaVersion: String
+    let lifeCycle: StoryPhaseDTO?
+    let plotSpine: PlotSpineDTO?
+    let chronotope: ChronotopeDTO?
+    let chaptersDigest: [AnyCodable]
+    let subtextSurface: SubtextSurfaceDTO?
+    let evolutionSurface: EvolutionSurfaceDTO?
+
+    enum CodingKeys: String, CodingKey {
+        case novelId = "novel_id"
+        case schemaVersion = "schema_version"
+        case lifeCycle = "life_cycle"
+        case plotSpine = "plot_spine"
+        case chronotope
+        case chaptersDigest = "chapters_digest"
+        case subtextSurface = "subtext_surface"
+        case evolutionSurface = "evolution_surface"
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.novelId = try c.decodeIfPresent(String.self, forKey: .novelId) ?? ""
+        self.schemaVersion = try c.decodeIfPresent(String.self, forKey: .schemaVersion) ?? ""
+        self.lifeCycle = try c.decodeIfPresent(StoryPhaseDTO.self, forKey: .lifeCycle)
+        self.plotSpine = try c.decodeIfPresent(PlotSpineDTO.self, forKey: .plotSpine)
+        self.chronotope = try c.decodeIfPresent(ChronotopeDTO.self, forKey: .chronotope)
+        self.chaptersDigest = try c.decodeIfPresent([AnyCodable].self, forKey: .chaptersDigest) ?? []
+        self.subtextSurface = try c.decodeIfPresent(SubtextSurfaceDTO.self, forKey: .subtextSurface)
+        self.evolutionSurface = try c.decodeIfPresent(EvolutionSurfaceDTO.self, forKey: .evolutionSurface)
+    }
+}
+
+/// 故事阶段 DTO — engineCore.ts StoryPhaseDTO
+struct StoryPhaseDTO: Codable, Equatable {
+    let phase: String?
+    let progress: Double?
+    let chapterRange: String?
+
+    enum CodingKeys: String, CodingKey {
+        case phase, progress
+        case chapterRange = "chapter_range"
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.phase = try c.decodeIfPresent(String.self, forKey: .phase)
+        self.progress = try c.decodeIfPresent(Double.self, forKey: .progress)
+        self.chapterRange = try c.decodeIfPresent(String.self, forKey: .chapterRange)
+    }
+}
+
+/// 故事骨架 DTO — narrativeEngine.ts:13-16
+struct PlotSpineDTO: Codable, Equatable {
+    let storylines: [StorylineDTO]
+    let plotArc: AnyCodable?
+
+    enum CodingKeys: String, CodingKey {
+        case storylines
+        case plotArc = "plot_arc"
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.storylines = try c.decodeIfPresent([StorylineDTO].self, forKey: .storylines) ?? []
+        self.plotArc = try c.decodeIfPresent(AnyCodable.self, forKey: .plotArc)
+    }
+}
+
+/// 故事线 DTO — workflow.ts:31-46 StorylineDTO
+struct StorylineDTO: Codable, Identifiable, Equatable {
+    let id: String
+    let name: String?
+    let role: String?
+    let status: String?
+    let parentId: String?
+    let estimatedChapterStart: Int?
+    let estimatedChapterEnd: Int?
+    let storylineType: String?
+    /// 里程碑列表 — workflow.ts:40
+    let milestones: [StorylineMilestoneDTO]?
+    /// 当前里程碑索引 — workflow.ts:41
+    let currentMilestoneIndex: Int?
+    /// 最后活跃章节 — workflow.ts:42
+    let lastActiveChapter: Int?
+    /// 进度摘要 — workflow.ts:43
+    let progressSummary: String?
+    /// 章节权重 — workflow.ts:45
+    let chapterWeight: Int?
+
+    enum CodingKeys: String, CodingKey {
+        case id, name, role, status
+        case parentId = "parent_id"
+        case estimatedChapterStart = "estimated_chapter_start"
+        case estimatedChapterEnd = "estimated_chapter_end"
+        case storylineType = "storyline_type"
+        case milestones
+        case currentMilestoneIndex = "current_milestone_index"
+        case lastActiveChapter = "last_active_chapter"
+        case progressSummary = "progress_summary"
+        case chapterWeight = "chapter_weight"
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.id = try c.decodeIfPresent(String.self, forKey: .id) ?? ""
+        self.name = try c.decodeIfPresent(String.self, forKey: .name)
+        self.role = try c.decodeIfPresent(String.self, forKey: .role)
+        self.status = try c.decodeIfPresent(String.self, forKey: .status)
+        self.parentId = try c.decodeIfPresent(String.self, forKey: .parentId)
+        self.estimatedChapterStart = try c.decodeIfPresent(Int.self, forKey: .estimatedChapterStart)
+        self.estimatedChapterEnd = try c.decodeIfPresent(Int.self, forKey: .estimatedChapterEnd)
+        self.storylineType = try c.decodeIfPresent(String.self, forKey: .storylineType)
+        self.milestones = try c.decodeIfPresent([StorylineMilestoneDTO].self, forKey: .milestones)
+        self.currentMilestoneIndex = try c.decodeIfPresent(Int.self, forKey: .currentMilestoneIndex)
+        self.lastActiveChapter = try c.decodeIfPresent(Int.self, forKey: .lastActiveChapter)
+        self.progressSummary = try c.decodeIfPresent(String.self, forKey: .progressSummary)
+        self.chapterWeight = try c.decodeIfPresent(Int.self, forKey: .chapterWeight)
+    }
+}
+
+/// 时空编年体 DTO — narrativeEngine.ts:17-21
+struct ChronotopeDTO: Codable, Equatable {
+    let rows: [ChronicleRow]
+    let maxChapterInBook: Int
+    let note: String?
+
+    enum CodingKeys: String, CodingKey {
+        case rows, note
+        case maxChapterInBook = "max_chapter_in_book"
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.rows = try c.decodeIfPresent([ChronicleRow].self, forKey: .rows) ?? []
+        self.maxChapterInBook = try c.decodeIfPresent(Int.self, forKey: .maxChapterInBook) ?? 0
+        self.note = try c.decodeIfPresent(String.self, forKey: .note)
+    }
+}
+
+/// 伏笔表层 DTO — narrativeEngine.ts:23-25
+struct SubtextSurfaceDTO: Codable, Equatable {
+    let foreshadowLedgerCount: Int
+
+    enum CodingKeys: String, CodingKey {
+        case foreshadowLedgerCount = "foreshadow_ledger_count"
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.foreshadowLedgerCount = try c.decodeIfPresent(Int.self, forKey: .foreshadowLedgerCount) ?? 0
+    }
+}
+
+/// 演化表层 DTO — narrativeEngine.ts:26-37
+struct EvolutionSurfaceDTO: Codable, Equatable {
+    let activeSnapshot: ActiveSnapshotDTO?
+    let counts: [String: Int]
+    let recentGateRisks: [AnyCodable]
+    let requiredContinuations: [String]
+
+    enum CodingKeys: String, CodingKey {
+        case activeSnapshot = "active_snapshot"
+        case counts
+        case recentGateRisks = "recent_gate_risks"
+        case requiredContinuations = "required_continuations"
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.activeSnapshot = try c.decodeIfPresent(ActiveSnapshotDTO.self, forKey: .activeSnapshot)
+        self.counts = try c.decodeIfPresent([String: Int].self, forKey: .counts) ?? [:]
+        self.recentGateRisks = try c.decodeIfPresent([AnyCodable].self, forKey: .recentGateRisks) ?? []
+        self.requiredContinuations = try c.decodeIfPresent([String].self, forKey: .requiredContinuations) ?? []
+    }
+}
+
+/// 活跃快照摘要 — narrativeEngine.ts:28-33
+struct ActiveSnapshotDTO: Codable, Equatable {
+    let snapshotId: String
+    let chapterNumber: Int
+    let status: String
+    let schemaVersion: String
+    let summary: String
+
+    enum CodingKeys: String, CodingKey {
+        case snapshotId = "snapshot_id"
+        case chapterNumber = "chapter_number"
+        case status
+        case schemaVersion = "schema_version"
+        case summary
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.snapshotId = try c.decodeIfPresent(String.self, forKey: .snapshotId) ?? ""
+        self.chapterNumber = try c.decodeIfPresent(Int.self, forKey: .chapterNumber) ?? 0
+        self.status = try c.decodeIfPresent(String.self, forKey: .status) ?? ""
+        self.schemaVersion = try c.decodeIfPresent(String.self, forKey: .schemaVersion) ?? ""
+        self.summary = try c.decodeIfPresent(String.self, forKey: .summary) ?? ""
+    }
+}
+
+// MARK: - 快照回滚响应 — chronicles.ts:37-40
+
+/// 快照回滚响应
+struct SnapshotRollbackResponse: Codable, Equatable {
+    let deletedChapterIds: [String]
+    let deletedCount: Int
+
+    enum CodingKeys: String, CodingKey {
+        case deletedChapterIds = "deleted_chapter_ids"
+        case deletedCount = "deleted_count"
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.deletedChapterIds = try c.decodeIfPresent([String].self, forKey: .deletedChapterIds) ?? []
+        self.deletedCount = try c.decodeIfPresent(Int.self, forKey: .deletedCount) ?? 0
+    }
 }

@@ -420,14 +420,32 @@ enum APIEndpoint {
         case delete(novelId: String, snapshotId: String)
     }
 
-    // MARK: - Worldline（世界线）
+    // MARK: - Worldline（世界线）— worldline.ts:52-115
     enum Worldline {
-        /// 世界线图 — `GET /novels/{novel_id}/worldline/graph`
+        /// 世界线图 — `GET /novels/{novel_id}/worldline/graph` — worldline.ts:53-54
         case graph(novelId: String)
-        /// 检查点列表 — `GET /novels/{novel_id}/worldline/checkpoints`
+        /// 检查点列表 — `GET /novels/{novel_id}/worldline/checkpoints` — worldline.ts:56-57
         case checkpoints(novelId: String)
-        /// 分支列表 — `GET /novels/{novel_id}/worldline/branches`
+        /// 创建检查点 — `POST /novels/{novel_id}/worldline/checkpoints` — worldline.ts:59-65
+        case createCheckpoint(novelId: String)
+        /// 分支列表 — `GET /novels/{novel_id}/worldline/branches` — worldline.ts:67-68
         case branches(novelId: String)
+        /// 创建分支 — `POST /novels/{novel_id}/worldline/branches` — worldline.ts:70-74
+        case createBranch(novelId: String)
+        /// 切换检查点 — `POST /novels/{novel_id}/worldline/checkpoints/{checkpoint_id}/checkout` — worldline.ts:76-80
+        case checkout(novelId: String, checkpointId: String)
+        /// 硬重置 — `POST /novels/{novel_id}/worldline/checkpoints/{checkpoint_id}/hard-reset` — worldline.ts:82-86
+        case hardReset(novelId: String, checkpointId: String)
+        /// 删除检查点 — `DELETE /novels/{novel_id}/worldline/checkpoints/{checkpoint_id}` — worldline.ts:88-89
+        case deleteCheckpoint(novelId: String, checkpointId: String)
+        /// 按故事线获取分支 — `GET /novels/{novel_id}/worldline/branches/by-storyline/{storyline_id}` — worldline.ts:91-94
+        case branchByStoryline(novelId: String, storylineId: String)
+        /// 更新分支 — `PUT /novels/{novel_id}/worldline/branches/{branch_id}` — worldline.ts:96-104
+        case updateBranch(novelId: String, branchId: String)
+        /// 合并分支 — `POST /novels/{novel_id}/worldline/branches/{branch_id}/merge` — worldline.ts:106-114
+        case mergeBranch(novelId: String, branchId: String)
+        /// 汇流点列表 — `GET /novels/{novel_id}/confluence-points` — confluence.ts:16-18
+        case confluenceList(novelId: String)
     }
 
     // MARK: - Governance（叙事治理）
@@ -462,6 +480,8 @@ enum APIEndpoint {
     enum Chronicles {
         /// 获取编年史 — `GET /novels/{novel_id}/chronicles`
         case get(novelId: String)
+        /// 快照回滚 — `POST /novels/{novel_id}/snapshots/{snapshot_id}/rollback` — chronicles.ts:46-49
+        case rollback(novelId: String, snapshotId: String)
     }
 
     // MARK: - Trace（AI Trace 溯源）
@@ -526,6 +546,8 @@ enum APIEndpoint {
         case dialogueWhitelist(novelId: String)
         /// 角色锚点 — `GET /novels/{novel_id}/sandbox/character/{character_id}/anchor`
         case characterAnchor(novelId: String, characterId: String)
+        /// 更新角色锚点 — `PATCH /novels/{novel_id}/sandbox/character/{character_id}/anchor` — sandbox.ts:63-72
+        case patchCharacterAnchor(novelId: String, characterId: String)
         /// 生成对话 — `POST /novels/{novel_id}/sandbox/generate-dialogue`
         case generateDialogue(novelId: String)
     }
@@ -536,6 +558,20 @@ enum APIEndpoint {
         case get(novelId: String)
         /// 更新节拍表 — `PUT /beat-sheets/novels/{novel_id}`
         case update(novelId: String)
+    }
+
+    // MARK: - Manuscript（手稿实体索引）— manuscript.ts:25-46
+    enum Manuscript {
+        /// 章节实体提及列表 — `GET /novels/{novel_id}/chapters/{chapter_number}/entity-mentions`
+        case chapterMentions(novelId: String, chapterNumber: Int)
+        /// 重建章节实体索引 — `POST /novels/{novel_id}/chapters/{chapter_number}/entity-mentions/reindex`
+        case reindexMentions(novelId: String, chapterNumber: Int)
+    }
+
+    // MARK: - NarrativeEngine（叙事引擎只读聚合）— narrativeEngine.ts:79-95
+    enum NarrativeEngine {
+        /// 故事演化聚合 — `GET /novels/{novel_id}/narrative-engine/story-evolution`
+        case storyEvolution(novelId: String)
     }
 
     // MARK: - Taxonomy（分类法）
@@ -578,6 +614,10 @@ enum APIEndpoint {
         case savePlotOutline(novelId: String)
         /// 剧情总纲生成（POST 降级）— `POST /novels/{novelId}/setup/generate-plot-outline` — workflow.ts:801-806
         case generatePlotOutline(novelId: String)
+        /// 获取故事线列表 — `GET /novels/{novelId}/storylines` — workflow.ts:774-776
+        case getStorylines(novelId: String)
+        /// 获取故事线 Git Graph 数据 — `GET /novels/{novelId}/storylines/graph-data` — workflow.ts:778-780
+        case getStorylineGraphData(novelId: String)
     }
 
     // MARK: - ChapterElement（章节元素）
@@ -602,6 +642,28 @@ enum APIEndpoint {
         case chapters(novelId: String)
         /// 进度统计 — `GET /progress/{novel_id}`
         case progress(novelId: String)
+    }
+
+    // MARK: - Voice（文风金库，挂载于 NOVELS_API_PREFIX）
+    // 对齐原版 api/voice.ts:26-40 — 后端路由 /api/v1/novels/{novel_id}/voice/...
+    enum Voice {
+        /// 提交文风样本对 — `POST /novels/{novel_id}/voice/samples` — voice.ts:28-32
+        case createSample(novelId: String)
+        /// 查看文风指纹统计 — `GET /novels/{novel_id}/voice/fingerprint` — voice.ts:35-39
+        case getFingerprint(novelId: String, povCharacterId: String?)
+    }
+
+    // MARK: - Knowledge（叙事知识，挂载于 NOVELS_API_PREFIX）
+    // 对齐原版 api/knowledge.ts:71-106 — 后端路由 /api/v1/novels/{novel_id}/knowledge
+    enum Knowledge {
+        /// 获取叙事知识 — `GET /novels/{novel_id}/knowledge` — knowledge.ts:75-76
+        case get(novelId: String)
+        /// 更新叙事知识 — `PUT /novels/{novel_id}/knowledge` — knowledge.ts:81-82
+        case update(novelId: String)
+        /// 搜索叙事知识 — `GET /novels/{novel_id}/knowledge/search` — knowledge.ts:91-94
+        case search(novelId: String, query: String, k: Int)
+        /// AI 生成叙事知识 — `POST /novels/{novel_id}/knowledge/generate` — knowledge.ts:100-105
+        case generate(novelId: String)
     }
 
     // MARK: - 端点协议
@@ -1346,10 +1408,19 @@ extension APIEndpoint.Chronicles: APIEndpoint.EndpointInfo {
         switch self {
         case .get(let novelId):
             return "/novels/\(novelId)/chronicles"
+        case .rollback(let novelId, let snapshotId):
+            return "/novels/\(novelId)/snapshots/\(snapshotId)/rollback"
         }
     }
 
-    var method: HTTPMethod { .get }
+    var method: HTTPMethod {
+        switch self {
+        case .get:
+            return .get
+        case .rollback:
+            return .post
+        }
+    }
 }
 
 // MARK: - Trace 端点信息
@@ -1456,6 +1527,8 @@ extension APIEndpoint.Sandbox: APIEndpoint.EndpointInfo {
             return "/novels/\(novelId)/sandbox/dialogue-whitelist"
         case .characterAnchor(let novelId, let characterId):
             return "/novels/\(novelId)/sandbox/character/\(characterId)/anchor"
+        case .patchCharacterAnchor(let novelId, let characterId):
+            return "/novels/\(novelId)/sandbox/character/\(characterId)/anchor"
         case .generateDialogue(let novelId):
             return "/novels/\(novelId)/sandbox/generate-dialogue"
         }
@@ -1465,6 +1538,8 @@ extension APIEndpoint.Sandbox: APIEndpoint.EndpointInfo {
         switch self {
         case .dialogueWhitelist, .characterAnchor:
             return .get
+        case .patchCharacterAnchor:
+            return .patch
         case .generateDialogue:
             return .post
         }
@@ -1513,6 +1588,45 @@ extension APIEndpoint.KnowledgeGraph: APIEndpoint.EndpointInfo {
             return .delete
         case .starTriple:
             return .patch
+        }
+    }
+}
+
+// MARK: - Voice 端点信息 — voice.ts:26-40
+
+extension APIEndpoint.Voice: APIEndpoint.EndpointInfo {
+    var path: String {
+        switch self {
+        case .createSample(let novelId):
+            // voice.ts:30 — `/novels/${novelId}/voice/samples`
+            return "/novels/\(novelId)/voice/samples"
+        case .getFingerprint(let novelId, _):
+            // voice.ts:37 — `/novels/${novelId}/voice/fingerprint`
+            return "/novels/\(novelId)/voice/fingerprint"
+        }
+    }
+
+    var method: HTTPMethod {
+        switch self {
+        case .createSample:
+            // voice.ts:29 — POST
+            return .post
+        case .getFingerprint:
+            // voice.ts:36 — GET
+            return .get
+        }
+    }
+
+    var queryItems: [URLQueryItem] {
+        switch self {
+        case .createSample:
+            return []
+        case .getFingerprint(_, let povCharacterId):
+            // voice.ts:38 — params: povCharacterId ? { pov_character_id: povCharacterId } : {}
+            if let povCharacterId = povCharacterId, !povCharacterId.isEmpty {
+                return [URLQueryItem(name: "pov_character_id", value: povCharacterId)]
+            }
+            return []
         }
     }
 }
@@ -1569,6 +1683,12 @@ extension APIEndpoint.Workflow: APIEndpoint.EndpointInfo {
             return "/novels/\(novelId)/setup/plot-outline"
         case .generatePlotOutline(let novelId):
             return "/novels/\(novelId)/setup/generate-plot-outline"
+        case .getStorylines(let novelId):
+            // workflow.ts:775 — /novels/${novelId}/storylines
+            return "/novels/\(novelId)/storylines"
+        case .getStorylineGraphData(let novelId):
+            // workflow.ts:779 — /novels/${novelId}/storylines/graph-data
+            return "/novels/\(novelId)/storylines/graph-data"
         }
     }
 
@@ -1580,6 +1700,9 @@ extension APIEndpoint.Workflow: APIEndpoint.EndpointInfo {
             return .put
         case .generatePlotOutline:
             return .post
+        case .getStorylines, .getStorylineGraphData:
+            // workflow.ts:775/779 — GET
+            return .get
         }
     }
 }
@@ -1620,6 +1743,157 @@ extension APIEndpoint.ChapterElement: APIEndpoint.EndpointInfo {
         case .list:
             // element_type 可选查询参数，由调用方通过 URL 注入
             return []
+        default:
+            return []
+        }
+    }
+}
+
+// MARK: - Manuscript 端点信息 — manuscript.ts:25-46
+
+extension APIEndpoint.Manuscript: APIEndpoint.EndpointInfo {
+    var path: String {
+        switch self {
+        case .chapterMentions(let novelId, let chapterNumber):
+            return "/novels/\(novelId)/chapters/\(chapterNumber)/entity-mentions"
+        case .reindexMentions(let novelId, let chapterNumber):
+            return "/novels/\(novelId)/chapters/\(chapterNumber)/entity-mentions/reindex"
+        }
+    }
+
+    var method: HTTPMethod {
+        switch self {
+        case .chapterMentions:
+            return .get
+        case .reindexMentions:
+            return .post
+        }
+    }
+}
+
+// MARK: - NarrativeEngine 端点信息 — narrativeEngine.ts:84-88
+
+extension APIEndpoint.NarrativeEngine: APIEndpoint.EndpointInfo {
+    var path: String {
+        switch self {
+        case .storyEvolution(let novelId):
+            return "/novels/\(novelId)/narrative-engine/story-evolution"
+        }
+    }
+
+    var method: HTTPMethod { .get }
+}
+
+// MARK: - BeatSheets 端点信息
+
+extension APIEndpoint.BeatSheets: APIEndpoint.EndpointInfo {
+    var path: String {
+        switch self {
+        case .get(let novelId):
+            return "/beat-sheets/novels/\(novelId)"
+        case .update(let novelId):
+            return "/beat-sheets/novels/\(novelId)"
+        }
+    }
+
+    var method: HTTPMethod {
+        switch self {
+        case .get:
+            return .get
+        case .update:
+            return .put
+        }
+    }
+}
+
+// MARK: - Worldline 端点信息 — worldline.ts:52-115 + confluence.ts:16-18
+
+extension APIEndpoint.Worldline: APIEndpoint.EndpointInfo {
+    var path: String {
+        switch self {
+        case .graph(let novelId):
+            return "/novels/\(novelId)/worldline/graph"
+        case .checkpoints(let novelId):
+            return "/novels/\(novelId)/worldline/checkpoints"
+        case .createCheckpoint(let novelId):
+            return "/novels/\(novelId)/worldline/checkpoints"
+        case .branches(let novelId):
+            return "/novels/\(novelId)/worldline/branches"
+        case .createBranch(let novelId):
+            return "/novels/\(novelId)/worldline/branches"
+        case .checkout(let novelId, let checkpointId):
+            return "/novels/\(novelId)/worldline/checkpoints/\(checkpointId)/checkout"
+        case .hardReset(let novelId, let checkpointId):
+            return "/novels/\(novelId)/worldline/checkpoints/\(checkpointId)/hard-reset"
+        case .deleteCheckpoint(let novelId, let checkpointId):
+            return "/novels/\(novelId)/worldline/checkpoints/\(checkpointId)"
+        case .branchByStoryline(let novelId, let storylineId):
+            return "/novels/\(novelId)/worldline/branches/by-storyline/\(storylineId)"
+        case .updateBranch(let novelId, let branchId):
+            return "/novels/\(novelId)/worldline/branches/\(branchId)"
+        case .mergeBranch(let novelId, let branchId):
+            return "/novels/\(novelId)/worldline/branches/\(branchId)/merge"
+        case .confluenceList(let novelId):
+            return "/novels/\(novelId)/confluence-points"
+        }
+    }
+
+    var method: HTTPMethod {
+        switch self {
+        case .graph, .checkpoints, .branches, .branchByStoryline, .confluenceList:
+            return .get
+        case .createCheckpoint, .createBranch, .checkout, .hardReset, .mergeBranch:
+            return .post
+        case .deleteCheckpoint:
+            return .delete
+        case .updateBranch:
+            return .put
+        }
+    }
+}
+
+// MARK: - Knowledge 端点信息 — knowledge.ts:71-106
+
+extension APIEndpoint.Knowledge: APIEndpoint.EndpointInfo {
+    var path: String {
+        switch self {
+        case .get(let novelId):
+            // knowledge.ts:76 — `/novels/${novelId}/knowledge`
+            return "/novels/\(novelId)/knowledge"
+        case .update(let novelId):
+            // knowledge.ts:82 — `/novels/${novelId}/knowledge`
+            return "/novels/\(novelId)/knowledge"
+        case .search(let novelId, _, _):
+            // knowledge.ts:93 — `/novels/${novelId}/knowledge/search`
+            return "/novels/\(novelId)/knowledge/search"
+        case .generate(let novelId):
+            // knowledge.ts:104 — `/novels/${novelId}/knowledge/generate`
+            return "/novels/\(novelId)/knowledge/generate"
+        }
+    }
+
+    var method: HTTPMethod {
+        switch self {
+        case .get, .search:
+            // knowledge.ts:75 GET, knowledge.ts:91 GET
+            return .get
+        case .update:
+            // knowledge.ts:81 PUT
+            return .put
+        case .generate:
+            // knowledge.ts:100 POST
+            return .post
+        }
+    }
+
+    var queryItems: [URLQueryItem] {
+        switch self {
+        case .search(_, let query, let k):
+            // knowledge.ts:93 — params: { q: query, k }
+            return [
+                URLQueryItem(name: "q", value: query),
+                URLQueryItem(name: "k", value: String(k)),
+            ]
         default:
             return []
         }

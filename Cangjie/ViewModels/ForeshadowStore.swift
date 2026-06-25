@@ -93,6 +93,21 @@ final class ForeshadowStore: ObservableObject {
         await updateEntry(novelId: novelId, entryId: entryId, request: request)
     }
 
+    /// 切换优先级星标 — ForeshadowLedgerPanel.vue:400-412 togglePriority
+    /// - Parameters:
+    ///   - novelId: 小说 ID
+    ///   - entryId: 条目 ID
+    ///   - currentValue: 当前 isPriorityForChapter 值
+    func togglePriority(novelId: String, entryId: String, currentValue: Bool) async {
+        let request = UpdateForeshadowRequest(
+            chapter: nil, characterId: nil, question: nil,
+            status: nil, consumedAtChapter: nil,
+            suggestedResolveChapter: nil, resolveChapterWindow: nil,
+            importance: nil, isPriorityForChapter: !currentValue
+        )
+        await updateEntry(novelId: novelId, entryId: entryId, request: request)
+    }
+
     // MARK: - 便捷属性
 
     /// 待处理伏笔

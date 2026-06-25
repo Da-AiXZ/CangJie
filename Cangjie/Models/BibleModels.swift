@@ -150,6 +150,14 @@ struct TimelineNoteDTO: Codable, Identifiable, Equatable {
         self.timePoint = try c.decodeIfPresent(String.self, forKey: .timePoint) ?? ""
         self.description = try c.decodeIfPresent(String.self, forKey: .description) ?? ""
     }
+
+    /// 显式 memberwise init（T04教训8）
+    init(id: String, event: String, timePoint: String, description: String) {
+        self.id = id
+        self.event = event
+        self.timePoint = timePoint
+        self.description = description
+    }
 }
 
 // MARK: - 风格笔记 DTO

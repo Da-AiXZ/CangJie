@@ -57,34 +57,53 @@ struct DialogueWhitelistResponse: Codable, Equatable {
 
 // MARK: - 角色锚点
 
-/// 角色锚点响应（GET /novels/{id}/sandbox/character/{character_id}/anchor），后端返回 CharacterAnchorResponse
+/// 角色锚点响应（GET /novels/{id}/sandbox/character/{character_id}/anchor），字段对齐原版 sandbox.ts:22-28
 struct CharacterAnchor: Codable, Equatable {
     let characterId: String
-    let name: String
-    let anchorTraits: [String]?
-    let verbalPatterns: [String]?
-    let behavioralNotes: String?
-    let recentDialogueSamples: [DialogueEntry]?
+    let characterName: String
+    let mentalState: String
+    let verbalTic: String
+    let idleBehavior: String
 
     enum CodingKeys: String, CodingKey {
         case characterId = "character_id"
-        case name
-        case anchorTraits = "anchor_traits"
-        case verbalPatterns = "verbal_patterns"
-        case behavioralNotes = "behavioral_notes"
-        case recentDialogueSamples = "recent_dialogue_samples"
+        case characterName = "character_name"
+        case mentalState = "mental_state"
+        case verbalTic = "verbal_tic"
+        case idleBehavior = "idle_behavior"
     }
 
     init(from decoder: Decoder) throws {
-        let c = try decoder.singleValueContainer()
-        let dict = try c.decode([String: AnyCodable].self)
-        self.characterId = dict["character_id"]?.stringStringValue ?? ""
-        self.name = dict["name"]?.stringStringValue ?? ""
-        self.anchorTraits = (dict["anchor_traits"]?.arrayValue ?? []).compactMap { $0 as? String }
-        self.verbalPatterns = (dict["verbal_patterns"]?.arrayValue ?? []).compactMap { $0 as? String }
-        self.behavioralNotes = dict["behavioral_notes"]?.stringStringValue
-        let samplesData = try JSONSerialization.data(withJSONObject: dict["recent_dialogue_samples"]?.value ?? [])
-        self.recentDialogueSamples = try? CangjieDecoder.shared.decode([DialogueEntry].self, from: samplesData)
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.characterId = try c.decodeIfPresent(String.self, forKey: .characterId) ?? ""
+        self.characterName = try c.decodeIfPresent(String.self, forKey: .characterName) ?? ""
+        self.mentalState = try c.decodeIfPresent(String.self, forKey: .mentalState) ?? ""
+        self.verbalTic = try c.decodeIfPresent(String.self, forKey: .verbalTic) ?? ""
+        self.idleBehavior = try c.decodeIfPresent(String.self, forKey: .idleBehavior) ?? ""
+    }
+
+    /// 显式 memberwise init（T04教训8：自定义 init(from:) 会抑制 memberwise init 合成）
+    init(characterId: String, characterName: String, mentalState: String, verbalTic: String, idleBehavior: String) {
+        self.characterId = characterId
+        self.characterName = characterName
+        self.mentalState = mentalState
+        self.verbalTic = verbalTic
+        self.idleBehavior = idleBehavior
+    }
+}
+
+// MARK: - 角色锚点更新请求 — sandbox.ts:63-72
+
+/// 角色锚点更新请求（PATCH /novels/{id}/sandbox/character/{character_id}/anchor）
+struct PatchCharacterAnchorRequest: Codable {
+    let mentalState: String
+    let verbalTic: String
+    let idleBehavior: String
+
+    enum CodingKeys: String, CodingKey {
+        case mentalState = "mental_state"
+        case verbalTic = "verbal_tic"
+        case idleBehavior = "idle_behavior"
     }
 }
 

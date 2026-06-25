@@ -8,9 +8,16 @@
 import SwiftUI
 
 /// 推断证据详情视图
+///
+/// 对齐原版 knowledgeGraph.ts 中三元组操作：
+/// - starTriple (PATCH) — 标星/取消标星
+/// - revokeInferredTriple (DELETE) — 撤销单条推断三元组
 struct InferenceEvidenceView: View {
 
     let triple: KnowledgeTriple
+
+    /// 当前小说 ID，用于 starTriple / revokeInferredTriple 请求
+    let novelId: String?
 
     @EnvironmentObject var kgStore: KnowledgeGraphStore
     @Environment(\.dismiss) private var dismiss
@@ -21,6 +28,9 @@ struct InferenceEvidenceView: View {
                 VStack(alignment: .leading, spacing: Theme.Spacing.lg) {
                     // 三元组摘要
                     tripleSummary
+
+                    // 操作按钮区 — 对齐原版 starTriple / revokeInferredTriple
+                    actionButtons
 
                     // 推断证据
                     if !triple.provenance.isEmpty {
@@ -53,6 +63,49 @@ struct InferenceEvidenceView: View {
                 }
             }
         }
+    }
+
+    // MARK: - 操作按钮区
+
+    /// 操作按钮，对齐原版 knowledgeGraph.ts:
+    /// - starTriple (PATCH /star) — :128-134
+    /// - revokeInferredTriple (DELETE /inferred-triples/{id}) — :80-88
+    private var actionButtons: some View {
+        VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
+            // 标星按钮 — 对齐原版 starTriple :128-134
+            Button {
+                guard let novelId = novelId else { return }
+                let newStarred = !(triple.isStarred ?? false)
+                Task { await kgStore.starTriple(novelId: novelId, tripleId: triple.id, starred: newStarred) }
+            } label: {
+                Label(
+                    (triple.isStarred ?? false) ? "取消标星" : "标星",
+                    systemImage: (triple.isStarred ?? false) ? "star.fill" : "star"
+                )
+                .font(.system(size: 13, weight: .medium))
+                .foregroundColor((triple.isStarred ?? false) ? Theme.warning : Theme.textSecondary)
+            }
+            .buttonStyle(.bordered)
+            .disabled(novelId == nil)
+
+            // 撤销推断 — 对齐原版 revokeInferredTriple :80-88
+            // 仅对推断来源的三元组显示
+            if triple.sourceType == "chapter_inferred" || triple.sourceType == "ai_generated" {
+                Button(role: .destructive) {
+                    guard let novelId = novelId else { return }
+                    Task {
+                        await kgStore.revokeInferredTriple(novelId: novelId, tripleId: triple.id)
+                        dismiss()
+                    }
+                } label: {
+                    Label("撤销此推断", systemImage: "trash")
+                        .font(.system(size: 13, weight: .medium))
+                }
+                .buttonStyle(.bordered)
+                .disabled(novelId == nil)
+            }
+        }
+        .cardStyle()
     }
 
     // MARK: - 三元组摘要

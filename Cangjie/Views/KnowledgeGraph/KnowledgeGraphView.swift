@@ -49,7 +49,7 @@ struct KnowledgeGraphView: View {
             }
         }
         .sheet(item: $selectedTriple) { triple in
-            InferenceEvidenceView(triple: triple)
+            InferenceEvidenceView(triple: triple, novelId: appState.currentNovelId)
                 .environmentObject(kgStore)
         }
     }
@@ -72,12 +72,26 @@ struct KnowledgeGraphView: View {
 
             Spacer()
 
-            // 搜索
+            // 全书推断按钮 — 对齐原版 knowledgeGraph.ts:92-99 inferNovel
+            Button {
+                if let novelId = appState.currentNovelId {
+                    Task { await kgStore.inferNovel(novelId: novelId) }
+                }
+            } label: {
+                Label("推断", systemImage: "sparkles")
+                    .font(.system(size: 12))
+            }
+            .buttonStyle(.bordered)
+            .disabled(kgStore.isLoading || appState.currentNovelId == nil)
+
+            // 刷新
             if !kgStore.triples.isEmpty {
                 Button {
-                    // 刷新
                     if let novelId = appState.currentNovelId {
-                        Task { await kgStore.loadTriples(novelId: novelId) }
+                        Task {
+                            await kgStore.loadTriples(novelId: novelId)
+                            await kgStore.loadStatistics(novelId: novelId)
+                        }
                     }
                 } label: {
                     Image(systemName: "arrow.clockwise")

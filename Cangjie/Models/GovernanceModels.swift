@@ -72,28 +72,31 @@ struct ReviewActionPayload: Codable {
 
 // MARK: - 治理状态
 
-/// 治理状态（GET /novels/{id}/governance/state），后端返回 dict[str, Any]
+/// 治理状态（GET /novels/{id}/governance/state），字段对齐原版 governance.ts:61-67
+/// storylines ← canonical_storylines, debts ← open_debts, latestReport ← latest_report（单条）
+/// chapterBudgetPreview ← chapter_budget_preview（P0-3修复）
 struct GovernanceState: Codable, Equatable {
     let contract: GovernanceContract?
     let storylines: [Storyline]?
     let debts: [DebtRecord]?
-    let reports: [GovernanceReport]?
+    let latestReport: GovernanceReport?
+    let chapterBudgetPreview: ChapterNarrativeBudgetDTO?
+
+    enum CodingKeys: String, CodingKey {
+        case contract
+        case storylines = "canonical_storylines"
+        case debts = "open_debts"
+        case latestReport = "latest_report"
+        case chapterBudgetPreview = "chapter_budget_preview"
+    }
 
     init(from decoder: Decoder) throws {
-        let c = try decoder.singleValueContainer()
-        let dict = try c.decode([String: AnyCodable].self)
-
-        let contractData = try JSONSerialization.data(withJSONObject: dict["contract"]?.value ?? [:])
-        self.contract = try? CangjieDecoder.shared.decode(GovernanceContract.self, from: contractData)
-
-        let storylinesData = try JSONSerialization.data(withJSONObject: dict["storylines"]?.value ?? [])
-        self.storylines = try? CangjieDecoder.shared.decode([Storyline].self, from: storylinesData)
-
-        let debtsData = try JSONSerialization.data(withJSONObject: dict["debts"]?.value ?? [])
-        self.debts = try? CangjieDecoder.shared.decode([DebtRecord].self, from: debtsData)
-
-        let reportsData = try JSONSerialization.data(withJSONObject: dict["reports"]?.value ?? [])
-        self.reports = try? CangjieDecoder.shared.decode([GovernanceReport].self, from: reportsData)
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.contract = try c.decodeIfPresent(GovernanceContract.self, forKey: .contract)
+        self.storylines = try c.decodeIfPresent([Storyline].self, forKey: .storylines)
+        self.debts = try c.decodeIfPresent([DebtRecord].self, forKey: .debts)
+        self.latestReport = try c.decodeIfPresent(GovernanceReport.self, forKey: .latestReport)
+        self.chapterBudgetPreview = try c.decodeIfPresent(ChapterNarrativeBudgetDTO.self, forKey: .chapterBudgetPreview)
     }
 }
 
@@ -184,18 +187,28 @@ struct DebtRecord: Codable, Identifiable, Equatable {
 
 // MARK: - 治理报告
 
-/// 治理报告
+/// 治理报告 — governance.ts:48-59 GovernanceReportDTO
+/// P0-4修复：新增 promiseHitRate / severity / issues 字段
 struct GovernanceReport: Codable, Identifiable, Equatable {
     let id: String
     let chapterNumber: Int?
-    let violations: [AnyCodable]?
-    let budget: AnyCodable?
+    let promiseHitRate: Double?
+    let severity: String?
+    let issues: [GovernanceIssueDTO]?
+    let budgetPatch: AnyCodable?
+    let shouldPauseAutopilot: Bool?
     let status: String?
     let createdAt: String?
 
     enum CodingKeys: String, CodingKey {
-        case id, status, violations, budget
+        case id = "report_id"
         case chapterNumber = "chapter_number"
+        case promiseHitRate = "promise_hit_rate"
+        case severity
+        case issues
+        case budgetPatch = "budget_patch"
+        case shouldPauseAutopilot = "should_pause_autopilot"
+        case status = "review_status"
         case createdAt = "created_at"
     }
 
@@ -203,10 +216,78 @@ struct GovernanceReport: Codable, Identifiable, Equatable {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.id = try c.decodeIfPresent(String.self, forKey: .id) ?? ""
         self.chapterNumber = try c.decodeIfPresent(Int.self, forKey: .chapterNumber)
-        self.violations = try c.decodeIfPresent([AnyCodable].self, forKey: .violations)
-        self.budget = try c.decodeIfPresent(AnyCodable.self, forKey: .budget)
+        self.promiseHitRate = try c.decodeIfPresent(Double.self, forKey: .promiseHitRate)
+        self.severity = try c.decodeIfPresent(String.self, forKey: .severity)
+        self.issues = try c.decodeIfPresent([GovernanceIssueDTO].self, forKey: .issues)
+        self.budgetPatch = try c.decodeIfPresent(AnyCodable.self, forKey: .budgetPatch)
+        self.shouldPauseAutopilot = try c.decodeIfPresent(Bool.self, forKey: .shouldPauseAutopilot)
         self.status = try c.decodeIfPresent(String.self, forKey: .status)
         self.createdAt = try c.decodeIfPresent(String.self, forKey: .createdAt)
+    }
+}
+
+// MARK: - 治理问题 DTO — governance.ts:39-46 GovernanceIssueDTO
+
+/// 治理问题 DTO — governance.ts:39-46
+struct GovernanceIssueDTO: Codable, Identifiable, Equatable {
+    var id: String { code }
+    let code: String
+    let severity: String
+    let title: String
+    let detail: String
+    let evidence: [String]?
+    let suggestion: String?
+
+    enum CodingKeys: String, CodingKey {
+        case code, severity, title, detail, evidence, suggestion
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.code = try c.decodeIfPresent(String.self, forKey: .code) ?? ""
+        self.severity = try c.decodeIfPresent(String.self, forKey: .severity) ?? "info"
+        self.title = try c.decodeIfPresent(String.self, forKey: .title) ?? ""
+        self.detail = try c.decodeIfPresent(String.self, forKey: .detail) ?? ""
+        self.evidence = try c.decodeIfPresent([String].self, forKey: .evidence)
+        self.suggestion = try c.decodeIfPresent(String.self, forKey: .suggestion)
+    }
+}
+
+// MARK: - 章节叙事预算 DTO — governance.ts:28-37 ChapterNarrativeBudgetDTO
+
+/// 章节叙事预算 DTO — governance.ts:28-37
+/// P0-3修复：用于 GovernanceState.chapterBudgetPreview
+struct ChapterNarrativeBudgetDTO: Codable, Equatable {
+    let novelId: String?
+    let chapterNumber: Int
+    let maxNewStorylines: Int
+    let maxDebtClosures: Int
+    let allowedRevealLevel: String
+    let mustServePromiseTags: [String]
+    let carryOverDebtIds: [String]
+    let notes: [String]
+
+    enum CodingKeys: String, CodingKey {
+        case novelId = "novel_id"
+        case chapterNumber = "chapter_number"
+        case maxNewStorylines = "max_new_storylines"
+        case maxDebtClosures = "max_debt_closures"
+        case allowedRevealLevel = "allowed_reveal_level"
+        case mustServePromiseTags = "must_serve_promise_tags"
+        case carryOverDebtIds = "carry_over_debt_ids"
+        case notes
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.novelId = try c.decodeIfPresent(String.self, forKey: .novelId)
+        self.chapterNumber = try c.decodeIfPresent(Int.self, forKey: .chapterNumber) ?? 0
+        self.maxNewStorylines = try c.decodeIfPresent(Int.self, forKey: .maxNewStorylines) ?? 0
+        self.maxDebtClosures = try c.decodeIfPresent(Int.self, forKey: .maxDebtClosures) ?? 0
+        self.allowedRevealLevel = try c.decodeIfPresent(String.self, forKey: .allowedRevealLevel) ?? ""
+        self.mustServePromiseTags = try c.decodeIfPresent([String].self, forKey: .mustServePromiseTags) ?? []
+        self.carryOverDebtIds = try c.decodeIfPresent([String].self, forKey: .carryOverDebtIds) ?? []
+        self.notes = try c.decodeIfPresent([String].self, forKey: .notes) ?? []
     }
 }
 

@@ -51,6 +51,7 @@ enum SidebarDestination: String, CaseIterable, Hashable {
     case export = "导出"
     case snapshot = "快照"
     case trace = "AI Trace"
+    case debug = "调试工具"
     case settings = "设置"
 
     /// SF Symbol 图标名
@@ -82,6 +83,8 @@ enum SidebarDestination: String, CaseIterable, Hashable {
             return "camera.fill"
         case .trace:
             return "waveform.path"
+        case .debug:
+            return "ladybug.fill"
         case .settings:
             return "gearshape.fill"
         }

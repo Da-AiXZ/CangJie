@@ -137,6 +137,13 @@ struct TriplesTableView: View {
                         .cornerRadius(3)
                 }
 
+                // 标星指示 — 对齐原版 TripleDTO.is_starred (knowledgeGraph.ts:47)
+                if triple.isStarred == true {
+                    Image(systemName: "star.fill")
+                        .font(.system(size: 9))
+                        .foregroundColor(Theme.warning)
+                }
+
                 Spacer()
 
                 // 展开指示

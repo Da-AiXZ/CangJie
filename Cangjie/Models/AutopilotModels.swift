@@ -111,6 +111,36 @@ struct AutopilotStatus: Codable, Equatable {
     /// 上下文 token 数 — context_tokens
     let contextTokens: Int?
 
+    // MARK: - 批次2 新增：StoryPipeline 可观测性字段（对齐 StoryPipelineObservability.vue:86-123 StatusLike）
+    /// 当前管线波次索引（1-10）— story_pipeline_wave_index
+    let storyPipelineWaveIndex: Int?
+    /// 当前波次进入时间（unix timestamp）— story_pipeline_wave_entered_at
+    let storyPipelineWaveEnteredAt: Double?
+    /// 管线事件列表 — story_pipeline_events
+    let storyPipelineEvents: [StoryPipelineEvent]?
+    /// 章后管线实时状态 — aftermath_live_status ('running'|'done'|'failed'|null)
+    let aftermathLiveStatus: String?
+    /// 章后管线实时章节号 — aftermath_live_chapter_number
+    let aftermathLiveChapterNumber: Int?
+    /// 叙事同步是否OK — narrative_sync_ok
+    let narrativeSyncOk: Bool?
+    /// 向量是否已存储 — vector_stored
+    let vectorStored: Bool?
+    /// 伏笔是否已存储 — foreshadow_stored
+    let foreshadowStored: Bool?
+    /// 三元组是否已抽取 — triples_extracted
+    let triplesExtracted: Bool?
+    /// 因果边是否已存储 — causal_edges_stored
+    let causalEdgesStored: Bool?
+    /// 角色变更是否已存储 — character_mutations_stored
+    let characterMutationsStored: Bool?
+    /// 叙事债务是否已更新 — debt_updated
+    let debtUpdated: Bool?
+    /// 角色对账是否OK — character_reconcile_ok
+    let characterReconcileOk: Bool?
+    /// 演化快照是否OK — evolution_snapshot_ok
+    let evolutionSnapshotOk: Bool?
+
     enum CodingKeys: String, CodingKey {
         case autopilotStatus = "autopilot_status"
         case currentStage = "current_stage"
@@ -145,6 +175,21 @@ struct AutopilotStatus: Codable, Equatable {
         case accumulatedWords = "accumulated_words"
         case chapterTargetWords = "chapter_target_words"
         case contextTokens = "context_tokens"
+        // 批次2 StoryPipeline 可观测性字段 CodingKeys
+        case storyPipelineWaveIndex = "story_pipeline_wave_index"
+        case storyPipelineWaveEnteredAt = "story_pipeline_wave_entered_at"
+        case storyPipelineEvents = "story_pipeline_events"
+        case aftermathLiveStatus = "aftermath_live_status"
+        case aftermathLiveChapterNumber = "aftermath_live_chapter_number"
+        case narrativeSyncOk = "narrative_sync_ok"
+        case vectorStored = "vector_stored"
+        case foreshadowStored = "foreshadow_stored"
+        case triplesExtracted = "triples_extracted"
+        case causalEdgesStored = "causal_edges_stored"
+        case characterMutationsStored = "character_mutations_stored"
+        case debtUpdated = "debt_updated"
+        case characterReconcileOk = "character_reconcile_ok"
+        case evolutionSnapshotOk = "evolution_snapshot_ok"
     }
 
     init(from decoder: Decoder) throws {
@@ -182,8 +227,89 @@ struct AutopilotStatus: Codable, Equatable {
         self.accumulatedWords = try c.decodeIfPresent(Int.self, forKey: .accumulatedWords)
         self.chapterTargetWords = try c.decodeIfPresent(Int.self, forKey: .chapterTargetWords)
         self.contextTokens = try c.decodeIfPresent(Int.self, forKey: .contextTokens)
+        // 批次2 StoryPipeline 可观测性字段解码（对齐 StoryPipelineObservability.vue:86-123）
+        self.storyPipelineWaveIndex = try c.decodeIfPresent(Int.self, forKey: .storyPipelineWaveIndex)
+        self.storyPipelineWaveEnteredAt = try c.decodeIfPresent(Double.self, forKey: .storyPipelineWaveEnteredAt)
+        self.storyPipelineEvents = try c.decodeIfPresent([StoryPipelineEvent].self, forKey: .storyPipelineEvents)
+        self.aftermathLiveStatus = try c.decodeIfPresent(String.self, forKey: .aftermathLiveStatus)
+        self.aftermathLiveChapterNumber = try c.decodeIfPresent(Int.self, forKey: .aftermathLiveChapterNumber)
+        self.narrativeSyncOk = try c.decodeIfPresent(Bool.self, forKey: .narrativeSyncOk)
+        self.vectorStored = try c.decodeIfPresent(Bool.self, forKey: .vectorStored)
+        self.foreshadowStored = try c.decodeIfPresent(Bool.self, forKey: .foreshadowStored)
+        self.triplesExtracted = try c.decodeIfPresent(Bool.self, forKey: .triplesExtracted)
+        self.causalEdgesStored = try c.decodeIfPresent(Bool.self, forKey: .causalEdgesStored)
+        self.characterMutationsStored = try c.decodeIfPresent(Bool.self, forKey: .characterMutationsStored)
+        self.debtUpdated = try c.decodeIfPresent(Bool.self, forKey: .debtUpdated)
+        self.characterReconcileOk = try c.decodeIfPresent(Bool.self, forKey: .characterReconcileOk)
+        self.evolutionSnapshotOk = try c.decodeIfPresent(Bool.self, forKey: .evolutionSnapshotOk)
     }
 }
+
+// MARK: - StoryPipeline 事件（对齐 StoryPipelineObservability.vue:89-95）
+
+/// 管线事件，对应原版 StatusLike.story_pipeline_events 数组项
+///
+/// ```typescript
+/// { t: number; wave?: number; wave_id?: string; substep?: string; label?: string }
+/// ```
+struct StoryPipelineEvent: Codable, Equatable {
+    /// 时间戳（unix seconds）— :90 t
+    let t: Double
+    /// 波次号 — :91 wave
+    let wave: Int?
+    /// 波次ID — :92 wave_id
+    let waveId: String?
+    /// 子步骤 — :93 substep
+    let substep: String?
+    /// 标签 — :94 label
+    let label: String?
+
+    enum CodingKeys: String, CodingKey {
+        case t, wave
+        case waveId = "wave_id"
+        case substep, label
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.t = try c.decodeIfPresent(Double.self, forKey: .t) ?? 0
+        self.wave = try c.decodeIfPresent(Int.self, forKey: .wave)
+        self.waveId = try c.decodeIfPresent(String.self, forKey: .waveId)
+        self.substep = try c.decodeIfPresent(String.self, forKey: .substep)
+        self.label = try c.decodeIfPresent(String.self, forKey: .label)
+    }
+
+    init(t: Double = 0, wave: Int? = nil, waveId: String? = nil, substep: String? = nil, label: String? = nil) {
+        self.t = t
+        self.wave = wave
+        self.waveId = waveId
+        self.substep = substep
+        self.label = label
+    }
+}
+
+// MARK: - StoryPipeline 十步波次常量（对齐 constants/storyPipelineWaves.ts:4-19）
+
+/// StoryPipeline 十步波次定义，对齐原版 `constants/storyPipelineWaves.ts:4-19` STORY_PIPELINE_WAVES
+struct StoryPipelineWave: Identifiable, Equatable {
+    let index: Int
+    let id: String
+    let label: String
+}
+
+/// 十步波次常量 — storyPipelineWaves.ts:8-19
+let STORY_PIPELINE_WAVES: [StoryPipelineWave] = [
+    StoryPipelineWave(index: 1, id: "find_chapter", label: "章节定位"),
+    StoryPipelineWave(index: 2, id: "build_context", label: "组装上下文"),
+    StoryPipelineWave(index: 3, id: "generate_script", label: "剧本生成"),
+    StoryPipelineWave(index: 4, id: "generate_prose", label: "正文撰写"),
+    StoryPipelineWave(index: 5, id: "validate_policy", label: "策略校验"),
+    StoryPipelineWave(index: 6, id: "persist_chapter", label: "章节落盘"),
+    StoryPipelineWave(index: 7, id: "voice_audit", label: "文风审计"),
+    StoryPipelineWave(index: 8, id: "aftermath", label: "章后管线"),
+    StoryPipelineWave(index: 9, id: "score_tension", label: "张力打分"),
+    StoryPipelineWave(index: 10, id: "finalize", label: "收尾"),
+]
 
 // MARK: - 启动自动驾驶请求
 

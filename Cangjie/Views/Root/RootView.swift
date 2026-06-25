@@ -177,6 +177,9 @@ struct RootView: View {
                 noNovelSelectedPlaceholder("请先选择一部小说")
             }
 
+        case .debug:
+            CharacterSchedulerSimulatorView()
+
         case .locations:
             if appState.currentNovelId != nil {
                 LocationGraphView()
