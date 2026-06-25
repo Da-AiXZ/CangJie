@@ -193,82 +193,9 @@ struct EvolutionOverrideRequest: Codable {
     }
 }
 
-// MARK: - 剧情大纲 DTO — workflow.ts:119-124 PlotOutlineDTO
-
-/// 剧情大纲 DTO — workflow.ts:119-124
-/// 用于司令塔引导落点（P0-2 依赖）
-struct PlotOutlineDTO: Codable, Equatable {
-    let mainStoryOverview: String
-    let stagePlan: [PlotOutlineStageDTO]
-    let expectedEnding: String
-    let coreConflict: String
-
-    enum CodingKeys: String, CodingKey {
-        case mainStoryOverview = "main_story_overview"
-        case stagePlan = "stage_plan"
-        case expectedEnding = "expected_ending"
-        case coreConflict = "core_conflict"
-    }
-
-    init(from decoder: Decoder) throws {
-        let c = try decoder.container(keyedBy: CodingKeys.self)
-        self.mainStoryOverview = try c.decodeIfPresent(String.self, forKey: .mainStoryOverview) ?? ""
-        self.stagePlan = try c.decodeIfPresent([PlotOutlineStageDTO].self, forKey: .stagePlan) ?? []
-        self.expectedEnding = try c.decodeIfPresent(String.self, forKey: .expectedEnding) ?? ""
-        self.coreConflict = try c.decodeIfPresent(String.self, forKey: .coreConflict) ?? ""
-    }
-}
-
-/// 剧情大纲阶段 — workflow.ts:109-117 PlotOutlineStageDTO
-struct PlotOutlineStageDTO: Codable, Identifiable, Equatable {
-    var id: String { phase }
-    let phase: String
-    let label: String
-    let rangePercent: String
-    let chapterStart: Int?
-    let chapterEnd: Int?
-    let summary: String
-    let keyGoals: [String]?
-
-    enum CodingKeys: String, CodingKey {
-        case phase, label, summary
-        case rangePercent = "range_percent"
-        case chapterStart = "chapter_start"
-        case chapterEnd = "chapter_end"
-        case keyGoals = "key_goals"
-    }
-
-    init(from decoder: Decoder) throws {
-        let c = try decoder.container(keyedBy: CodingKeys.self)
-        self.phase = try c.decodeIfPresent(String.self, forKey: .phase) ?? ""
-        self.label = try c.decodeIfPresent(String.self, forKey: .label) ?? ""
-        self.rangePercent = try c.decodeIfPresent(String.self, forKey: .rangePercent) ?? ""
-        self.chapterStart = try c.decodeIfPresent(Int.self, forKey: .chapterStart)
-        self.chapterEnd = try c.decodeIfPresent(Int.self, forKey: .chapterEnd)
-        self.summary = try c.decodeIfPresent(String.self, forKey: .summary) ?? ""
-        self.keyGoals = try c.decodeIfPresent([String].self, forKey: .keyGoals)
-    }
-}
-
-/// 剧情大纲响应 — workflow.ts:126-130 GeneratePlotOutlineResponse
-struct GeneratePlotOutlineResponse: Codable, Equatable {
-    let plotOutline: PlotOutlineDTO?
-    let invocationSessionId: String?
-    let invocationNextAction: String?
-
-    enum CodingKeys: String, CodingKey {
-        case plotOutline = "plot_outline"
-        case invocationSessionId = "invocation_session_id"
-        case invocationNextAction = "invocation_next_action"
-    }
-
-    init(from decoder: Decoder) throws {
-        let c = try decoder.container(keyedBy: CodingKeys.self)
-        self.plotOutline = try c.decodeIfPresent(PlotOutlineDTO.self, forKey: .plotOutline)
-        self.invocationSessionId = try c.decodeIfPresent(String.self, forKey: .invocationSessionId)
-        self.invocationNextAction = try c.decodeIfPresent(String.self, forKey: .invocationNextAction)
-    }
-}
+// MARK: - 剧情大纲 DTO（PlotOutlineDTO/PlotOutlineStageDTO/GeneratePlotOutlineResponse）
+// 注意：这三个类型定义在 PlotOutlineModels.swift 中（字段更完整，含 memberwise init）
+// 此处不再重复声明，避免 "ambiguous for type lookup" 编译错误（教训10：新建类型前必须 Grep 查同名）
 
 // MARK: - 回放请求
 
