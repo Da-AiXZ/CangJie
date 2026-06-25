@@ -109,7 +109,7 @@ struct CharacterNavigatorView: View {
                 // 对齐 :17-19 头像
                 ZStack {
                     Circle()
-                        .fill(roleColor(char.role ?? ""))
+                        .fill(roleColor(char.role))
                     Text(String(char.name.prefix(1)))
                         .font(.system(size: 13, weight: .bold))
                         .foregroundColor(.white)
@@ -133,13 +133,13 @@ struct CharacterNavigatorView: View {
                     }
 
                     // 对齐 :29-32 角色Tag
-                    Text(roleLabel(char.role ?? ""))
+                    Text(roleLabel(char.role))
                         .font(.system(size: 10, weight: .semibold))
                         .padding(.horizontal, 6)
                         .padding(.vertical, 1)
-                        .background(roleBgColor(char.role ?? ""))
+                        .background(roleBgColor(char.role))
                         .cornerRadius(4)
-                        .foregroundColor(roleFgColor(char.role ?? ""))
+                        .foregroundColor(roleFgColor(char.role))
                 }
 
                 Spacer()

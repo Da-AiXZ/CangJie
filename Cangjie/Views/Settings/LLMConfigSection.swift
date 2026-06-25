@@ -308,7 +308,7 @@ struct LLMProfileEditView: View {
                         id: profile?.id ?? "",
                         name: name,
                         presetKey: "custom",
-                        `protocol`: protocolType,
+                        protocol: protocolType,
                         baseUrl: baseUrl,
                         apiKey: apiKey,
                         model: model,

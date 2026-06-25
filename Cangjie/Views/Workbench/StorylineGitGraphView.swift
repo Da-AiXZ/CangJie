@@ -274,8 +274,8 @@ struct StorylineGitGraphView: View {
                 path.move(to: CGPoint(x: commitCx(c1), y: commitCy(c1)))
                 path.addLine(to: CGPoint(x: commitCx(c2), y: commitCy(c2)))
                 let isActive = isActiveCommit(c1) || isActiveCommit(c2)
-                context.stroke(path, with: .color(tr.color),
-                               style: StrokeStyle(lineWidth: isActive ? 2.5 : 1.6, opacity: isActive ? 0.85 : 0.35))
+                context.stroke(path, with: .color(tr.color.opacity(isActive ? 0.85 : 0.35)),
+                               style: StrokeStyle(lineWidth: isActive ? 2.5 : 1.6))
             }
         }
 
@@ -310,8 +310,8 @@ struct StorylineGitGraphView: View {
                               control1: CGPoint(x: sx + dx * 0.45, y: sy),
                               control2: CGPoint(x: mx - dx * 0.35, y: my))
                 let sourceColor = tracks.first(where: { $0.id == source.trackId })?.color ?? .gray
-                context.stroke(path, with: .color(sourceColor),
-                               style: StrokeStyle(lineWidth: 2, opacity: 0.75))
+                context.stroke(path, with: .color(sourceColor.opacity(0.75)),
+                               style: StrokeStyle(lineWidth: 2))
             }
         }
     }
@@ -353,7 +353,7 @@ struct StorylineGitGraphView: View {
             let labelY = cy - (isMerge ? 16 : 14)
             context.draw(Text(cm.label)
                 .font(.system(size: 10, weight: isHead ? .bold : .medium))
-                .foregroundColor(isHead ? .orange : Color(Theme.textTertiary)),
+                .foregroundColor(isHead ? .orange : Theme.textTertiary),
                 at: CGPoint(x: cx, y: labelY), anchor: .top)
 
             // HEAD 标记 — 对齐 :260-268
@@ -389,7 +389,7 @@ struct StorylineGitGraphView: View {
             let x = chapterToX(ch)
             context.draw(Text("Ch.\(ch)")
                 .font(.system(size: 9))
-                .foregroundColor(Color(Theme.textTertiary)),
+                .foregroundColor(Theme.textTertiary),
                 at: CGPoint(x: x, y: svgHeight - 10), anchor: .top)
         }
     }

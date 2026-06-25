@@ -282,7 +282,8 @@ struct WorldlineDAGView: View {
         let allBranches = store.branches
         let headId = store.headId
 
-        // 分支列分配 — WorldlineDAG.vue:428-440        var branchOrder: [String] = []
+        // 分支列分配 — WorldlineDAG.vue:428-440
+        var branchOrder: [String] = []
         for b in allBranches {
             if !branchOrder.contains(b.name) {
                 branchOrder.append(b.name)

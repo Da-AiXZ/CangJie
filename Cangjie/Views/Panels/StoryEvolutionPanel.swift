@@ -624,7 +624,7 @@ struct StoryEvolutionPanel: View {
                         Text("\(snap.deltaActions.count) 个动作 · \(snap.conflicts.count) 个冲突")
                             .font(.system(size: 9)).foregroundColor(Theme.textTertiary)
                         if !snap.deltaActions.isEmpty {
-                            ForEach(Array(snap.deltaActions.prefix(20)), id: \.self) { action in
+                            ForEach(Array(snap.deltaActions.prefix(20)).enumerated(), id: \.offset) { _, action in
                                 let dict = action.value as? [String: Any] ?? [:]
                                 HStack(spacing: 4) {
                                     Text((dict["type"] as? String) ?? "action")
@@ -639,7 +639,7 @@ struct StoryEvolutionPanel: View {
                             }
                         }
                         // 冲突展示
-                        ForEach(Array(snap.conflicts.prefix(10)), id: \.self) { conflict in
+                        ForEach(Array(snap.conflicts.prefix(10)).enumerated(), id: \.offset) { _, conflict in
                             let dict = conflict.value as? [String: Any] ?? [:]
                             HStack(spacing: 4) {
                                 Text((dict["level"] as? String) ?? "warning")
@@ -718,9 +718,9 @@ struct StoryEvolutionPanel: View {
                 highlightRange: selectedStorylineRange,
                 bundledChronicleRows: store.evolutionBundle?.chronotope?.rows
             ) { event in
-                selectedItem = StorySelectedItem(type: "event", data: event)
+                selectedItem = StorySelectedItem(type: "event", data: AnyCodable(event))
             } onSelectSnapshot: { snapshot in
-                selectedItem = StorySelectedItem(type: "snapshot", data: snapshot)
+                selectedItem = StorySelectedItem(type: "snapshot", data: AnyCodable(snapshot))
             } onRequestRefresh: {
                 if let novelId = appState.currentNovelId {
                     Task { await store.loadBundle(novelId: novelId) }
