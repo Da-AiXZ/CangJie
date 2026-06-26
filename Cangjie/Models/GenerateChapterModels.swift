@@ -55,6 +55,29 @@ struct GenerateChapterWithContextPayload: Codable {
         self.prosePromptTemplate = nil
         self.promptVariables = nil
     }
+
+    /// 完整构造器（P0-2 生成弹窗传入完整 payload，对齐 workflow.ts:159-174）
+    init(
+        chapterNumber: Int,
+        outline: String,
+        sceneDirectorResult: AnyCodable? = nil,
+        invocationPolicy: String? = nil,
+        regenerationGuidance: String? = nil,
+        profileId: String? = nil,
+        scriptPromptTemplate: String? = nil,
+        prosePromptTemplate: String? = nil,
+        promptVariables: [String: String]? = nil
+    ) {
+        self.chapterNumber = chapterNumber
+        self.outline = outline
+        self.sceneDirectorResult = sceneDirectorResult
+        self.invocationPolicy = invocationPolicy
+        self.regenerationGuidance = regenerationGuidance
+        self.profileId = profileId
+        self.scriptPromptTemplate = scriptPromptTemplate
+        self.prosePromptTemplate = prosePromptTemplate
+        self.promptVariables = promptVariables
+    }
 }
 
 // MARK: - 流式统计（workflow.ts:273-277）

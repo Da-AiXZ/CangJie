@@ -284,4 +284,27 @@ struct Theme {
             endPoint: .bottomTrailing
         )
     }
+
+    // P1 补充：anchor 模式语义色（U3 决策）
+
+    /// Anchor 强调色（金色，用于按钮/链接/选中态）
+    static let anchorAccent = anchorGold
+
+    /// Anchor 主文字色（亮金色，用于标题/主文本）
+    static let anchorTextPrimary = Color(red: 0xF5/255.0, green: 0xE8/255.0, blue: 0xC8/255.0)
+
+    /// Anchor 次文字色（暗金色，用于副文本/描述）
+    static let anchorTextSecondary = Color(red: 0xB0/255.0, green: 0x9A/255.0, blue: 0x60/255.0)
+
+    /// Anchor 卡片背景色
+    static let anchorCardBackground = Color(red: 0x1A/255.0, green: 0x1C/255.0, blue: 0x24/255.0)
+
+    /// Anchor 分隔线颜色
+    static let anchorSeparator = Color(red: 0x2A/255.0, green: 0x2C/255.0, blue: 0x34/255.0)
+
+    /// Anchor 警告色（红色偏金）
+    static let anchorWarning = Color(red: 0xE8/255.0, green: 0xA8/255.0, blue: 0x43/255.0)
+
+    /// Anchor 成功色（金色偏绿）
+    static let anchorSuccess = Color(red: 0xA8/255.0, green: 0xD4/255.0, blue: 0x85/255.0)
 }

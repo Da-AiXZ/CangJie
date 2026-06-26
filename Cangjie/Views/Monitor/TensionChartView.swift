@@ -26,6 +26,9 @@ struct TensionChartView: View {
     /// 警戒线阈值（默认 5.0）
     private let threshold: Double = 5.0
 
+    /// P0-5：workbenchStore（用于打开张力诊断弹窗）
+    @EnvironmentObject var workbenchStore: WorkbenchStore
+
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
             // 标题
@@ -34,6 +37,15 @@ struct TensionChartView: View {
                     .font(Theme.headlineFont())
 
                 Spacer()
+
+                // P0-5：张力诊断入口按钮
+                Button {
+                    workbenchStore.openTensionModal(chapterNumber: curve.points.last?.chapter ?? 1)
+                } label: {
+                    Label("张力诊断", systemImage: "scope")
+                        .font(.system(size: 11))
+                }
+                .buttonStyle(.bordered)
 
                 // 平缓警告
                 if let stats = curve.stats, stats.isFlat {

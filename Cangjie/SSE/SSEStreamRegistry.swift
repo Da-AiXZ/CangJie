@@ -355,6 +355,14 @@ final class SSEStreamRegistry: ObservableObject {
         case .extensionInstall:
             // 7. 扩展包安装流
             path = "/system/install-extensions"
+
+        case .hostedWriteStream:
+            // P0-1: 托管撰稿流 — POST /api/v1/novels/{novelId}/hosted-write-stream
+            path = "/novels/\(novelId)/hosted-write-stream"
+
+        case .suggestMainPlotOptionsStream:
+            // P0-1: 主线推荐流 — POST /api/v1/novels/{novelId}/setup/suggest-main-plot-options-stream
+            path = "/novels/\(novelId)/setup/suggest-main-plot-options-stream"
         }
 
         return config.fullURL(path: path, prefix: APIConfig.apiV1Prefix)
@@ -724,6 +732,203 @@ extension SSEStreamRegistry {
         eventHandlers.removeValue(forKey: key)
         stateHandlers.removeValue(forKey: key)
         errorHandlers.removeValue(forKey: key)
+        lock.unlock()
+    }
+
+    // MARK: - 托管撰稿 SSE 流（P0-1, workflow.ts:523-579）
+
+    /// 构建托管撰稿 SSE URL — workflow.ts:523-579 consumeHostedWriteStream
+    /// POST /api/v1/novels/{novelId}/hosted-write-stream
+    ///
+    /// - Parameter novelId: 小说 ID
+    /// - Returns: SSE 端点 URL
+    func hostedWriteStreamURL(novelId: String) -> URL? {
+        let path = "/novels/\(novelId)/hosted-write-stream"
+        return config.fullURL(path: path, prefix: APIConfig.apiV1Prefix)
+    }
+
+    /// 启动托管撰稿 SSE 流 — workflow.ts:523-579 consumeHostedWriteStream
+    /// POST /api/v1/novels/{novelId}/hosted-write-stream
+    /// data-only 格式，事件类型由 data JSON 的 type 字段确定。
+    ///
+    /// - Parameters:
+    ///   - novelId: 小说 ID
+    ///   - payload: 请求载荷（JSON body）
+    ///   - onEvent: 事件回调
+    ///   - onError: 错误回调
+    /// - Returns: 是否成功启动
+    @discardableResult
+    func startHostedWriteStream(
+        novelId: String,
+        payload: [String: Any] = [:],
+        onEvent: @escaping (SSEEvent) -> Void,
+        onError: ((Error) -> Void)? = nil
+    ) -> Bool {
+        Logger.sse.info("启动托管撰稿 SSE 流 [novel: \(novelId)]")
+
+        guard let url = hostedWriteStreamURL(novelId: novelId) else {
+            Logger.sse.error("SSE URL 构建失败: 托管撰稿流")
+            onError?(APIError.invalidURL)
+            return false
+        }
+
+        let key = "hostedWriteStream:\(novelId)"
+
+        lock.lock()
+
+        if let oldConnection = connections[key] {
+            oldConnection.cancel()
+            connections.removeValue(forKey: key)
+        }
+
+        let bodyData = try? JSONSerialization.data(withJSONObject: payload, options: [])
+
+        let connection = SSEConnection(
+            streamType: .hostedWriteStream,
+            url: url,
+            client: client,
+            method: "POST",
+            body: bodyData
+        )
+        connections[key] = connection
+        eventHandlers[key] = onEvent
+        stateHandlers[key] = nil
+        errorHandlers[key] = onError
+
+        activeNovelIds.insert(novelId)
+        if activeStreams[novelId] == nil {
+            activeStreams[novelId] = []
+        }
+        activeStreams[novelId]?.insert(.hostedWriteStream)
+
+        lock.unlock()
+
+        connection.start(
+            onEvent: { [weak self] event in
+                self?.handleEvent(event, key: key)
+            },
+            onStateChange: { [weak self] state in
+                self?.handleStateChange(state, key: key)
+            },
+            onError: { [weak self] error in
+                self?.handleError(error, key: key)
+            }
+        )
+
+        return true
+    }
+
+    /// 取消托管撰稿 SSE 流
+    /// - Parameter novelId: 小说 ID
+    func cancelHostedWriteStream(novelId: String) {
+        let key = "hostedWriteStream:\(novelId)"
+        Logger.sse.info("取消托管撰稿 SSE 流: [novel: \(novelId)]")
+
+        lock.lock()
+        connections[key]?.cancel()
+        connections.removeValue(forKey: key)
+        eventHandlers.removeValue(forKey: key)
+        stateHandlers.removeValue(forKey: key)
+        errorHandlers.removeValue(forKey: key)
+        activeStreams[novelId]?.remove(.hostedWriteStream)
+        lock.unlock()
+    }
+
+    // MARK: - 主线推荐 SSE 流（P0-1, workflow.ts:581-680）
+
+    /// 构建主线推荐 SSE URL — workflow.ts:581-680 consumeMainPlotOptionsStream
+    /// POST /api/v1/novels/{novelId}/setup/suggest-main-plot-options-stream
+    ///
+    /// - Parameter novelId: 小说 ID
+    /// - Returns: SSE 端点 URL
+    func suggestMainPlotOptionsStreamURL(novelId: String) -> URL? {
+        let path = "/novels/\(novelId)/setup/suggest-main-plot-options-stream"
+        return config.fullURL(path: path, prefix: APIConfig.apiV1Prefix)
+    }
+
+    /// 启动主线推荐 SSE 流 — workflow.ts:581-680 consumeMainPlotOptionsStream
+    /// POST /api/v1/novels/{novelId}/setup/suggest-main-plot-options-stream
+    /// data-only 格式，6 类事件：phase/chunk/option/approval_required/done/error
+    ///
+    /// - Parameters:
+    ///   - novelId: 小说 ID
+    ///   - onEvent: 事件回调
+    ///   - onError: 错误回调
+    /// - Returns: 是否成功启动
+    @discardableResult
+    func startSuggestMainPlotOptionsStream(
+        novelId: String,
+        onEvent: @escaping (SSEEvent) -> Void,
+        onError: ((Error) -> Void)? = nil
+    ) -> Bool {
+        Logger.sse.info("启动主线推荐 SSE 流 [novel: \(novelId)]")
+
+        guard let url = suggestMainPlotOptionsStreamURL(novelId: novelId) else {
+            Logger.sse.error("SSE URL 构建失败: 主线推荐流")
+            onError?(APIError.invalidURL)
+            return false
+        }
+
+        let key = "suggestMainPlotOptionsStream:\(novelId)"
+
+        lock.lock()
+
+        if let oldConnection = connections[key] {
+            oldConnection.cancel()
+            connections.removeValue(forKey: key)
+        }
+
+        // 对齐原版 workflow.ts:586 body: '{}'
+        let bodyData = try? JSONSerialization.data(withJSONObject: [String: Any](), options: [])
+
+        let connection = SSEConnection(
+            streamType: .suggestMainPlotOptionsStream,
+            url: url,
+            client: client,
+            method: "POST",
+            body: bodyData
+        )
+        connections[key] = connection
+        eventHandlers[key] = onEvent
+        stateHandlers[key] = nil
+        errorHandlers[key] = onError
+
+        activeNovelIds.insert(novelId)
+        if activeStreams[novelId] == nil {
+            activeStreams[novelId] = []
+        }
+        activeStreams[novelId]?.insert(.suggestMainPlotOptionsStream)
+
+        lock.unlock()
+
+        connection.start(
+            onEvent: { [weak self] event in
+                self?.handleEvent(event, key: key)
+            },
+            onStateChange: { [weak self] state in
+                self?.handleStateChange(state, key: key)
+            },
+            onError: { [weak self] error in
+                self?.handleError(error, key: key)
+            }
+        )
+
+        return true
+    }
+
+    /// 取消主线推荐 SSE 流
+    /// - Parameter novelId: 小说 ID
+    func cancelSuggestMainPlotOptionsStream(novelId: String) {
+        let key = "suggestMainPlotOptionsStream:\(novelId)"
+        Logger.sse.info("取消主线推荐 SSE 流: [novel: \(novelId)]")
+
+        lock.lock()
+        connections[key]?.cancel()
+        connections.removeValue(forKey: key)
+        eventHandlers.removeValue(forKey: key)
+        stateHandlers.removeValue(forKey: key)
+        errorHandlers.removeValue(forKey: key)
+        activeStreams[novelId]?.remove(.suggestMainPlotOptionsStream)
         lock.unlock()
     }
 }

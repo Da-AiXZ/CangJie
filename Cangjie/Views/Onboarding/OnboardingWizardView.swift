@@ -202,9 +202,6 @@ struct OnboardingWizardView: View {
 
 // MARK: - 辅助类型
 
-/// 空请求体（用于 POST body: {}）
-struct EmptyBody: Codable {}
-
 /// 剧情总纲保存请求
 struct PlotOutlineSaveRequest: Codable {
     let plotOutline: PlotOutlineDTO

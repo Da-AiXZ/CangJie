@@ -38,6 +38,10 @@ struct NodeContextMenu: View {
     var onToggle: (String) -> Void
     /// 关闭回调
     var onClose: () -> Void
+    /// P0-6：编辑 Prompt 回调（打开 NodeEditorView sheet）
+    var onEditPrompt: ((String, String) -> Void)?
+    /// P0-7：在提示词广场编辑回调（调用 openPromptInPlaza）
+    var onEditInPlaza: ((String) -> Void)?
 
     // MARK: - 计算属性
 
@@ -69,8 +73,8 @@ struct NodeContextMenu: View {
 
     private func menuView(in geometry: GeometryProxy) -> some View {
         // 对齐 NodeContextMenu.vue:61-68 menuStyle（确保不超出视口）
-        let menuWidth: CGFloat = 200
-        let menuHeight: CGFloat = 150
+        let menuWidth: CGFloat = 220
+        let menuHeight: CGFloat = 260
         let maxX = geometry.size.width - menuWidth - 16
         let maxY = geometry.size.height - menuHeight - 16
         let clampedX = min(x, maxX)
@@ -94,6 +98,22 @@ struct NodeContextMenu: View {
             // 对齐 NodeContextMenu.vue:16-18 查看详情
             menuButton("📋 查看详情", color: Theme.primary) {
                 onDetail(nodeId)
+                onClose()
+            }
+
+            Divider()
+
+            // P0-6：编辑 Prompt — 打开 NodeEditorView sheet
+            menuButton("✏️ 编辑 Prompt", color: Theme.primary) {
+                onEditPrompt?(nodeId, nodeType)
+                onClose()
+            }
+
+            Divider()
+
+            // P0-7：在提示词广场编辑 — 调用 openPromptInPlaza
+            menuButton("🏪 在提示词广场编辑", color: Theme.info) {
+                onEditInPlaza?(nodeType)
                 onClose()
             }
 

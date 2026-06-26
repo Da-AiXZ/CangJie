@@ -33,6 +33,9 @@ struct GlobalLLMEntryButton: View {
     /// 是否显示 AI 控制台 Sheet
     @State private var showConsoleSheet: Bool = false
 
+    /// LLM 控制台 Store（用于 runtime chip 显示）
+    @StateObject private var llmStore = LLMControlStore()
+
     // MARK: - Body
 
     var body: some View {
@@ -55,13 +58,63 @@ struct GlobalLLMEntryButton: View {
                     .foregroundColor(Theme.textPrimary)
 
                 Spacer()
+
+                // A-2：runtime summary chip（激活模型/协议/Mock 状态）
+                runtimeChip
             }
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .task {
+            // 加载 runtime 数据用于 chip 显示
+            await llmStore.loadPanelData()
+        }
         .sheet(isPresented: $showConsoleSheet) {
             // 对齐原版 Modal — :43-306
             aiConsoleSheet
+        }
+    }
+
+    // MARK: - Runtime Summary Chip
+
+    /// 运行时摘要 chip，对齐原版 GlobalLLMEntryButton.vue:98-113 runtime 状态。
+    ///
+    /// 显示当前激活模型/协议/Mock 状态的小型 chip。
+    private var runtimeChip: some View {
+        Group {
+            if llmStore.isUsingMock {
+                // Mock 状态
+                Text("Mock")
+                    .font(.system(size: 9, weight: .medium))
+                    .padding(.horizontal, 5)
+                    .padding(.vertical, 2)
+                    .background(Theme.warning.opacity(0.2))
+                    .cornerRadius(4)
+                    .foregroundColor(Theme.warning)
+            } else if let model = llmStore.panelData?.runtime.model, !model.isEmpty {
+                // 激活模型 + 协议
+                HStack(spacing: 3) {
+                    if let proto = llmStore.panelData?.runtime.`protocol`, !proto.isEmpty {
+                        Text(proto)
+                            .font(.system(size: 9, weight: .medium))
+                            .padding(.horizontal, 4)
+                            .padding(.vertical, 2)
+                            .background(Theme.info.opacity(0.15))
+                            .cornerRadius(4)
+                            .foregroundColor(Theme.info)
+                    }
+                    Text(model)
+                        .font(.system(size: 9))
+                        .foregroundColor(Theme.textTertiary)
+                        .lineLimit(1)
+                        .frame(maxWidth: 80)
+                }
+            } else {
+                // 未配置
+                Text("未配置")
+                    .font(.system(size: 9))
+                    .foregroundColor(Theme.textTertiary)
+            }
         }
     }
 

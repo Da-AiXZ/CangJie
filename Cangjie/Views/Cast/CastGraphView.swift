@@ -15,19 +15,138 @@ struct CastGraphView: View {
     @StateObject private var castStore = CastStore()
 
     @State private var selectedCharacter: CastCharacter?
+    // P1-VIEW-03 搜索高亮
+    @State private var searchText: String = ""
+    @State private var highlightIds: Set<String> = []
+    @State private var searchDebounceTask: Task<Void, Never>?
+    // P1-VIEW-03 Coverage + 三元组抽屉
+    @State private var showCoverage: Bool = false
+    @State private var showTriplesDrawer: Bool = false
 
     var body: some View {
-        contentView
-            .navigationTitle("人物关系")
-            .navigationBarTitleDisplayMode(.inline)
-            .task {
-                if let novelId = appState.currentNovelId {
-                    await castStore.loadCastGraph(novelId: novelId)
+        VStack(spacing: 0) {
+            // P1-VIEW-03 搜索栏（对齐 Cast.vue:398-421）
+            searchBar
+
+            contentView
+        }
+        .navigationTitle("人物关系")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .navigationBarTrailing) {
+                Menu {
+                    Button {
+                        showCoverage = true
+                    } label: {
+                        Label("角色覆盖", systemImage: "person.crop.circle.badge.checkmark")
+                    }
+                    Button {
+                        showTriplesDrawer = true
+                    } label: {
+                        Label("三元组", systemImage: "network")
+                    }
+                } label: {
+                    Image(systemName: "ellipsis.circle")
                 }
             }
-            .sheet(item: $selectedCharacter) { character in
-                characterDetailSheet(character)
+        }
+        .task {
+            if let novelId = appState.currentNovelId {
+                await castStore.loadCastGraph(novelId: novelId)
             }
+        }
+        .sheet(item: $selectedCharacter) { character in
+            characterDetailSheet(character)
+        }
+        .sheet(isPresented: $showCoverage) {
+            if let novelId = appState.currentNovelId {
+                NavigationStack {
+                    CastCoveragePanel(novelId: novelId)
+                        .navigationTitle("角色覆盖")
+                        .navigationBarTitleDisplayMode(.inline)
+                        .toolbar {
+                            ToolbarItem(placement: .navigationBarTrailing) {
+                                Button("关闭") { showCoverage = false }
+                            }
+                        }
+                }
+            }
+        }
+        .sheet(isPresented: $showTriplesDrawer) {
+            if let novelId = appState.currentNovelId,
+               let graph = castStore.castGraph {
+                KnowledgeTriplesDrawer(
+                    novelId: novelId,
+                    triples: [],
+                    focusEntityName: selectedCharacter?.name,
+                    defaultEntityType: "character"
+                )
+            }
+        }
+    }
+
+    // MARK: - P1-VIEW-03 搜索栏
+
+    private var searchBar: some View {
+        HStack {
+            Image(systemName: "magnifyingglass")
+                .foregroundColor(Theme.textSecondary)
+                .font(.system(size: 12))
+            TextField("搜索角色…", text: $searchText)
+                .textFieldStyle(.plain)
+                .font(.system(size: 12))
+                .onChange(of: searchText) { newValue in
+                    // debounce 300ms（对齐 Cast.vue:398-421）
+                    searchDebounceTask?.cancel()
+                    searchDebounceTask = Task {
+                        try? await Task.sleep(nanoseconds: 300_000_000)
+                        if !Task.isCancelled {
+                            await performSearch(query: newValue)
+                        }
+                    }
+                }
+            if !searchText.isEmpty {
+                Button {
+                    searchText = ""
+                    highlightIds.removeAll()
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .foregroundColor(Theme.textSecondary)
+                        .font(.system(size: 12))
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .background(Theme.secondaryBackground)
+    }
+
+    // MARK: - P1-VIEW-03 搜索执行
+
+    private func performSearch(query: String) async {
+        guard let novelId = appState.currentNovelId, !query.isEmpty else {
+            highlightIds.removeAll()
+            return
+        }
+        do {
+            // 调用 Cast.search 端点（对齐 castApi.searchCast）
+            let results: AnyCodable = try await APIClient.shared.request(
+                APIEndpoint.Cast.search(novelId: novelId)
+            )
+            // 解析返回的 id 集合
+            if let resultsArray = results.arrayValue as? [[String: Any]] {
+                highlightIds = Set(resultsArray.compactMap { $0["id"] as? String })
+            }
+        } catch {
+            // 搜索失败时本地过滤
+            if let graph = castStore.castGraph {
+                let queryLower = query.lowercased()
+                highlightIds = Set(graph.characters
+                    .filter { $0.name.lowercased().contains(queryLower) }
+                    .map { $0.id })
+            }
+        }
     }
 
     @ViewBuilder

@@ -143,6 +143,10 @@ struct AiTraceSpan: Codable, Identifiable, Equatable {
     let novelId: String
     let operation: String
     let phase: String
+    /// P1 补齐：stage — engineCore.ts:336 AiTraceSpanDTO.stage
+    let stage: String?
+    /// P1 补齐：stage_label — engineCore.ts:337 AiTraceSpanDTO.stage_label
+    let stageLabel: String?
     let nodeId: String?
     let nodeType: String?
     let contractKey: String?
@@ -173,6 +177,8 @@ struct AiTraceSpan: Codable, Identifiable, Equatable {
         case parentSpanId = "parent_span_id"
         case novelId = "novel_id"
         case operation, phase
+        case stage
+        case stageLabel = "stage_label"
         case nodeId = "node_id"
         case nodeType = "node_type"
         case contractKey = "contract_key"
@@ -204,6 +210,8 @@ struct AiTraceSpan: Codable, Identifiable, Equatable {
         self.novelId = try c.decodeIfPresent(String.self, forKey: .novelId) ?? ""
         self.operation = try c.decodeIfPresent(String.self, forKey: .operation) ?? "ai_call"
         self.phase = try c.decodeIfPresent(String.self, forKey: .phase) ?? ""
+        self.stage = try c.decodeIfPresent(String.self, forKey: .stage)
+        self.stageLabel = try c.decodeIfPresent(String.self, forKey: .stageLabel)
         self.nodeId = try c.decodeIfPresent(String.self, forKey: .nodeId)
         self.nodeType = try c.decodeIfPresent(String.self, forKey: .nodeType)
         self.contractKey = try c.decodeIfPresent(String.self, forKey: .contractKey)

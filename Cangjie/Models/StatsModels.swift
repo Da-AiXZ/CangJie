@@ -61,7 +61,7 @@ struct BookStats: Codable, Equatable {
     let totalChapters: Int
     let completedChapters: Int
     let totalWords: Int
-    let avgChapterWords: Int
+    let avgChapterWords: Double
     let completionRate: Double
     let lastUpdated: String?
 
@@ -82,7 +82,7 @@ struct BookStats: Codable, Equatable {
         self.totalChapters = try c.decodeIfPresent(Int.self, forKey: .totalChapters) ?? 0
         self.completedChapters = try c.decodeIfPresent(Int.self, forKey: .completedChapters) ?? 0
         self.totalWords = try c.decodeIfPresent(Int.self, forKey: .totalWords) ?? 0
-        self.avgChapterWords = try c.decodeIfPresent(Int.self, forKey: .avgChapterWords) ?? 0
+        self.avgChapterWords = try c.decodeIfPresent(Double.self, forKey: .avgChapterWords) ?? 0.0
         self.completionRate = try c.decodeIfPresent(Double.self, forKey: .completionRate) ?? 0.0
         self.lastUpdated = try c.decodeIfPresent(String.self, forKey: .lastUpdated)
     }

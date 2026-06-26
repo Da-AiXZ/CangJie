@@ -13,6 +13,21 @@ struct LocationGraphView: View {
     @EnvironmentObject var appState: AppState
     @StateObject private var bibleStore = BibleStore()
 
+    // P1-VIEW-04 节点详情 + 三元组抽屉
+    @State private var selectedLocation: LocationDTO?
+    @State private var showTriplesDrawer: Bool = false
+
+    // E-3：实际三元组数据（从 API 加载）
+    @State private var allTriples: [KnowledgeTriple] = []
+
+    /// E-3：按选中地点节点过滤的三元组
+    private var filteredTriples: [KnowledgeTriple] {
+        guard let locationName = selectedLocation?.name else { return allTriples }
+        return allTriples.filter { triple in
+            triple.subject == locationName || triple.object == locationName
+        }
+    }
+
     var body: some View {
         Group {
             if let bible = bibleStore.bible, !bible.locations.isEmpty {
@@ -23,7 +38,11 @@ struct LocationGraphView: View {
                     nodeRadius: { _ in 24 },
                     nodeLabel: { $0.label },
                     edgeColor: { _ in Theme.textTertiary.opacity(0.4) },
-                    edgeLabel: { $0.label }
+                    edgeLabel: { $0.label },
+                    onTapNode: { nodeId in
+                        // P1-VIEW-04 节点点击 → 详情面板
+                        selectedLocation = bible.locations.first { $0.id == nodeId }
+                    }
                 )
             } else if bibleStore.isLoading {
                 ProgressView("加载地点…")
@@ -33,9 +52,76 @@ struct LocationGraphView: View {
         }
         .navigationTitle("地点关系")
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .navigationBarTrailing) {
+                Button {
+                    showTriplesDrawer = true
+                } label: {
+                    Image(systemName: "network")
+                }
+            }
+        }
         .task {
             if let novelId = appState.currentNovelId {
                 await bibleStore.loadBible(novelId: novelId)
+                // E-3：加载实际三元组数据
+                await loadTriples(novelId: novelId)
+            }
+        }
+        .sheet(item: $selectedLocation) { location in
+            // P1-VIEW-04 节点详情面板
+            locationDetailSheet(location)
+        }
+        .sheet(isPresented: $showTriplesDrawer) {
+            // P1-VIEW-04 三元组抽屉
+            if let novelId = appState.currentNovelId {
+                KnowledgeTriplesDrawer(
+                    novelId: novelId,
+                    triples: filteredTriples,
+                    focusEntityName: selectedLocation?.name,
+                    defaultEntityType: "location"
+                )
+            }
+        }
+    }
+
+    // MARK: - P1-VIEW-04 地点详情面板
+
+    @ViewBuilder
+    private func locationDetailSheet(_ location: LocationDTO) -> some View {
+        NavigationStack {
+            Form {
+                Section("基本信息") {
+                    LabeledContent("名称", value: location.name)
+                    LabeledContent("类型", value: location.locationType)
+                    if !location.description.isEmpty {
+                        LabeledContent("描述", value: location.description)
+                    }
+                }
+
+                if !location.aliases.isEmpty {
+                    Section("别名") {
+                        ForEach(location.aliases, id: \.self) { alias in
+                            Text(alias)
+                        }
+                    }
+                }
+
+                Section {
+                    Button {
+                        selectedLocation = nil
+                        showTriplesDrawer = true
+                    } label: {
+                        Label("查看相关三元组", systemImage: "network")
+                    }
+                }
+            }
+            .navigationTitle(location.name)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button("关闭") { selectedLocation = nil }
+                }
             }
         }
     }
@@ -86,6 +172,20 @@ struct LocationGraphView: View {
         }
 
         return edges
+    }
+
+    // MARK: - E-3 三元组加载
+
+    /// 加载知识三元组数据
+    private func loadTriples(novelId: String) async {
+        do {
+            let response: [KnowledgeTriple] = try await APIClient.shared.request(
+                APIEndpoint.Knowledge.triples(novelId: novelId)
+            )
+            allTriples = response
+        } catch {
+            allTriples = []
+        }
     }
 
     // MARK: - 颜色辅助

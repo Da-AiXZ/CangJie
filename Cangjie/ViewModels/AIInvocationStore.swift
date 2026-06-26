@@ -579,14 +579,15 @@ final class AIInvocationStore: ObservableObject {
     }
 
     /// 安排轮询 — aiInvocationStore.ts:423-450
-    /// Q2决策：间隔 2000ms 硬编码
+    /// D-1：间隔用 RuntimePerformance.aiInvocation.generationPollMs（1200ms），不再硬编码 2000
     private func scheduleGenerationPoll(sessionId: String) {
         guard activeGenerationPollSessions.contains(sessionId) else { return }
         if sessionPollTimers[sessionId] != nil || sessionPollInFlight.contains(sessionId) { return }
 
         let timer = Task { [weak self] in
-            // Q2决策：2000ms 硬编码
-            try? await Task.sleep(nanoseconds: 2_000_000_000)
+            // D-1：间隔从 RuntimePerformance 读取（1200ms）
+            let pollMs = RuntimePerformance.aiInvocation.generationPollMs
+            try? await Task.sleep(nanoseconds: UInt64(pollMs) * 1_000_000)
 
             guard let self = self else { return }
             self.sessionPollTimers.removeValue(forKey: sessionId)

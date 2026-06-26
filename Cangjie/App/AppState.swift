@@ -242,6 +242,33 @@ final class AppState: ObservableObject {
         return themeMode.isAnchor
     }
 
+    // MARK: - P1-STATE-04 Anchor 模式有效色值（U3 决策）
+
+    /// Anchor 模式下的强调色（非 anchor 模式返回 Theme.primary）
+    var effectiveAccent: Color {
+        return isAnchor ? Theme.anchorAccent : Theme.primary
+    }
+
+    /// Anchor 模式下的主文字色（非 anchor 模式返回 Theme.textPrimary）
+    var effectiveTextPrimary: Color {
+        return isAnchor ? Theme.anchorTextPrimary : Theme.textPrimary
+    }
+
+    /// Anchor 模式下的次文字色（非 anchor 模式返回 Theme.textSecondary）
+    var effectiveTextSecondary: Color {
+        return isAnchor ? Theme.anchorTextSecondary : Theme.textSecondary
+    }
+
+    /// Anchor 模式下的卡片背景色（非 anchor 模式返回 Theme.secondaryBackground）
+    var effectiveCardBackground: Color {
+        return isAnchor ? Theme.anchorCardBackground : Theme.secondaryBackground
+    }
+
+    /// Anchor 模式下的背景色（非 anchor 模式返回 Theme.background）
+    var effectiveBackground: Color {
+        return isAnchor ? Theme.anchorBackgroundDark : Theme.background
+    }
+
     // MARK: - 小说选择
 
     /// 选择小说

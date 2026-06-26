@@ -17,6 +17,12 @@ struct DAGCanvasView: View {
 
     @EnvironmentObject var dagStore: DAGStore
 
+    /// P0-7：提示词广场桥接（共享单例）
+    @ObservedObject private var promptPlazaBridge = PromptPlazaBridge.shared
+
+    /// P0-6：节点编辑器 Store（共享单例）
+    @ObservedObject private var nodeEditorStore = NodeEditorStore.shared
+
     /// 小说 ID（T04 新增，NodeDetailPanel/NodeContextMenu 需要）
     var novelId: String = ""
 
@@ -33,6 +39,9 @@ struct DAGCanvasView: View {
 
     /// 节点详情弹窗 — 决策6：用 .sheet 呈现 NodeDetailPanel
     @State private var showNodeDetail = false
+
+    /// P0-6：Prompt 编辑器弹窗
+    @State private var showNodeEditor = false
 
     /// 上下文菜单状态 — 决策7：自定义 overlay
     @State private var contextMenuState: ContextMenuState?
@@ -163,6 +172,14 @@ struct DAGCanvasView: View {
                     },
                     onClose: {
                         contextMenuState = nil
+                    },
+                    onEditPrompt: { nodeId, nodeType in
+                        // P0-6：打开 NodeEditorView sheet
+                        openNodeEditor(nodeId: nodeId, nodeType: nodeType)
+                    },
+                    onEditInPlaza: { nodeType in
+                        // P0-7：在提示词广场编辑
+                        promptPlazaBridge.openPromptInPlaza(nodeKey: nodeType, isDagType: true)
                     }
                 )
                 .environmentObject(dagStore)
@@ -183,6 +200,21 @@ struct DAGCanvasView: View {
             if let nodeId = selectedNodeId {
                 NodeDetailPanel(novelId: novelId, nodeId: nodeId)
                     .environmentObject(dagStore)
+            }
+        }
+        // P0-6：NodeEditorView sheet
+        .sheet(isPresented: $showNodeEditor) {
+            NodeEditorView()
+                .environmentObject(dagStore)
+        }
+        // P0-7：注册提示词保存回调，收到通知后刷新节点 prompt-live 数据
+        .onAppear {
+            // 设置 DAGStore 引用给桥接
+            promptPlazaBridge.setDAGStore(dagStore)
+            // 注册回调：提示词广场保存后刷新节点 prompt-live
+            promptPlazaBridge.setOnPlazaSaved { nodeKey in
+                // 对齐流程3时序图：回调触发刷新节点 prompt-live
+                refreshNodePromptLive(nodeKey: nodeKey)
             }
         }
         } // VStack
@@ -386,6 +418,48 @@ struct DAGCanvasView: View {
             }
         }
         return nil
+    }
+
+    // MARK: - P0-6/P0-7 辅助方法
+
+    /// 打开节点 Prompt 编辑器 — P0-6
+    /// - Parameters:
+    ///   - nodeId: 节点 ID
+    ///   - nodeType: 节点类型
+    private func openNodeEditor(nodeId: String, nodeType: String) {
+        // 从 DAG 获取节点配置中的模板和变量
+        let node = dagStore.nodes.first { $0.id == nodeId }
+        let template = node?.config?.promptTemplate ?? ""
+        let variables = node?.config?.promptVariables ?? [:]
+
+        // 打开编辑器
+        nodeEditorStore.open(
+            nId: novelId,
+            nNodeId: nodeId,
+            template: template,
+            vars: variables
+        )
+        showNodeEditor = true
+    }
+
+    /// 刷新节点 prompt-live 数据 — P0-7
+    /// 提示词广场保存后回调，刷新对应节点的实时提示词
+    /// - Parameter nodeKey: CPMS node_key
+    private func refreshNodePromptLive(nodeKey: String) {
+        // 通过 nodeKey 找到对应的 DAG 节点
+        guard let dag = dagStore.dagDefinition else { return }
+
+        // 遍历节点，找到 cpmsNodeKey 匹配的节点
+        for node in dag.nodes {
+            let cpmsKey = promptPlazaBridge.getCpmsKey(dagNodeType: node.type)
+            if cpmsKey == nodeKey {
+                // 刷新该节点的 prompt-live 数据
+                Task {
+                    await dagStore.loadNodePromptLive(novelId: novelId, nodeId: node.id)
+                }
+                return
+            }
+        }
     }
 
     // MARK: - 布局计算

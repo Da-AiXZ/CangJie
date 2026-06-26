@@ -200,7 +200,7 @@ struct DialogueGeneratorModalView: View {
                 "idle_behavior": characterAnchor?.idleBehavior ?? ""
             ]
             let raw: AnyCodable = try await apiClient.request(
-                APIEndpoint.Sandbox.generateDialogue(novelId: novelId),
+                APIEndpoint.Sandbox.generateDialogue,
                 body: AnyCodable(requestBody)
             )
             if let dict = raw.dictionaryValue {

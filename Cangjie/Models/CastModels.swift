@@ -148,11 +148,14 @@ struct CharacterCoverage: Codable, Identifiable, Equatable {
 // MARK: - Cast 覆盖分析
 
 /// Cast 覆盖分析，对应后端 CastCoverageDTO
+///
+/// C-2：bibleNotInCast 从 [AnyCodable] 结构化为 [CastBibleCharacter]；
+/// quotedNotInCast 从 [AnyCodable] 结构化为 [CastQuotedText]。
 struct CastCoverage: Codable, Equatable {
     let chapterFilesScanned: Int
     let characters: [CharacterCoverage]
-    let bibleNotInCast: [AnyCodable]
-    let quotedNotInCast: [AnyCodable]
+    let bibleNotInCast: [CastBibleCharacter]
+    let quotedNotInCast: [CastQuotedText]
 
     enum CodingKeys: String, CodingKey {
         case characters
@@ -165,30 +168,63 @@ struct CastCoverage: Codable, Equatable {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.chapterFilesScanned = try c.decodeIfPresent(Int.self, forKey: .chapterFilesScanned) ?? 0
         self.characters = try c.decodeIfPresent([CharacterCoverage].self, forKey: .characters) ?? []
-        self.bibleNotInCast = try c.decodeIfPresent([AnyCodable].self, forKey: .bibleNotInCast) ?? []
-        self.quotedNotInCast = try c.decodeIfPresent([AnyCodable].self, forKey: .quotedNotInCast) ?? []
+        self.bibleNotInCast = try c.decodeIfPresent([CastBibleCharacter].self, forKey: .bibleNotInCast) ?? []
+        self.quotedNotInCast = try c.decodeIfPresent([CastQuotedText].self, forKey: .quotedNotInCast) ?? []
     }
 }
 
 // MARK: - 角色叙事画像
 
 /// 角色叙事画像（GET /novels/{id}/characters/{character_id}/narrative-profile）
+/// 字段对齐原版 cast.ts:98-112 CharacterNarrativeProfile
+/// Q6 决策：base_profile/current_state 等字段原项目本身是 Record<string,unknown>，
+/// 用 AnyCodable 对齐是正确做法（非结构化字段）。
 struct CharacterNarrativeProfile: Codable, Equatable {
     let characterId: String
     let name: String
-    let arcSummary: String?
-    let emotionalJourney: [AnyCodable]?
-    let keyDecisions: [AnyCodable]?
-    let relationshipChanges: [AnyCodable]?
+    let baseProfile: AnyCodable?
+    let currentState: AnyCodable?
+    let castHistory: [AnyCodable]?
+    let relationshipEdges: [AnyCodable]?
+    let knowledgeFacts: [AnyCodable]?
+    let hiddenFacts: [AnyCodable]?
+    let openDebts: [AnyCodable]?
+    let foreshadowLinks: [AnyCodable]?
+    let causalLinks: [AnyCodable]?
+    let recentDialogueSamples: [AnyCodable]?
+    let consistencyRisks: [AnyCodable]?
+
+    enum CodingKeys: String, CodingKey {
+        case characterId = "character_id"
+        case name
+        case baseProfile = "base_profile"
+        case currentState = "current_state"
+        case castHistory = "cast_history"
+        case relationshipEdges = "relationship_edges"
+        case knowledgeFacts = "knowledge_facts"
+        case hiddenFacts = "hidden_facts"
+        case openDebts = "open_debts"
+        case foreshadowLinks = "foreshadow_links"
+        case causalLinks = "causal_links"
+        case recentDialogueSamples = "recent_dialogue_samples"
+        case consistencyRisks = "consistency_risks"
+    }
 
     init(from decoder: Decoder) throws {
         let c = try decoder.singleValueContainer()
         let dict = try c.decode([String: AnyCodable].self)
         self.characterId = dict["character_id"]?.stringStringValue ?? ""
         self.name = dict["name"]?.stringStringValue ?? ""
-        self.arcSummary = dict["arc_summary"]?.stringStringValue
-        self.emotionalJourney = dict["emotional_journey"]?.arrayValue?.map { AnyCodable($0) }
-        self.keyDecisions = dict["key_decisions"]?.arrayValue?.map { AnyCodable($0) }
-        self.relationshipChanges = dict["relationship_changes"]?.arrayValue?.map { AnyCodable($0) }
+        self.baseProfile = dict["base_profile"].map { AnyCodable($0) }
+        self.currentState = dict["current_state"].map { AnyCodable($0) }
+        self.castHistory = dict["cast_history"]?.arrayValue?.map { AnyCodable($0) }
+        self.relationshipEdges = dict["relationship_edges"]?.arrayValue?.map { AnyCodable($0) }
+        self.knowledgeFacts = dict["knowledge_facts"]?.arrayValue?.map { AnyCodable($0) }
+        self.hiddenFacts = dict["hidden_facts"]?.arrayValue?.map { AnyCodable($0) }
+        self.openDebts = dict["open_debts"]?.arrayValue?.map { AnyCodable($0) }
+        self.foreshadowLinks = dict["foreshadow_links"]?.arrayValue?.map { AnyCodable($0) }
+        self.causalLinks = dict["causal_links"]?.arrayValue?.map { AnyCodable($0) }
+        self.recentDialogueSamples = dict["recent_dialogue_samples"]?.arrayValue?.map { AnyCodable($0) }
+        self.consistencyRisks = dict["consistency_risks"]?.arrayValue?.map { AnyCodable($0) }
     }
 }

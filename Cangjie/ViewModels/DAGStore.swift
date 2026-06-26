@@ -271,7 +271,15 @@ final class DAGStore: ObservableObject {
 
     // MARK: - SSE 订阅
 
-    /// 启动 DAG 事件 SSE
+    /// P0-8：DAGRunStore 引用（事件分发委托）
+    private weak var dagRunStore: DAGRunStore?
+
+    /// 设置 DAGRunStore 引用（延迟注入）
+    func setDAGRunStore(_ store: DAGRunStore) {
+        self.dagRunStore = store
+    }
+
+    /// 启动 DAG 事件 SSE — P0-8 修改：事件处理改为调用 DAGRunStore 分发
     /// - Parameter novelId: 小说 ID
     func startDAGEvents(novelId: String) {
         sseRegistry.startDAGEvents(
@@ -297,7 +305,7 @@ final class DAGStore: ObservableObject {
         sseConnected = false
     }
 
-    /// 处理 DAG 事件
+    /// 处理 DAG 事件 — P0-8 修改：事件分发委托给 DAGRunStore
     private func handleDAGEvent(_ event: SSEEvent) {
         // DAG 事件使用 event+data 格式
         guard let dagEvent = try? event.decode(DAGEvent.self) else { return }
@@ -307,6 +315,13 @@ final class DAGStore: ObservableObject {
             return
         }
 
+        // P0-8：事件分发委托给 DAGRunStore（如果已注入）
+        // 传递原始 SSEEvent，让 DAGRunStore 正确处理 dag_run_complete 等特殊事件
+        if let runStore = dagRunStore {
+            runStore.dispatchSSEEvent(event)
+        }
+
+        // 保留原有事件追加逻辑（向后兼容）
         nodeEvents.append(dagEvent)
 
         // 保留最近 100 条

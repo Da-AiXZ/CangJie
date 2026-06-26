@@ -136,6 +136,13 @@ struct SSEEvent: Equatable {
         return typeFromData
     }
 
+    /// 主线推荐 SSE 事件类型（data-only 格式，从 data JSON 的 type 字段获取）。
+    /// 6 类事件：phase / chunk / option / approval_required / done / error
+    /// 对齐 workflow.ts:581-680 consumeMainPlotOptionsStream
+    var mainPlotOptionsEventType: String? {
+        return typeFromData
+    }
+
     /// 默认 JSON 解码器（配置微秒日期格式）
     private static let defaultDecoder: JSONDecoder = {
         let decoder = JSONDecoder()

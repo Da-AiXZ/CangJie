@@ -23,6 +23,20 @@ struct HomeView: View {
 
     @State private var searchQuery: String = ""
 
+    // B-1：批量操作状态
+    /// 是否处于批量选择模式
+    @State private var batchMode: Bool = false
+    /// 选中的书目 ID 集合
+    @State private var selectedBookIds: Set<String> = []
+    /// 是否显示"查看全部"弹窗
+    @State private var showAllBooks: Bool = false
+    /// 是否显示高级设置
+    @State private var showAdvanced: Bool = false
+    /// 高级设置：自定义章数
+    @State private var customTargetChapters: Int = 100
+    /// 高级设置：每章字数
+    @State private var customWordsPerChapter: Int = 2500
+
     // MARK: - 筛选
 
     /// 搜索过滤后的书目
@@ -63,6 +77,16 @@ struct HomeView: View {
                     noResultsState
                 } else {
                     booksGrid
+
+                    // B-1：批量操作栏
+                    if batchMode && !selectedBookIds.isEmpty {
+                        batchActionBar
+                    }
+
+                    // B-1：高级设置切换
+                    if showAdvanced {
+                        advancedSettingsSection
+                    }
                 }
             }
             .padding(Theme.Spacing.lg)
@@ -74,10 +98,24 @@ struct HomeView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .navigationBarTrailing) {
-                Button(action: onCreateNovel) {
-                    Image(systemName: "plus.circle.fill")
-                        .font(.system(size: 22))
-                }
+                HStack(spacing: 8) {
+                    // B-1：批量操作切换按钮
+                    if !novelStore.novels.isEmpty {
+                        Button {
+                            batchMode.toggle()
+                            if !batchMode {
+                                selectedBookIds.removeAll()
+                            }
+                        } label: {
+                            Image(systemName: batchMode ? "checkmark.circle.fill" : "checkmark.circle")
+                                .font(.system(size: 18))
+                        }
+                    }
+
+                    Button(action: onCreateNovel) {
+                        Image(systemName: "plus.circle.fill")
+                            .font(.system(size: 22))
+                    }
             }
         }
         .refreshable {
@@ -96,9 +134,22 @@ struct HomeView: View {
 
     private var headerSection: some View {
         VStack(spacing: Theme.Spacing.sm) {
-            Text("我的书目")
-                .font(Theme.titleFont())
-                .frame(maxWidth: .infinity, alignment: .leading)
+            HStack {
+                Text("我的书目")
+                    .font(Theme.titleFont())
+                    .frame(maxWidth: .infinity, alignment: .leading)
+
+                // B-1：高级设置切换
+                if !novelStore.novels.isEmpty {
+                    Button {
+                        showAdvanced.toggle()
+                    } label: {
+                        Image(systemName: showAdvanced ? "slider.horizontal.3.fill" : "slider.horizontal.3")
+                            .font(.system(size: 16))
+                            .foregroundColor(Theme.textSecondary)
+                    }
+                }
+            }
 
             if !novelStore.novels.isEmpty {
                 Text("\(novelStore.novels.count) 本")
@@ -138,25 +189,172 @@ struct HomeView: View {
     private var booksGrid: some View {
         LazyVGrid(columns: columns, spacing: Theme.Spacing.md) {
             ForEach(filteredNovels) { novel in
-                NovelCardView(novel: novel) {
-                    onOpenNovel(novel)
-                }
-                .contextMenu {
-                    Button {
-                        onOpenNovel(novel)
-                    } label: {
-                        Label("进入工作台", systemImage: "book.fill")
+                // B-1：批量模式下显示选中状态
+                if batchMode {
+                    NovelCardView(novel: novel) {
+                        toggleBookSelection(novel.id)
                     }
-
-                    Button(role: .destructive) {
-                        Task {
-                            await novelStore.deleteNovel(novel.id)
+                    .overlay(
+                        Group {
+                            if selectedBookIds.contains(novel.id) {
+                                RoundedRectangle(cornerRadius: 10)
+                                    .stroke(Theme.primary, lineWidth: 2)
+                            }
                         }
-                    } label: {
-                        Label("删除", systemImage: "trash")
+                    )
+                    .overlay(alignment: .topTrailing) {
+                        Image(systemName: selectedBookIds.contains(novel.id) ? "checkmark.circle.fill" : "circle")
+                            .foregroundColor(selectedBookIds.contains(novel.id) ? Theme.primary : Theme.textTertiary)
+                            .padding(8)
+                    }
+                    .contextMenu {
+                        Button {
+                            toggleBookSelection(novel.id)
+                        } label: {
+                            Label(selectedBookIds.contains(novel.id) ? "取消选中" : "选中", systemImage: "checkmark")
+                        }
+                    }
+                } else {
+                    NovelCardView(novel: novel) {
+                        onOpenNovel(novel)
+                    }
+                    .contextMenu {
+                        Button {
+                            onOpenNovel(novel)
+                        } label: {
+                            Label("进入工作台", systemImage: "book.fill")
+                        }
+
+                        Button(role: .destructive) {
+                            Task {
+                                await novelStore.deleteNovel(novel.id)
+                            }
+                        } label: {
+                            Label("删除", systemImage: "trash")
+                        }
+
+                        // B-1：查看全部弹窗
+                        Button {
+                            showAllBooks = true
+                        } label: {
+                            Label("查看全部", systemImage: "list.bullet")
+                        }
                     }
                 }
             }
+        }
+        .sheet(isPresented: $showAllBooks) {
+            // B-1：查看全部弹窗
+            NavigationStack {
+                List(novelStore.novels) { novel in
+                    Button {
+                        showAllBooks = false
+                        onOpenNovel(novel)
+                    } label: {
+                        HStack {
+                            Image(systemName: "book.fill")
+                                .foregroundColor(Theme.primary)
+                            VStack(alignment: .leading) {
+                                Text(novel.title)
+                                    .font(.system(size: 14, weight: .medium))
+                                Text("\(novel.lockedGenre) · \(novel.chapters.count)章")
+                                    .font(.system(size: 11))
+                                    .foregroundColor(Theme.textTertiary)
+                            }
+                        }
+                    }
+                    .buttonStyle(.plain)
+                }
+                .navigationTitle("全部书目")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .navigationBarTrailing) {
+                        Button("关闭") { showAllBooks = false }
+                    }
+                }
+            }
+        }
+    }
+
+    // MARK: - B-1 批量操作栏
+
+    /// 批量操作栏：全选/反选 + 删除选中
+    private var batchActionBar: some View {
+        HStack(spacing: 12) {
+            // 全选/反选
+            Button {
+                if selectedBookIds.count == filteredNovels.count {
+                    selectedBookIds.removeAll()
+                } else {
+                    selectedBookIds = Set(filteredNovels.map { $0.id })
+                }
+            } label: {
+                Text(selectedBookIds.count == filteredNovels.count ? "取消全选" : "全选")
+                    .font(.system(size: 13))
+            }
+
+            Spacer()
+
+            // 删除选中
+            Button(role: .destructive) {
+                Task {
+                    for id in selectedBookIds {
+                        await novelStore.deleteNovel(id)
+                    }
+                    selectedBookIds.removeAll()
+                    batchMode = false
+                }
+            } label: {
+                Label("删除选中(\(selectedBookIds.count))", systemImage: "trash")
+                    .font(.system(size: 13, weight: .medium))
+            }
+            .buttonStyle(.borderedProminent)
+            .tint(Theme.error)
+        }
+        .padding(.horizontal, Theme.Spacing.md)
+        .padding(.vertical, Theme.Spacing.sm)
+        .background(Theme.secondaryBackground)
+        .cornerRadius(Theme.CornerRadius.medium)
+    }
+
+    // MARK: - B-1 高级设置
+
+    /// 高级设置切换按钮（放在标题区下方）
+    private var advancedSettingsSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("高级设置")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundColor(Theme.textPrimary)
+
+            HStack {
+                Text("自定义章数")
+                    .font(.system(size: 12))
+                    .foregroundColor(Theme.textSecondary)
+                Stepper("\(customTargetChapters) 章", value: $customTargetChapters, in: 1...500, step: 10)
+                    .font(.system(size: 12))
+            }
+
+            HStack {
+                Text("每章字数")
+                    .font(.system(size: 12))
+                    .foregroundColor(Theme.textSecondary)
+                Stepper("\(customWordsPerChapter) 字", value: $customWordsPerChapter, in: 1000...5000, step: 500)
+                    .font(.system(size: 12))
+            }
+        }
+        .padding(Theme.Spacing.md)
+        .background(Theme.secondaryBackground)
+        .cornerRadius(Theme.CornerRadius.medium)
+    }
+
+    // MARK: - B-1 批量选择辅助
+
+    /// 切换书目选中状态
+    private func toggleBookSelection(_ id: String) {
+        if selectedBookIds.contains(id) {
+            selectedBookIds.remove(id)
+        } else {
+            selectedBookIds.insert(id)
         }
     }
 

@@ -85,6 +85,12 @@ struct ChapterDTO: Codable, Identifiable, Equatable {
     /// 生成提示
     let generationHint: String
 
+    /// 创建时间（ISO 字符串）— chapter.ts ChapterDTO.created_at
+    let createdAt: String
+
+    /// 修改时间（ISO 字符串）— chapter.ts ChapterDTO.updated_at
+    let updatedAt: String
+
     enum CodingKeys: String, CodingKey {
         case id
         case novelId = "novel_id"
@@ -92,6 +98,8 @@ struct ChapterDTO: Codable, Identifiable, Equatable {
         case wordCount = "word_count"
         case status
         case generationHint = "generation_hint"
+        case createdAt = "created_at"
+        case updatedAt = "updated_at"
     }
 
     init(from decoder: Decoder) throws {
@@ -104,10 +112,13 @@ struct ChapterDTO: Codable, Identifiable, Equatable {
         self.wordCount = try c.decodeIfPresent(Int.self, forKey: .wordCount) ?? 0
         self.status = try c.decodeIfPresent(String.self, forKey: .status) ?? "draft"
         self.generationHint = try c.decodeIfPresent(String.self, forKey: .generationHint) ?? ""
+        self.createdAt = try c.decodeIfPresent(String.self, forKey: .createdAt) ?? ""
+        self.updatedAt = try c.decodeIfPresent(String.self, forKey: .updatedAt) ?? ""
     }
 
     init(id: String, novelId: String, number: Int, title: String, content: String,
-         wordCount: Int, status: String, generationHint: String = "") {
+         wordCount: Int, status: String, generationHint: String = "",
+         createdAt: String = "", updatedAt: String = "") {
         self.id = id
         self.novelId = novelId
         self.number = number
@@ -116,6 +127,161 @@ struct ChapterDTO: Codable, Identifiable, Equatable {
         self.wordCount = wordCount
         self.status = status
         self.generationHint = generationHint
+        self.createdAt = createdAt
+        self.updatedAt = updatedAt
+    }
+}
+
+// MARK: - 章节微观节拍载荷
+
+/// 章节微观节拍载荷，对应原版 chapter.ts:18-38 ChapterMicroBeatPayload
+///
+/// 18 个字段：description 必填，其余可选。
+/// 保存时写入 chapter_summaries.micro_beats。
+struct ChapterMicroBeatPayload: Codable, Equatable {
+
+    /// 描述（必填）— chapter.ts:19
+    let description: String
+
+    /// 目标字数 — chapter.ts:20
+    let targetWords: Int?
+
+    /// 焦点 — chapter.ts:21
+    let focus: String?
+
+    /// 地点 ID — chapter.ts:22
+    let locationId: String?
+
+    /// 功能 — chapter.ts:23
+    let function: String?
+
+    /// 视角 — chapter.ts:24
+    let pov: String?
+
+    /// 角色引用 — chapter.ts:25
+    let castRefs: [String]?
+
+    /// 地点引用 — chapter.ts:26
+    let locationRefs: [String]?
+
+    /// 道具引用 — chapter.ts:27
+    let propRefs: [String]?
+
+    /// 知识引用 — chapter.ts:28
+    let knowledgeRefs: [String]?
+
+    /// 可见动作 — chapter.ts:29
+    let visibleAction: String?
+
+    /// 冲突 — chapter.ts:30
+    let conflict: String?
+
+    /// 变化 — chapter.ts:31
+    let delta: String?
+
+    /// 交接下一节拍 — chapter.ts:32
+    let handoffToNext: String?
+
+    /// 必须包含 — chapter.ts:33
+    let mustInclude: [String]?
+
+    /// 禁止包含 — chapter.ts:34
+    let mustNotInclude: [String]?
+
+    /// 主动动作 — chapter.ts:35
+    let activeAction: String?
+
+    /// 情感差距 — chapter.ts:36
+    let emotionGap: String?
+
+    /// 禁止偏移 — chapter.ts:37
+    let forbiddenDrift: String?
+
+    enum CodingKeys: String, CodingKey {
+        case description
+        case targetWords = "target_words"
+        case focus
+        case locationId = "location_id"
+        case function
+        case pov
+        case castRefs = "cast_refs"
+        case locationRefs = "location_refs"
+        case propRefs = "prop_refs"
+        case knowledgeRefs = "knowledge_refs"
+        case visibleAction = "visible_action"
+        case conflict
+        case delta
+        case handoffToNext = "handoff_to_next"
+        case mustInclude = "must_include"
+        case mustNotInclude = "must_not_include"
+        case activeAction = "active_action"
+        case emotionGap = "emotion_gap"
+        case forbiddenDrift = "forbidden_drift"
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.description = try c.decodeIfPresent(String.self, forKey: .description) ?? ""
+        self.targetWords = try c.decodeIfPresent(Int.self, forKey: .targetWords)
+        self.focus = try c.decodeIfPresent(String.self, forKey: .focus)
+        self.locationId = try c.decodeIfPresent(String.self, forKey: .locationId)
+        self.function = try c.decodeIfPresent(String.self, forKey: .function)
+        self.pov = try c.decodeIfPresent(String.self, forKey: .pov)
+        self.castRefs = try c.decodeIfPresent([String].self, forKey: .castRefs)
+        self.locationRefs = try c.decodeIfPresent([String].self, forKey: .locationRefs)
+        self.propRefs = try c.decodeIfPresent([String].self, forKey: .propRefs)
+        self.knowledgeRefs = try c.decodeIfPresent([String].self, forKey: .knowledgeRefs)
+        self.visibleAction = try c.decodeIfPresent(String.self, forKey: .visibleAction)
+        self.conflict = try c.decodeIfPresent(String.self, forKey: .conflict)
+        self.delta = try c.decodeIfPresent(String.self, forKey: .delta)
+        self.handoffToNext = try c.decodeIfPresent(String.self, forKey: .handoffToNext)
+        self.mustInclude = try c.decodeIfPresent([String].self, forKey: .mustInclude)
+        self.mustNotInclude = try c.decodeIfPresent([String].self, forKey: .mustNotInclude)
+        self.activeAction = try c.decodeIfPresent(String.self, forKey: .activeAction)
+        self.emotionGap = try c.decodeIfPresent(String.self, forKey: .emotionGap)
+        self.forbiddenDrift = try c.decodeIfPresent(String.self, forKey: .forbiddenDrift)
+    }
+
+    init(
+        description: String = "",
+        targetWords: Int? = nil,
+        focus: String? = nil,
+        locationId: String? = nil,
+        function: String? = nil,
+        pov: String? = nil,
+        castRefs: [String]? = nil,
+        locationRefs: [String]? = nil,
+        propRefs: [String]? = nil,
+        knowledgeRefs: [String]? = nil,
+        visibleAction: String? = nil,
+        conflict: String? = nil,
+        delta: String? = nil,
+        handoffToNext: String? = nil,
+        mustInclude: [String]? = nil,
+        mustNotInclude: [String]? = nil,
+        activeAction: String? = nil,
+        emotionGap: String? = nil,
+        forbiddenDrift: String? = nil
+    ) {
+        self.description = description
+        self.targetWords = targetWords
+        self.focus = focus
+        self.locationId = locationId
+        self.function = function
+        self.pov = pov
+        self.castRefs = castRefs
+        self.locationRefs = locationRefs
+        self.propRefs = propRefs
+        self.knowledgeRefs = knowledgeRefs
+        self.visibleAction = visibleAction
+        self.conflict = conflict
+        self.delta = delta
+        self.handoffToNext = handoffToNext
+        self.mustInclude = mustInclude
+        self.mustNotInclude = mustNotInclude
+        self.activeAction = activeAction
+        self.emotionGap = emotionGap
+        self.forbiddenDrift = forbiddenDrift
     }
 }
 
@@ -150,7 +316,7 @@ struct NovelDTO: Codable, Identifiable, Equatable {
     let lockedWritingStyle: String
     let lockedSpecialRequirements: String
     let targetWordsPerChapter: Int
-    let generationPrefs: AnyCodable
+    let generationPrefs: GenerationPrefsDTO?
 
     enum CodingKeys: String, CodingKey {
         case id, title, author, stage, premise, chapters, slug
@@ -192,7 +358,7 @@ struct NovelDTO: Codable, Identifiable, Equatable {
         self.lockedWritingStyle = try c.decodeIfPresent(String.self, forKey: .lockedWritingStyle) ?? ""
         self.lockedSpecialRequirements = try c.decodeIfPresent(String.self, forKey: .lockedSpecialRequirements) ?? ""
         self.targetWordsPerChapter = try c.decodeIfPresent(Int.self, forKey: .targetWordsPerChapter) ?? 2500
-        self.generationPrefs = try c.decodeIfPresent(AnyCodable.self, forKey: .generationPrefs) ?? AnyCodable([:])
+        self.generationPrefs = try c.decodeIfPresent(GenerationPrefsDTO.self, forKey: .generationPrefs)
     }
 
     init(id: String, title: String, author: String, targetChapters: Int,
@@ -202,7 +368,7 @@ struct NovelDTO: Codable, Identifiable, Equatable {
          lockedGenre: String, lockedWorldPreset: String,
          lockedStoryStructure: String, lockedPacingControl: String,
          lockedWritingStyle: String, lockedSpecialRequirements: String,
-         targetWordsPerChapter: Int, generationPrefs: AnyCodable) {
+         targetWordsPerChapter: Int, generationPrefs: GenerationPrefsDTO? = nil) {
         self.id = id
         self.title = title
         self.author = author
@@ -310,7 +476,7 @@ struct UpdateNovelRequest: Codable {
     let targetChapters: Int?
     let premise: String?
     let targetWordsPerChapter: Int?
-    let generationPrefs: [String: AnyCodable]?
+    let generationPrefs: GenerationPrefsDTO?
 
     enum CodingKeys: String, CodingKey {
         case title, author, premise
@@ -463,9 +629,21 @@ struct ChapterDraftResponse: Codable, Identifiable, Equatable {
 
 // MARK: - 更新章节内容请求
 
-/// 更新章节内容请求
+/// 更新章节内容请求，对应原版 chapter.ts:40-44 UpdateChapterRequest
+/// content 必填；micro_beats 可选，保存时写入 chapter_summaries.micro_beats
 struct UpdateChapterContentRequest: Codable {
     let content: String
+    let microBeats: [ChapterMicroBeatPayload]?
+
+    enum CodingKeys: String, CodingKey {
+        case content
+        case microBeats = "micro_beats"
+    }
+
+    init(content: String, microBeats: [ChapterMicroBeatPayload]? = nil) {
+        self.content = content
+        self.microBeats = microBeats
+    }
 }
 
 /// 更新章节生成约束请求

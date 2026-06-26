@@ -234,9 +234,21 @@ struct DAGDefinition: Codable, Identifiable, Equatable {
     }
 }
 
+// MARK: - DAG 运行状态枚举（P0-8，对齐 dagRunStore.ts:11）
+
+/// DAG 运行状态 — 对齐 dagRunStore.ts:11 `DAGRunStatus = 'idle' | 'running' | 'stopping' | 'completed' | 'error'`
+enum DAGRunStatus: String, Codable, Equatable {
+    case idle
+    case running
+    case stopping
+    case completed
+    case error
+}
+
 // MARK: - 节点运行时状态
 
 /// 节点运行时状态，对应后端 NodeRunState
+/// P0-8 新增 `enabled` 字段，对齐 dagRunStore.ts:21 `{ status: NodeStatus; enabled: boolean }`
 struct NodeRunState: Codable, Equatable {
     let nodeId: String
     let status: String
@@ -247,6 +259,8 @@ struct NodeRunState: Codable, Equatable {
     let metrics: [String: Double]
     let error: String?
     let progress: Double
+    /// P0-8：节点是否启用 — 对齐 dagRunStore.ts:21 `enabled: boolean`
+    let enabled: Bool
 
     enum CodingKeys: String, CodingKey {
         case nodeId = "node_id"
@@ -255,6 +269,7 @@ struct NodeRunState: Codable, Equatable {
         case completedAt = "completed_at"
         case durationMs = "duration_ms"
         case outputs, metrics, error, progress
+        case enabled
     }
 
     init(from decoder: Decoder) throws {
@@ -268,6 +283,24 @@ struct NodeRunState: Codable, Equatable {
         self.metrics = try c.decodeIfPresent([String: Double].self, forKey: .metrics) ?? [:]
         self.error = try c.decodeIfPresent(String.self, forKey: .error)
         self.progress = try c.decodeIfPresent(Double.self, forKey: .progress) ?? 0.0
+        self.enabled = try c.decodeIfPresent(Bool.self, forKey: .enabled) ?? true
+    }
+
+    /// 显式 memberwise init（P0-8 DAGRunStore 构造用）
+    init(nodeId: String = "", status: String = "idle", startedAt: String? = nil,
+         completedAt: String? = nil, durationMs: Int = 0, outputs: AnyCodable = AnyCodable([:]),
+         metrics: [String: Double] = [:], error: String? = nil, progress: Double = 0.0,
+         enabled: Bool = true) {
+        self.nodeId = nodeId
+        self.status = status
+        self.startedAt = startedAt
+        self.completedAt = completedAt
+        self.durationMs = durationMs
+        self.outputs = outputs
+        self.metrics = metrics
+        self.error = error
+        self.progress = progress
+        self.enabled = enabled
     }
 }
 
@@ -309,6 +342,12 @@ struct DAGEvent: Codable, Equatable {
     let outputs: AnyCodable?
     let durationMs: Int?
     let error: String?
+    /// P1 补齐：edge_data_flow 事件 5 字段
+    let sourceNode: String?
+    let targetNode: String?
+    let port: String?
+    let dataType: String?
+    let dataSize: Int?
 
     enum CodingKeys: String, CodingKey {
         case type
@@ -317,6 +356,11 @@ struct DAGEvent: Codable, Equatable {
         case timestamp, status, metrics, outputs
         case durationMs = "duration_ms"
         case error
+        case sourceNode = "source_node"
+        case targetNode = "target_node"
+        case port
+        case dataType = "data_type"
+        case dataSize = "data_size"
     }
 
     init(from decoder: Decoder) throws {
@@ -330,6 +374,33 @@ struct DAGEvent: Codable, Equatable {
         self.outputs = try c.decodeIfPresent(AnyCodable.self, forKey: .outputs)
         self.durationMs = try c.decodeIfPresent(Int.self, forKey: .durationMs)
         self.error = try c.decodeIfPresent(String.self, forKey: .error)
+        self.sourceNode = try c.decodeIfPresent(String.self, forKey: .sourceNode)
+        self.targetNode = try c.decodeIfPresent(String.self, forKey: .targetNode)
+        self.port = try c.decodeIfPresent(String.self, forKey: .port)
+        self.dataType = try c.decodeIfPresent(String.self, forKey: .dataType)
+        self.dataSize = try c.decodeIfPresent(Int.self, forKey: .dataSize)
+    }
+
+    /// P0-8：显式 memberwise init（DAGRunStore 构造事件用）
+    init(type: String, novelId: String, nodeId: String?, timestamp: String?,
+         status: String?, metrics: [String: AnyCodable]?, outputs: AnyCodable?,
+         durationMs: Int?, error: String?,
+         sourceNode: String? = nil, targetNode: String? = nil,
+         port: String? = nil, dataType: String? = nil, dataSize: Int? = nil) {
+        self.type = type
+        self.novelId = novelId
+        self.nodeId = nodeId
+        self.timestamp = timestamp
+        self.status = status
+        self.metrics = metrics
+        self.outputs = outputs
+        self.durationMs = durationMs
+        self.error = error
+        self.sourceNode = sourceNode
+        self.targetNode = targetNode
+        self.port = port
+        self.dataType = dataType
+        self.dataSize = dataSize
     }
 }
 
@@ -622,3 +693,93 @@ let CATEGORY_LABELS: [String: String] = [
     "validation": "校验与监控",
     "gateway": "网关与熔断",
 ]
+
+// MARK: - DAG 运行结果 — types/dag.ts DAGRunResult
+
+/// DAG 运行结果，对齐原版 types/dag.ts DAGRunResult
+/// 用于 dagRunStore.ts:24 runHistory + dagRunStore.ts:25 latestResult
+///
+/// ```typescript
+/// export interface DAGRunResult {
+///   dag_run_id: string
+///   novel_id: string
+///   status: 'completed' | 'error' | 'interrupted'
+///   node_results: Record<string, unknown>
+///   total_duration_ms: number
+///   error_count: number
+///   started_at: string
+///   completed_at: string
+/// }
+/// ```
+struct DAGRunResult: Codable, Identifiable, Equatable {
+    /// DAG 运行 ID（Identifiable 用）— dag.ts DAGRunResult.dag_run_id
+    var id: String { dagRunId }
+    /// DAG 运行 ID — dag.ts DAGRunResult.dag_run_id
+    let dagRunId: String
+    /// 小说 ID — dag.ts DAGRunResult.novel_id
+    let novelId: String
+    /// 运行状态（completed/error/interrupted）— dag.ts DAGRunResult.status
+    let status: String
+    /// 节点结果（Record<string, unknown>）— dag.ts DAGRunResult.node_results
+    let nodeResults: AnyCodable
+    /// 总运行时长（毫秒）— dag.ts DAGRunResult.total_duration_ms
+    let totalDurationMs: Int
+    /// 错误数 — dag.ts DAGRunResult.error_count
+    let errorCount: Int
+    /// 开始时间（ISO 字符串）— dag.ts DAGRunResult.started_at
+    let startedAt: String
+    /// 完成时间（ISO 字符串）— dag.ts DAGRunResult.completed_at
+    let completedAt: String
+
+    enum CodingKeys: String, CodingKey {
+        case dagRunId = "dag_run_id"
+        case novelId = "novel_id"
+        case status
+        case nodeResults = "node_results"
+        case totalDurationMs = "total_duration_ms"
+        case errorCount = "error_count"
+        case startedAt = "started_at"
+        case completedAt = "completed_at"
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.dagRunId = try c.decodeIfPresent(String.self, forKey: .dagRunId) ?? ""
+        self.novelId = try c.decodeIfPresent(String.self, forKey: .novelId) ?? ""
+        self.status = try c.decodeIfPresent(String.self, forKey: .status) ?? "completed"
+        self.nodeResults = try c.decodeIfPresent(AnyCodable.self, forKey: .nodeResults) ?? AnyCodable([:])
+        self.totalDurationMs = try c.decodeIfPresent(Int.self, forKey: .totalDurationMs) ?? 0
+        self.errorCount = try c.decodeIfPresent(Int.self, forKey: .errorCount) ?? 0
+        self.startedAt = try c.decodeIfPresent(String.self, forKey: .startedAt) ?? ""
+        self.completedAt = try c.decodeIfPresent(String.self, forKey: .completedAt) ?? ""
+    }
+
+    /// 显式 memberwise init
+    init(dagRunId: String, novelId: String, status: String,
+         nodeResults: AnyCodable, totalDurationMs: Int, errorCount: Int,
+         startedAt: String, completedAt: String) {
+        self.dagRunId = dagRunId
+        self.novelId = novelId
+        self.status = status
+        self.nodeResults = nodeResults
+        self.totalDurationMs = totalDurationMs
+        self.errorCount = errorCount
+        self.startedAt = startedAt
+        self.completedAt = completedAt
+    }
+
+    /// 运行时长（秒），便于显示
+    var durationSeconds: Double {
+        return Double(totalDurationMs) / 1000.0
+    }
+
+    /// 是否成功完成
+    var isCompleted: Bool {
+        return status == "completed"
+    }
+
+    /// 是否有错误
+    var hasErrors: Bool {
+        return errorCount > 0 || status == "error"
+    }
+}

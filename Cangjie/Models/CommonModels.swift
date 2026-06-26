@@ -178,31 +178,73 @@ struct PageInfo: Codable, Equatable {
 
 // MARK: - 分页响应封装
 
-/// 通用分页响应封装。
+/// 通用分页响应封装（扁平结构）。
 ///
-/// 当后端返回分页数据时使用此结构。
+/// 对齐原项目 `types/api.ts` L27-35 的扁平结构：
+/// `{success: true, data: T[], total, page, page_size, total_pages, message?}`
+///
+/// 后端大部分列表接口直接返回数组（无分页封装），
+/// 但日志分页等查询接口可能使用此结构。
 struct PaginatedResponse<T: Codable>: Codable {
 
-    /// 数据列表
-    let items: [T]
+    /// 是否成功
+    let success: Bool
 
-    /// 分页信息
-    let pageInfo: PageInfo?
+    /// 数据列表
+    let data: [T]
+
+    /// 总条数
+    let total: Int
+
+    /// 当前页码（从 1 开始）
+    let page: Int
+
+    /// 每页条数
+    let pageSize: Int
+
+    /// 总页数
+    let totalPages: Int
+
+    /// 消息（可选）
+    let message: String?
 
     enum CodingKeys: String, CodingKey {
-        case items
-        case pageInfo = "page_info"
+        case success
+        case data
+        case total
+        case page
+        case pageSize = "page_size"
+        case totalPages = "total_pages"
+        case message
     }
 
-    init(items: [T], pageInfo: PageInfo? = nil) {
-        self.items = items
-        self.pageInfo = pageInfo
+    init(
+        success: Bool = true,
+        data: [T] = [],
+        total: Int = 0,
+        page: Int = 1,
+        pageSize: Int = 20,
+        totalPages: Int = 0,
+        message: String? = nil
+    ) {
+        self.success = success
+        self.data = data
+        self.total = total
+        self.page = page
+        self.pageSize = pageSize
+        self.totalPages = totalPages
+        self.message = message
     }
 
     init(from decoder: Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        self.items = try container.decodeIfPresent([T].self, forKey: .items) ?? []
-        self.pageInfo = try container.decodeIfPresent(PageInfo.self, forKey: .pageInfo)
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        success = try c.decodeIfPresent(Bool.self, forKey: .success) ?? true
+        data = try c.decodeIfPresent([T].self, forKey: .data) ?? []
+        total = try c.decodeIfPresent(Int.self, forKey: .total) ?? 0
+        page = try c.decodeIfPresent(Int.self, forKey: .page) ?? 1
+        pageSize = try c.decodeIfPresent(Int.self, forKey: .pageSize) ?? 20
+        totalPages = try c.decodeIfPresent(Int.self, forKey: .totalPages) ?? 0
+        message = try c.decodeIfPresent(String.self, forKey: .message)
     }
 }
 
@@ -372,7 +414,7 @@ enum HTTPMethod: String, Equatable {
 
 // MARK: - SSE 流类型枚举
 
-/// SSE 流类型，对应架构文档 6.5 节的 7 条流。
+/// SSE 流类型，对应架构文档 6.5 节的 7 条流 + P0-1 新增 2 条流。
 enum SSEStreamType: String, CaseIterable, Hashable {
 
     /// 章节生成流 — `GET /api/v1/autopilot/{id}/chapter-stream`
@@ -396,6 +438,16 @@ enum SSEStreamType: String, CaseIterable, Hashable {
     /// 扩展包安装流 — `POST /api/v1/system/install-extensions`
     case extensionInstall
 
+    // P0-1 新增 SSE 流
+
+    /// 托管撰稿流 — `POST /api/v1/novels/{novelId}/hosted-write-stream`
+    /// 对齐 workflow.ts:523-579 consumeHostedWriteStream
+    case hostedWriteStream
+
+    /// 主线推荐流 — `POST /api/v1/novels/{novelId}/setup/suggest-main-plot-options-stream`
+    /// 对齐 workflow.ts:581-680 consumeMainPlotOptionsStream
+    case suggestMainPlotOptionsStream
+
     /// 流的中文描述
     var displayName: String {
         switch self {
@@ -413,6 +465,10 @@ enum SSEStreamType: String, CaseIterable, Hashable {
             return "DAG 事件流"
         case .extensionInstall:
             return "扩展包安装流"
+        case .hostedWriteStream:
+            return "托管撰稿流"
+        case .suggestMainPlotOptionsStream:
+            return "主线推荐流"
         }
     }
 

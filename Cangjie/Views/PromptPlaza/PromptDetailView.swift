@@ -15,6 +15,9 @@ struct PromptDetailView: View {
 
     @EnvironmentObject var store: PromptPlazaStore
 
+    /// P0-7：提示词广场桥接（共享单例，保存后通知 DAG 刷新）
+    @ObservedObject private var promptPlazaBridge = PromptPlazaBridge.shared
+
     @State private var systemContent: String = ""
     @State private var userTemplateContent: String = ""
     @State private var showVersionCompare = false
@@ -63,6 +66,9 @@ struct PromptDetailView: View {
                                 userTemplate: userTemplateContent
                             )
                         )
+                        // P0-7：保存成功后通知 DAG 刷新节点 prompt-live 数据
+                        // 对齐 promptPlazaBridge.ts:90-94 notifyPromptSaved
+                        promptPlazaBridge.notifyPromptSaved(nodeKey: node.nodeKey)
                     }
                 }
             }

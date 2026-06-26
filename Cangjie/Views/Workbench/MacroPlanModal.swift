@@ -105,7 +105,7 @@ struct MacroPlanModal: View {
                     autoApproveMode: false, lockedGenre: "", lockedWorldPreset: "",
                     lockedStoryStructure: "", lockedPacingControl: "", lockedWritingStyle: "",
                     lockedSpecialRequirements: "", targetWordsPerChapter: 2500,
-                    generationPrefs: AnyCodable([:])
+                    generationPrefs: nil
                 )
             }
         }

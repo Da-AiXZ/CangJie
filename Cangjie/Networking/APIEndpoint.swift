@@ -446,6 +446,12 @@ enum APIEndpoint {
         case mergeBranch(novelId: String, branchId: String)
         /// 汇流点列表 — `GET /novels/{novel_id}/confluence-points` — confluence.ts:16-18
         case confluenceList(novelId: String)
+        /// P1 新增：创建汇流点 — `POST /novels/{novel_id}/confluence-points` — workflow.ts
+        case createConfluence(novelId: String)
+        /// P1 新增：更新汇流点 — `PATCH /novels/{novel_id}/confluence-points/{cpId}` — workflow.ts
+        case updateConfluence(novelId: String, cpId: String)
+        /// P1 新增：删除汇流点 — `DELETE /novels/{novel_id}/confluence-points/{cpId}` — workflow.ts
+        case deleteConfluence(novelId: String, cpId: String)
     }
 
     // MARK: - Governance（叙事治理）
@@ -548,8 +554,9 @@ enum APIEndpoint {
         case characterAnchor(novelId: String, characterId: String)
         /// 更新角色锚点 — `PATCH /novels/{novel_id}/sandbox/character/{character_id}/anchor` — sandbox.ts:63-72
         case patchCharacterAnchor(novelId: String, characterId: String)
-        /// 生成对话 — `POST /novels/{novel_id}/sandbox/generate-dialogue`
-        case generateDialogue(novelId: String)
+        /// 生成对话 — `POST /novels/sandbox/generate-dialogue`（novel_id 在 body 中，无路径参数）
+        /// 对齐原项目 sandbox.ts:74-77
+        case generateDialogue
     }
 
     // MARK: - BeatSheets（节拍表）
@@ -618,6 +625,57 @@ enum APIEndpoint {
         case getStorylines(novelId: String)
         /// 获取故事线 Git Graph 数据 — `GET /novels/{novelId}/storylines/graph-data` — workflow.ts:778-780
         case getStorylineGraphData(novelId: String)
+        // P0-2 新增端点
+        /// 场记分析 — `POST /novels/{novelId}/scene-director/analyze` — workflow.ts:226-235
+        case analyzeScene(novelId: String)
+        /// 上下文检索 — `POST /novels/{novelId}/context/retrieve` — workflow.ts:880-895
+        case retrieveContext(novelId: String)
+        /// 主线推荐（非流式降级）— `POST /novels/{novelId}/setup/suggest-main-plot-options` — workflow.ts:830-835
+        case suggestMainPlotOptions(novelId: String)
+        // P1 新增端点
+        /// 创建故事线 — `POST /novels/{novelId}/storylines` — workflow.ts
+        case createStoryline(novelId: String)
+        /// 更新故事线 — `PUT /novels/{novelId}/storylines/{storylineId}` — workflow.ts
+        case updateStoryline(novelId: String, storylineId: String)
+        /// 删除故事线 — `DELETE /novels/{novelId}/storylines/{storylineId}` — workflow.ts
+        case deleteStoryline(novelId: String, storylineId: String)
+        /// 获取剧情弧 — `GET /novels/{novelId}/plot-arc` — workflow.ts
+        case getPlotArc(novelId: String)
+        /// 创建剧情弧 — `POST /novels/{novelId}/plot-arc` — workflow.ts
+        case createPlotArc(novelId: String)
+        /// 规划小说 — `POST /novels/{novelId}/plan` — workflow.ts
+        case planNovel(novelId: String)
+        /// 章节审阅 — `POST /novels/{novelId}/chapters/{chapterNumber}/review` — workflow.ts
+        case reviewChapter(novelId: String, chapterNumber: Int)
+        /// 续写大纲 — `POST /novels/{novelId}/outline/extend` — workflow.ts
+        case extendOutline(novelId: String)
+        /// 获取任务状态 — `GET /jobs/{jobId}` — workflow.ts
+        case getJobStatus(jobId: String)
+        /// 取消任务 — `POST /jobs/{jobId}/cancel` — workflow.ts
+        case cancelJob(jobId: String)
+    }
+
+    // MARK: - Tools（创作工具）
+    enum Tools {
+        /// 张力弹弓诊断 — `POST /novels/{novelId}/writer-block/tension-slingshot` — tools.ts:24-28
+        case tensionSlingshot(novelId: String)
+        // P1 新增：宏观重构 + 实体状态
+        /// 扫描断点 — `GET /novels/{novelId}/macro-refactor/breakpoints` — tools.ts:85-89
+        case scanBreakpoints(novelId: String, trait: String, conflictTags: String?)
+        /// 生成重构提案 — `POST /novels/{novelId}/macro-refactor/proposals` — tools.ts:92-96
+        case generateProposal(novelId: String)
+        /// 应用变异 — `POST /novels/{novelId}/macro-refactor/apply` — tools.ts:99-103
+        case applyMutations(novelId: String)
+        /// 获取最新诊断 — `GET /novels/{novelId}/macro-refactor/diagnosis/latest` — tools.ts:106-109
+        case getLatestDiagnosis(novelId: String)
+        /// 诊断历史 — `GET /novels/{novelId}/macro-refactor/diagnosis/history` — tools.ts:112-116
+        case getDiagnosisHistory(novelId: String, limit: Int)
+        /// 运行诊断 — `POST /novels/{novelId}/macro-refactor/diagnosis/run` — tools.ts:119-124
+        case runDiagnosis(novelId: String, traits: String?)
+        /// 解决诊断 — `POST /novels/{novelId}/macro-refactor/diagnosis/{diagId}/resolve` — tools.ts:127-130
+        case resolveDiagnosis(novelId: String, diagId: String)
+        /// 实体状态 — `GET /novels/{novelId}/entities/{entityId}/state` — tools.ts:142-146
+        case getEntityState(novelId: String, entityId: String, chapter: Int)
     }
 
     // MARK: - ChapterElement（章节元素）
@@ -635,13 +693,15 @@ enum APIEndpoint {
     }
 
     // MARK: - Stats（统计 API，前缀 /api/stats）
+    // 对齐原项目 stats.ts：legacyStatsHttp baseURL=/api，路径 /stats/global、/stats/book/{slug}/chapter/{id}、/stats/book/{slug}/progress
+    // 仓颉 statsPrefix=/api/stats，端点 path 不含 /stats 前缀
     enum Stats {
-        /// 全局统计 — `GET /`
+        /// 全局统计 — `GET /global`（prefix=`/api/stats`，完整路径 `/api/stats/global`）
         case global
-        /// 章节统计 — `GET /chapters/{novel_id}`
-        case chapters(novelId: String)
-        /// 进度统计 — `GET /progress/{novel_id}`
-        case progress(novelId: String)
+        /// 章节统计 — `GET /book/{slug}/chapter/{chapterId}`（prefix=`/api/stats`）
+        case chapter(slug: String, chapterId: Int)
+        /// 进度统计 — `GET /book/{slug}/progress?days={days}`（prefix=`/api/stats`）
+        case progress(slug: String, days: Int)
     }
 
     // MARK: - Voice（文风金库，挂载于 NOVELS_API_PREFIX）
@@ -683,6 +743,32 @@ enum APIEndpoint {
     /// 默认前缀
     static let defaultPrefix = APIConfig.apiV1Prefix
     static let statsPrefix = APIConfig.statsPrefix
+
+    // MARK: - Memory（记忆系统）— P1 新增，U4 决策
+    // 对齐原版 memory.ts:37-65 — 路径挂载于 NOVELS_API_PREFIX（/api/v1/novels/{id}/...）
+    enum Memory {
+        /// 角色投影 — `GET /novels/{novelId}/characters/{characterId}/projection` — memory.ts:38-41
+        /// E-5：P1 遗漏端点，P2 补注册（对齐 CharacterProfile.vue L540）
+        case getCharacterProjection(novelId: String, characterId: String)
+
+        /// 章节记忆候选 — `GET /novels/{novelId}/chapters/{chapterNumber}/memory-candidates` — memory.ts:43-46
+        case getChapterCandidates(novelId: String, chapterNumber: Int)
+        /// 确认记忆原子 — `POST /novels/{novelId}/memory-atoms/{atomId}/confirm` — memory.ts:48-52
+        case confirmAtom(novelId: String, atomId: String)
+        /// 拒绝记忆原子 — `POST /novels/{novelId}/memory-atoms/{atomId}/reject` — memory.ts:54-58
+        case rejectAtom(novelId: String, atomId: String)
+        /// 提升记忆原子 — `POST /novels/{novelId}/memory-atoms/{atomId}/promote` — memory.ts:60-64
+        case promoteAtom(novelId: String, atomId: String)
+    }
+
+    // MARK: - Worldbuilding（世界观）— P1 新增
+    // 对齐原版 worldbuilding.ts:48-56 — 路径挂载于 NOVELS_API_PREFIX
+    enum Worldbuilding {
+        /// 获取世界观 — `GET /novels/{novelId}/worldbuilding` — worldbuilding.ts:49-52
+        case get(novelId: String)
+        /// 更新世界观 — `PUT /novels/{novelId}/worldbuilding` — worldbuilding.ts:54-55
+        case update(novelId: String)
+    }
 }
 
 // MARK: - 默认实现
@@ -1125,6 +1211,8 @@ extension APIEndpoint.Planning: APIEndpoint.EndpointInfo {
 }
 
 // MARK: - Stats 端点信息（前缀 /api/stats）
+// 对齐原项目 stats.ts：路径 /stats/global、/stats/book/{slug}/chapter/{id}、/stats/book/{slug}/progress
+// 仓颉 statsPrefix=/api/stats，端点 path 不含 /stats 前缀
 
 extension APIEndpoint.Stats: APIEndpoint.EndpointInfo {
     var prefix: String { APIConfig.statsPrefix }
@@ -1132,15 +1220,28 @@ extension APIEndpoint.Stats: APIEndpoint.EndpointInfo {
     var path: String {
         switch self {
         case .global:
-            return "/"
-        case .chapters(let novelId):
-            return "/chapters/\(novelId)"
-        case .progress(let novelId):
-            return "/progress/\(novelId)"
+            // stats.ts:16 — GET /stats/global → 仓颉 path=/global（prefix=/api/stats）
+            return "/global"
+        case .chapter(let slug, let chapterId):
+            // stats.ts:23 — GET /stats/book/{slug}/chapter/{chapterId} → 仓颉 path=/book/{slug}/chapter/{chapterId}
+            return "/book/\(slug)/chapter/\(chapterId)"
+        case .progress(let slug, _):
+            // stats.ts:30 — GET /stats/book/{slug}/progress → 仓颉 path=/book/{slug}/progress
+            return "/book/\(slug)/progress"
         }
     }
 
     var method: HTTPMethod { .get }
+
+    var queryItems: [URLQueryItem] {
+        switch self {
+        case .progress(_, let days):
+            // stats.ts:31 — params: { days }
+            return [URLQueryItem(name: "days", value: String(days))]
+        default:
+            return []
+        }
+    }
 }
 
 // MARK: - StoryStructure 端点信息
@@ -1529,8 +1630,9 @@ extension APIEndpoint.Sandbox: APIEndpoint.EndpointInfo {
             return "/novels/\(novelId)/sandbox/character/\(characterId)/anchor"
         case .patchCharacterAnchor(let novelId, let characterId):
             return "/novels/\(novelId)/sandbox/character/\(characterId)/anchor"
-        case .generateDialogue(let novelId):
-            return "/novels/\(novelId)/sandbox/generate-dialogue"
+        case .generateDialogue:
+            // sandbox.ts:76 — POST /novels/sandbox/generate-dialogue（novel_id 在 body 中，无路径参数）
+            return "/novels/sandbox/generate-dialogue"
         }
     }
 
@@ -1689,6 +1791,46 @@ extension APIEndpoint.Workflow: APIEndpoint.EndpointInfo {
         case .getStorylineGraphData(let novelId):
             // workflow.ts:779 — /novels/${novelId}/storylines/graph-data
             return "/novels/\(novelId)/storylines/graph-data"
+        case .analyzeScene(let novelId):
+            // workflow.ts:230 — /novels/${novelId}/scene-director/analyze
+            return "/novels/\(novelId)/scene-director/analyze"
+        case .retrieveContext(let novelId):
+            // workflow.ts:885 — /novels/${novelId}/context/retrieve
+            return "/novels/\(novelId)/context/retrieve"
+        case .suggestMainPlotOptions(let novelId):
+            // workflow.ts:832 — /novels/${novelId}/setup/suggest-main-plot-options
+            return "/novels/\(novelId)/setup/suggest-main-plot-options"
+        // P1 新增
+        case .createStoryline(let novelId):
+            // workflow.ts — POST /novels/${novelId}/storylines
+            return "/novels/\(novelId)/storylines"
+        case .updateStoryline(let novelId, let storylineId):
+            // workflow.ts — PUT /novels/${novelId}/storylines/${storylineId}
+            return "/novels/\(novelId)/storylines/\(storylineId)"
+        case .deleteStoryline(let novelId, let storylineId):
+            // workflow.ts — DELETE /novels/${novelId}/storylines/${storylineId}
+            return "/novels/\(novelId)/storylines/\(storylineId)"
+        case .getPlotArc(let novelId):
+            // workflow.ts — GET /novels/${novelId}/plot-arc
+            return "/novels/\(novelId)/plot-arc"
+        case .createPlotArc(let novelId):
+            // workflow.ts — POST /novels/${novelId}/plot-arc
+            return "/novels/\(novelId)/plot-arc"
+        case .planNovel(let novelId):
+            // workflow.ts — POST /novels/${novelId}/plan
+            return "/novels/\(novelId)/plan"
+        case .reviewChapter(let novelId, let chapterNumber):
+            // workflow.ts — POST /novels/${novelId}/chapters/${chapterNumber}/review
+            return "/novels/\(novelId)/chapters/\(chapterNumber)/review"
+        case .extendOutline(let novelId):
+            // workflow.ts — POST /novels/${novelId}/outline/extend
+            return "/novels/\(novelId)/outline/extend"
+        case .getJobStatus(let jobId):
+            // workflow.ts — GET /jobs/${jobId}
+            return "/jobs/\(jobId)"
+        case .cancelJob(let jobId):
+            // workflow.ts — POST /jobs/${jobId}/cancel
+            return "/jobs/\(jobId)/cancel"
         }
     }
 
@@ -1703,6 +1845,96 @@ extension APIEndpoint.Workflow: APIEndpoint.EndpointInfo {
         case .getStorylines, .getStorylineGraphData:
             // workflow.ts:775/779 — GET
             return .get
+        case .analyzeScene, .retrieveContext, .suggestMainPlotOptions:
+            // workflow.ts:229/881/831 — POST
+            return .post
+        // P1 新增
+        case .createStoryline, .createPlotArc, .planNovel, .reviewChapter, .extendOutline, .cancelJob:
+            return .post
+        case .updateStoryline:
+            return .put
+        case .deleteStoryline:
+            return .delete
+        case .getPlotArc, .getJobStatus:
+            return .get
+        }
+    }
+}
+
+// MARK: - Tools 端点信息 — tools.ts:24-28
+
+extension APIEndpoint.Tools: APIEndpoint.EndpointInfo {
+    var path: String {
+        switch self {
+        case .tensionSlingshot(let novelId):
+            // tools.ts:25 — /novels/${novelId}/writer-block/tension-slingshot
+            return "/novels/\(novelId)/writer-block/tension-slingshot"
+        // P1 新增：宏观重构 + 实体状态
+        case .scanBreakpoints(let novelId, _, _):
+            // tools.ts:87 — /novels/${novelId}/macro-refactor/breakpoints
+            return "/novels/\(novelId)/macro-refactor/breakpoints"
+        case .generateProposal(let novelId):
+            // tools.ts:93 — /novels/${novelId}/macro-refactor/proposals
+            return "/novels/\(novelId)/macro-refactor/proposals"
+        case .applyMutations(let novelId):
+            // tools.ts:100 — /novels/${novelId}/macro-refactor/apply
+            return "/novels/\(novelId)/macro-refactor/apply"
+        case .getLatestDiagnosis(let novelId):
+            // tools.ts:107 — /novels/${novelId}/macro-refactor/diagnosis/latest
+            return "/novels/\(novelId)/macro-refactor/diagnosis/latest"
+        case .getDiagnosisHistory(let novelId, _):
+            // tools.ts:113 — /novels/${novelId}/macro-refactor/diagnosis/history
+            return "/novels/\(novelId)/macro-refactor/diagnosis/history"
+        case .runDiagnosis(let novelId, _):
+            // tools.ts:121 — /novels/${novelId}/macro-refactor/diagnosis/run
+            return "/novels/\(novelId)/macro-refactor/diagnosis/run"
+        case .resolveDiagnosis(let novelId, let diagId):
+            // tools.ts:128 — /novels/${novelId}/macro-refactor/diagnosis/${diagnosisId}/resolve
+            return "/novels/\(novelId)/macro-refactor/diagnosis/\(diagId)/resolve"
+        case .getEntityState(let novelId, let entityId, _):
+            // tools.ts:143 — /novels/${novelId}/entities/${entityId}/state
+            return "/novels/\(novelId)/entities/\(entityId)/state"
+        }
+    }
+
+    var method: HTTPMethod {
+        switch self {
+        case .tensionSlingshot:
+            // tools.ts:24 — POST
+            return .post
+        // P1 新增
+        case .scanBreakpoints, .getLatestDiagnosis, .getDiagnosisHistory, .getEntityState:
+            return .get
+        case .generateProposal, .applyMutations, .runDiagnosis, .resolveDiagnosis:
+            return .post
+        }
+    }
+
+    var queryItems: [URLQueryItem] {
+        switch self {
+        case .tensionSlingshot:
+            return []
+        case .scanBreakpoints(_, let trait, let conflictTags):
+            // tools.ts:88 — params: { trait, ...(conflictTags ? { conflict_tags: conflictTags } : {}) }
+            var items = [URLQueryItem(name: "trait", value: trait)]
+            if let tags = conflictTags, !tags.isEmpty {
+                items.append(URLQueryItem(name: "conflict_tags", value: tags))
+            }
+            return items
+        case .getDiagnosisHistory(_, let limit):
+            // tools.ts:115 — params: { limit }
+            return [URLQueryItem(name: "limit", value: String(limit))]
+        case .runDiagnosis(_, let traits):
+            // tools.ts:123 — params: traits ? { traits } : {}
+            if let t = traits, !t.isEmpty {
+                return [URLQueryItem(name: "traits", value: t)]
+            }
+            return []
+        case .getEntityState(_, _, let chapter):
+            // tools.ts:145 — params: { chapter }
+            return [URLQueryItem(name: "chapter", value: String(chapter))]
+        default:
+            return []
         }
     }
 }
@@ -1835,6 +2067,15 @@ extension APIEndpoint.Worldline: APIEndpoint.EndpointInfo {
             return "/novels/\(novelId)/worldline/branches/\(branchId)/merge"
         case .confluenceList(let novelId):
             return "/novels/\(novelId)/confluence-points"
+        case .createConfluence(let novelId):
+            // workflow.ts — POST /novels/${novelId}/confluence-points
+            return "/novels/\(novelId)/confluence-points"
+        case .updateConfluence(let novelId, let cpId):
+            // workflow.ts — PATCH /novels/${novelId}/confluence-points/${cpId}
+            return "/novels/\(novelId)/confluence-points/\(cpId)"
+        case .deleteConfluence(let novelId, let cpId):
+            // workflow.ts — DELETE /novels/${novelId}/confluence-points/${cpId}
+            return "/novels/\(novelId)/confluence-points/\(cpId)"
         }
     }
 
@@ -1848,6 +2089,13 @@ extension APIEndpoint.Worldline: APIEndpoint.EndpointInfo {
             return .delete
         case .updateBranch:
             return .put
+        // P1 新增
+        case .createConfluence:
+            return .post
+        case .updateConfluence:
+            return .patch
+        case .deleteConfluence:
+            return .delete
         }
     }
 }
@@ -1896,6 +2144,67 @@ extension APIEndpoint.Knowledge: APIEndpoint.EndpointInfo {
             ]
         default:
             return []
+        }
+    }
+}
+
+// MARK: - Memory 端点信息 — memory.ts:37-65（P1 新增，U4 决策）
+
+extension APIEndpoint.Memory: APIEndpoint.EndpointInfo {
+    var path: String {
+        switch self {
+        case .getCharacterProjection(let novelId, let characterId):
+            // memory.ts:39 — /novels/${novelId}/characters/${characterId}/projection
+            return "/novels/\(novelId)/characters/\(characterId)/projection"
+        case .getChapterCandidates(let novelId, let chapterNumber):
+            // memory.ts:45 — /novels/${novelId}/chapters/${chapterNumber}/memory-candidates
+            return "/novels/\(novelId)/chapters/\(chapterNumber)/memory-candidates"
+        case .confirmAtom(let novelId, let atomId):
+            // memory.ts:50 — /novels/${novelId}/memory-atoms/${atomId}/confirm
+            return "/novels/\(novelId)/memory-atoms/\(atomId)/confirm"
+        case .rejectAtom(let novelId, let atomId):
+            // memory.ts:55 — /novels/${novelId}/memory-atoms/${atomId}/reject
+            return "/novels/\(novelId)/memory-atoms/\(atomId)/reject"
+        case .promoteAtom(let novelId, let atomId):
+            // memory.ts:61 — /novels/${novelId}/memory-atoms/${atomId}/promote
+            return "/novels/\(novelId)/memory-atoms/\(atomId)/promote"
+        }
+    }
+
+    var method: HTTPMethod {
+        switch self {
+        case .getCharacterProjection, .getChapterCandidates:
+            // memory.ts:38/43 — GET
+            return .get
+        case .confirmAtom, .rejectAtom, .promoteAtom:
+            // memory.ts:48/54/60 — POST
+            return .post
+        }
+    }
+}
+
+// MARK: - Worldbuilding 端点信息 — worldbuilding.ts:48-56（P1 新增）
+
+extension APIEndpoint.Worldbuilding: APIEndpoint.EndpointInfo {
+    var path: String {
+        switch self {
+        case .get(let novelId):
+            // worldbuilding.ts:52 — /novels/${novelId}/worldbuilding
+            return "/novels/\(novelId)/worldbuilding"
+        case .update(let novelId):
+            // worldbuilding.ts:55 — /novels/${novelId}/worldbuilding
+            return "/novels/\(novelId)/worldbuilding"
+        }
+    }
+
+    var method: HTTPMethod {
+        switch self {
+        case .get:
+            // worldbuilding.ts:49 — GET
+            return .get
+        case .update:
+            // worldbuilding.ts:54 — PUT
+            return .put
         }
     }
 }

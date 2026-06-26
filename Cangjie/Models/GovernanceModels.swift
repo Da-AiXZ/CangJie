@@ -130,7 +130,7 @@ struct GovernanceContract: Codable, Equatable {
 
 // MARK: - 故事线
 
-/// 故事线
+/// 故事线，对应原版 governance.ts:13-26 CanonicalStorylineDTO
 struct Storyline: Codable, Identifiable, Equatable {
     let id: String
     let title: String
@@ -139,12 +139,31 @@ struct Storyline: Codable, Identifiable, Equatable {
     let status: String?
     let introducedChapter: Int?
     let resolvedChapter: Int?
+    /// P1 补齐：novel_id — governance.ts:15
+    let novelId: String?
+    /// P1 补齐：canonical_key — governance.ts:16
+    let canonicalKey: String?
+    /// P1 补齐：goal — governance.ts:19
+    let goal: String?
+    /// P1 补齐：conflict — governance.ts:20
+    let conflict: String?
+    /// P1 补齐：span: Record<string, number | null> — governance.ts:21
+    let span: [String: Int?]?
+    /// P1 补齐：source_storyline_ids — governance.ts:24
+    let sourceStorylineIds: [String]?
+    /// P1 补齐：updated_at — governance.ts:25
+    let updatedAt: String?
 
     enum CodingKeys: String, CodingKey {
         case id, title, aliases, status
         case promiseTags = "promise_tags"
         case introducedChapter = "introduced_chapter"
         case resolvedChapter = "resolved_chapter"
+        case novelId = "novel_id"
+        case canonicalKey = "canonical_key"
+        case goal, conflict, span
+        case sourceStorylineIds = "source_storyline_ids"
+        case updatedAt = "updated_at"
     }
 
     init(from decoder: Decoder) throws {
@@ -156,6 +175,13 @@ struct Storyline: Codable, Identifiable, Equatable {
         self.status = try c.decodeIfPresent(String.self, forKey: .status)
         self.introducedChapter = try c.decodeIfPresent(Int.self, forKey: .introducedChapter)
         self.resolvedChapter = try c.decodeIfPresent(Int.self, forKey: .resolvedChapter)
+        self.novelId = try c.decodeIfPresent(String.self, forKey: .novelId)
+        self.canonicalKey = try c.decodeIfPresent(String.self, forKey: .canonicalKey)
+        self.goal = try c.decodeIfPresent(String.self, forKey: .goal)
+        self.conflict = try c.decodeIfPresent(String.self, forKey: .conflict)
+        self.span = try c.decodeIfPresent([String: Int?].self, forKey: .span)
+        self.sourceStorylineIds = try c.decodeIfPresent([String].self, forKey: .sourceStorylineIds)
+        self.updatedAt = try c.decodeIfPresent(String.self, forKey: .updatedAt)
     }
 }
 

@@ -7,6 +7,88 @@
 
 import Foundation
 
+// MARK: - 实体词典角色
+
+/// 词典角色，对应原版 manuscript.ts:4-8 LexiconCharacter
+struct LexiconCharacter: Codable, Identifiable, Equatable {
+    let id: String
+    let name: String
+    let aliases: [String]
+
+    enum CodingKeys: String, CodingKey {
+        case id, name, aliases
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.id = try c.decodeIfPresent(String.self, forKey: .id) ?? ""
+        self.name = try c.decodeIfPresent(String.self, forKey: .name) ?? ""
+        self.aliases = try c.decodeIfPresent([String].self, forKey: .aliases) ?? []
+    }
+
+    init(id: String = "", name: String = "", aliases: [String] = []) {
+        self.id = id
+        self.name = name
+        self.aliases = aliases
+    }
+}
+
+// MARK: - 实体词典地点
+
+/// 词典地点，对应原版 manuscript.ts:10-15 LexiconLocation
+struct LexiconLocation: Codable, Identifiable, Equatable {
+    let id: String
+    let name: String
+    let locationType: String
+    let aliases: [String]
+
+    enum CodingKeys: String, CodingKey {
+        case id, name, aliases
+        case locationType = "location_type"
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.id = try c.decodeIfPresent(String.self, forKey: .id) ?? ""
+        self.name = try c.decodeIfPresent(String.self, forKey: .name) ?? ""
+        self.locationType = try c.decodeIfPresent(String.self, forKey: .locationType) ?? ""
+        self.aliases = try c.decodeIfPresent([String].self, forKey: .aliases) ?? []
+    }
+
+    init(id: String = "", name: String = "", locationType: String = "", aliases: [String] = []) {
+        self.id = id
+        self.name = name
+        self.locationType = locationType
+        self.aliases = aliases
+    }
+}
+
+// MARK: - 实体词典响应
+
+/// 实体词典响应 — manuscript.ts:26-29
+struct EntityLexiconResponse: Codable, Equatable {
+    let characters: [LexiconCharacter]
+    let locations: [LexiconLocation]
+    let props: [AnyCodable]
+
+    enum CodingKeys: String, CodingKey {
+        case characters, locations, props
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.characters = try c.decodeIfPresent([LexiconCharacter].self, forKey: .characters) ?? []
+        self.locations = try c.decodeIfPresent([LexiconLocation].self, forKey: .locations) ?? []
+        self.props = try c.decodeIfPresent([AnyCodable].self, forKey: .props) ?? []
+    }
+
+    init(characters: [LexiconCharacter] = [], locations: [LexiconLocation] = [], props: [AnyCodable] = []) {
+        self.characters = characters
+        self.locations = locations
+        self.props = props
+    }
+}
+
 // MARK: - 章节实体提及
 
 /// 章节实体提及，对应原版 manuscript.ts:17-23 ChapterEntityMention

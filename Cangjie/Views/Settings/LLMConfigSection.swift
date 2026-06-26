@@ -19,41 +19,49 @@ struct LLMConfigSection: View {
     @State private var showFetchModels = false
 
     var body: some View {
-        Section {
-            // 端点列表
-            ForEach(llmStore.profiles) { profile in
-                profileRow(profile)
-            }
+        Group {
+            Section {
+                // 端点列表
+                ForEach(llmStore.profiles) { profile in
+                    profileRow(profile)
+                }
 
-            // 新建端点
-            Button {
-                editingProfile = nil
-                showEditSheet = true
-            } label: {
-                Label("新建端点", systemImage: "plus.circle.fill")
-            }
+                // 新建端点
+                Button {
+                    editingProfile = nil
+                    showEditSheet = true
+                } label: {
+                    Label("新建端点", systemImage: "plus.circle.fill")
+                }
 
-            // Mock 状态警告
-            if llmStore.isUsingMock {
-                Label("当前使用 Mock 模式，请在下方配置真实端点", systemImage: "exclamationmark.triangle.fill")
-                    .font(.system(size: 11))
-                    .foregroundColor(Theme.warning)
-            }
+                // Mock 状态警告
+                if llmStore.isUsingMock {
+                    Label("当前使用 Mock 模式，请在下方配置真实端点", systemImage: "exclamationmark.triangle.fill")
+                        .font(.system(size: 11))
+                        .foregroundColor(Theme.warning)
+                }
 
-            // 运行时信息
-            if let runtime = llmStore.panelData?.runtime {
-                VStack(alignment: .leading, spacing: 2) {
-                    if let model = runtime.model {
-                        Text("当前模型：\(model)")
-                            .font(.system(size: 11))
-                            .foregroundColor(Theme.textSecondary)
-                    }
-                    if let baseUrl = runtime.baseUrl {
-                        Text("端点：\(baseUrl)")
-                            .font(.system(size: 11))
-                            .foregroundColor(Theme.textSecondary)
+                // 运行时信息
+                if let runtime = llmStore.panelData?.runtime {
+                    VStack(alignment: .leading, spacing: 2) {
+                        if let model = runtime.model {
+                            Text("当前模型：\(model)")
+                                .font(.system(size: 11))
+                                .foregroundColor(Theme.textSecondary)
+                        }
+                        if let baseUrl = runtime.baseUrl {
+                            Text("端点：\(baseUrl)")
+                                .font(.system(size: 11))
+                                .foregroundColor(Theme.textSecondary)
+                        }
                     }
                 }
+            }
+
+            // P1-VIEW-05 EngineMatrix 端点网格集成
+            Section("引擎端点矩阵") {
+                EngineMatrixView()
+                    .listRowInsets(EdgeInsets())
             }
         }
         .task {

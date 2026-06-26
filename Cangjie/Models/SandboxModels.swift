@@ -110,36 +110,60 @@ struct PatchCharacterAnchorRequest: Codable {
 // MARK: - 生成对话请求
 
 /// 生成对话请求（POST /novels/{id}/sandbox/generate-dialogue）
+/// 字段对齐原版 sandbox.ts:30-37 GenerateDialogueRequest
 struct GenerateDialogueRequest: Codable {
+    let novelId: String
     let characterId: String
-    let scenario: String?
-    let context: String?
-    let maxTurns: Int?
+    let scenePrompt: String
+    let mentalState: String?
+    let verbalTic: String?
+    let idleBehavior: String?
 
     enum CodingKeys: String, CodingKey {
+        case novelId = "novel_id"
         case characterId = "character_id"
-        case scenario, context
-        case maxTurns = "max_turns"
+        case scenePrompt = "scene_prompt"
+        case mentalState = "mental_state"
+        case verbalTic = "verbal_tic"
+        case idleBehavior = "idle_behavior"
+    }
+
+    /// 显式 memberwise init（自定义 CodingKeys 后编译器不再自动合成）
+    init(novelId: String,
+         characterId: String,
+         scenePrompt: String,
+         mentalState: String? = nil,
+         verbalTic: String? = nil,
+         idleBehavior: String? = nil) {
+        self.novelId = novelId
+        self.characterId = characterId
+        self.scenePrompt = scenePrompt
+        self.mentalState = mentalState
+        self.verbalTic = verbalTic
+        self.idleBehavior = idleBehavior
     }
 }
 
 // MARK: - 生成对话响应
 
 /// 生成对话响应，对应后端 GenerateDialogueResponse
+/// 字段对齐原版 sandbox.ts:39-42 GenerateDialogueResponse
 struct GenerateDialogueResponse: Codable, Equatable {
     let dialogue: String
-    let speaker: String?
+    let characterName: String?
     let metadata: [String: AnyCodable]?
 
     enum CodingKeys: String, CodingKey {
-        case dialogue, speaker, metadata
+        case dialogue
+        case characterName = "character_name"
+        case metadata
     }
 
     init(from decoder: Decoder) throws {
         let c = try decoder.singleValueContainer()
         let dict = try c.decode([String: AnyCodable].self)
         self.dialogue = dict["dialogue"]?.stringStringValue ?? ""
-        self.speaker = dict["speaker"]?.stringStringValue
+        self.characterName = dict["character_name"]?.stringStringValue
         self.metadata = (dict["metadata"]?.dictionaryValue ?? [:]).mapValues { AnyCodable($0) }
     }
 }

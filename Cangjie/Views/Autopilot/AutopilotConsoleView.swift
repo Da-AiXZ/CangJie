@@ -16,6 +16,7 @@ struct AutopilotConsoleView: View {
 
     @StateObject private var autopilotStore = AutopilotStore()
     @StateObject private var dagStore = DAGStore()
+    @StateObject private var workbenchStore = WorkbenchStore()
 
     var body: some View {
         ScrollView {
@@ -23,6 +24,7 @@ struct AutopilotConsoleView: View {
                 // 上半：控制面板
                 AutopilotControlPanel(novelId: novelId)
                     .environmentObject(autopilotStore)
+                    .environmentObject(workbenchStore)
 
                 // 熔断器卡片
                 CircuitBreakerCard(novelId: novelId)
@@ -62,6 +64,10 @@ struct AutopilotConsoleView: View {
             await autopilotStore.refreshStatus(novelId: novelId)
             await autopilotStore.refreshCircuitBreaker(novelId: novelId)
             autopilotStore.startSSEStreams(novelId: novelId)
+
+            // P0-4 集成遗留：DAGRunStore ← → DAGStore 注入
+            dagStore.setDAGRunStore(workbenchStore.dagRunStore)
+            workbenchStore.dagRunStore.setDAGStore(dagStore)
 
             // 加载 DAG — T04 改用 hydrateDagForNovel（并行加载 DAG + 注册表 + linkage）
             await dagStore.hydrateDagForNovel(novelId: novelId)

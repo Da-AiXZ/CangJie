@@ -1256,6 +1256,114 @@ final class OnboardingStore: ObservableObject {
         }
     }
 
+    // MARK: - P0-1：suggestMainPlotOptionsStream 消费者（workflow.ts:581-680）
+
+    /// 主线推荐选项（SSE 流式生成结果）
+    @Published var mainPlotOptions: [MainPlotOptionDTO] = []
+
+    /// 主线推荐流式 chunk 累积文本
+    @Published var mainPlotOptionsChunkText: String = ""
+
+    /// 主线推荐是否正在生成
+    @Published var mainPlotOptionsGenerating: Bool = false
+
+    /// 主线推荐错误
+    @Published var mainPlotOptionsError: String = ""
+
+    /// 启动主线推荐 SSE 流（workflow.ts:581-680 consumeMainPlotOptionsStream）
+    /// POST /api/v1/novels/{novelId}/setup/suggest-main-plot-options-stream
+    /// data-only 格式，6 类事件：phase/chunk/option/approval_required/done/error
+    ///
+    /// - Parameters:
+    ///   - novelId: 小说 ID
+    func startSuggestMainPlotOptionsStream(novelId: String) {
+        mainPlotOptionsGenerating = true
+        mainPlotOptions = []
+        mainPlotOptionsChunkText = ""
+        mainPlotOptionsError = ""
+        errorMessage = nil
+
+        Logger.engine.info("启动主线推荐 SSE 流: novel=\(novelId)")
+
+        sseRegistry.startSuggestMainPlotOptionsStream(
+            novelId: novelId,
+            onEvent: { [weak self] event in
+                Task { @MainActor in
+                    self?.handleMainPlotOptionsSSEEvent(event, novelId: novelId)
+                }
+            },
+            onError: { [weak self] error in
+                Task { @MainActor in
+                    self?.mainPlotOptionsGenerating = false
+                    self?.mainPlotOptionsError = "主线推荐连接失败: \(error.localizedDescription)"
+                }
+            }
+        )
+    }
+
+    /// 处理主线推荐 SSE 事件（workflow.ts:617-660）
+    private func handleMainPlotOptionsSSEEvent(_ event: SSEEvent, novelId: String) {
+        // data-only 格式，用 mainPlotOptionsEventType 获取事件类型
+        guard let eventType = event.mainPlotOptionsEventType else { return }
+        guard let dict = event.decodeAsDictionary() else { return }
+
+        switch eventType {
+        case "phase":
+            // workflow.ts:618-625
+            let message = dict["message"] as? String ?? ""
+            phaseMessage = message
+
+        case "chunk":
+            // workflow.ts:626-629
+            let text = dict["text"] as? String ?? ""
+            mainPlotOptionsChunkText += text
+
+        case "option":
+            // workflow.ts:630-635
+            let optionDict = dict["option"] as? [String: Any] ?? [:]
+            let index = dict["index"] as? Int ?? 0
+            let option = MainPlotOptionDTO.fromDict(optionDict)
+            // 确保 index 不越界
+            while mainPlotOptions.count <= index {
+                mainPlotOptions.append(MainPlotOptionDTO.empty)
+            }
+            mainPlotOptions[index] = option
+
+        case "approval_required":
+            // workflow.ts:636-647
+            let sessionId = dict["session_id"] as? String ?? ""
+            let status = dict["status"] as? String
+            let nextAction = dict["next_action"] as? String
+            if !sessionId.isEmpty {
+                plotOutlineSessionId = sessionId
+                Task { await openPlotOutlineReviewPanel(sessionId: sessionId) }
+            }
+
+        case "done":
+            // workflow.ts:648-653
+            let optionsArray = dict["plot_options"] as? [[String: Any]] ?? []
+            mainPlotOptions = optionsArray.map { MainPlotOptionDTO.fromDict($0) }
+            mainPlotOptionsGenerating = false
+            sseRegistry.cancelSuggestMainPlotOptionsStream(novelId: novelId)
+
+        case "error":
+            // workflow.ts:654-660
+            let message = dict["message"] as? String ?? "推演失败"
+            mainPlotOptionsError = message
+            mainPlotOptionsGenerating = false
+            sseRegistry.cancelSuggestMainPlotOptionsStream(novelId: novelId)
+
+        default:
+            break
+        }
+    }
+
+    /// 取消主线推荐 SSE 流
+    func cancelSuggestMainPlotOptionsStream(novelId: String) {
+        sseRegistry.cancelSuggestMainPlotOptionsStream(novelId: novelId)
+        mainPlotOptionsGenerating = false
+    }
+
     // MARK: - 重置
 
     /// 重置向导状态

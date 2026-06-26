@@ -17,6 +17,7 @@ struct AutopilotControlPanel: View {
     let novelId: String
 
     @EnvironmentObject var autopilotStore: AutopilotStore
+    @EnvironmentObject var workbenchStore: WorkbenchStore
 
     // 启动配置（默认值对齐原版 AutopilotPanel.vue:358-363）
     @State private var targetChapters: Int = 100
@@ -36,6 +37,9 @@ struct AutopilotControlPanel: View {
                 kpiGrid(status)
             }
 
+            // P0-4：DAG 运行控制按钮（startRun/stopRun）
+            dagRunControlSection
+
             // 操作按钮
             actionButtons
         }
@@ -48,6 +52,85 @@ struct AutopilotControlPanel: View {
             }
         } message: {
             Text("请先在工作台点击「宏观规划」按钮，生成并确认故事骨架（部/卷/幕）后再启动自动驾驶。")
+        }
+    }
+
+    // MARK: - P0-4 DAG 运行控制按钮
+
+    private var dagRunControlSection: some View {
+        VStack(spacing: Theme.Spacing.sm) {
+            // 运行状态标签
+            HStack(spacing: 6) {
+                Circle()
+                    .fill(dagRunStatusColor)
+                    .frame(width: 8, height: 8)
+
+                Text("DAG 运行：\(dagRunStatusLabel)")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundColor(Theme.textSecondary)
+
+                Spacer()
+            }
+
+            // 启动/停止按钮
+            HStack(spacing: Theme.Spacing.sm) {
+                if workbenchStore.dagRunStore.canStart {
+                    Button {
+                        Task {
+                            await workbenchStore.dagRunStore.startRun(novelId: novelId)
+                            // 启动后连接 SSE 事件流
+                            workbenchStore.dagRunStore.connectSSE(novelId: novelId)
+                        }
+                    } label: {
+                        Label("启动 DAG 运行", systemImage: "play.fill")
+                            .frame(maxWidth: .infinity)
+                            .font(.system(size: 12, weight: .medium))
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(Theme.primary)
+                    .controlSize(.small)
+                }
+
+                if workbenchStore.dagRunStore.canStop {
+                    Button(role: .destructive) {
+                        Task {
+                            await workbenchStore.dagRunStore.stopRun(novelId: novelId)
+                            workbenchStore.dagRunStore.disconnectSSE()
+                        }
+                    } label: {
+                        Label("停止 DAG 运行", systemImage: "stop.fill")
+                            .frame(maxWidth: .infinity)
+                            .font(.system(size: 12, weight: .medium))
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                }
+            }
+        }
+        .padding(Theme.Spacing.sm)
+        .background(Theme.tertiaryBackground)
+        .cornerRadius(Theme.CornerRadius.small)
+    }
+
+    /// DAG 运行状态颜色
+    private var dagRunStatusColor: Color {
+        switch workbenchStore.dagRunStore.runStatus {
+        case .running: return Theme.success
+        case .stopping: return Theme.warning
+        case .completed: return Theme.info
+        case .error: return Theme.error
+        case .idle: return Theme.textTertiary
+        }
+    }
+
+    /// DAG 运行状态中文标签
+    private var dagRunStatusLabel: String {
+        switch workbenchStore.dagRunStore.runStatus {
+        case .idle: return "空闲"
+        case .running: return "运行中"
+        case .stopping: return "停止中"
+        case .completed: return "已完成"
+        case .error: return "错误"
         }
     }
 

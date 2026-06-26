@@ -13,6 +13,12 @@ struct SidebarView: View {
 
     @EnvironmentObject var appState: AppState
 
+    /// A-2：PromptPlaza Bridge（shouldOpenPlaza 联动跳转）
+    @ObservedObject private var promptPlazaBridge = PromptPlazaBridge.shared
+
+    /// A-2：PromptPlaza Store（Badge 角标数据）
+    @StateObject private var promptPlazaStore = PromptPlazaStore()
+
     // MARK: - 导航分组
 
     /// 创作分组
@@ -82,6 +88,17 @@ struct SidebarView: View {
         .listStyle(.sidebar)
         .navigationTitle("仓颉")
         .navigationBarTitleDisplayMode(.inline)
+        .task {
+            // A-2：加载 PromptPlaza 数据用于 Badge 角标
+            await promptPlazaStore.loadPlazaInit()
+        }
+        .onChange(of: promptPlazaBridge.shouldOpenPlaza) { shouldOpen in
+            // A-2：shouldOpenPlaza 联动跳转
+            if shouldOpen {
+                appState.sidebarSelection = .promptPlaza
+                _ = promptPlazaBridge.consumeOpenRequest()
+            }
+        }
     }
 
     // MARK: - 品牌头部
@@ -112,12 +129,49 @@ struct SidebarView: View {
     /// 侧边栏导航行
     private func sidebarRow(_ destination: SidebarDestination) -> some View {
         Label {
-            Text(destination.rawValue)
+            HStack(spacing: 4) {
+                Text(destination.rawValue)
+
+                // A-2：PromptPlaza Badge 角标（提示词数量）
+                if destination == .promptPlaza {
+                    let count = promptPlazaStore.nodes.count
+                    if count > 0 {
+                        Text("\(min(count, 99))\(count > 99 ? "+" : "")")
+                            .font(.system(size: 9, weight: .bold))
+                            .foregroundColor(.white)
+                            .padding(.horizontal, 5)
+                            .padding(.vertical, 1)
+                            .background(Theme.primary)
+                            .clipShape(Capsule())
+                    }
+                }
+            }
         } icon: {
             Image(systemName: destination.iconName)
                 .foregroundColor(appState.sidebarSelection == destination ? Theme.primary : Theme.textSecondary)
                 .frame(width: 24)
         }
         .tag(destination)
+    }
+}
+
+// MARK: - A-2 shouldOpenPlaza 联动
+
+/// SidebarView 的 shouldOpenPlaza 联动修饰符。
+///
+/// 当 PromptPlazaBridge.shouldOpenPlaza 为 true 时，
+/// 自动切换侧栏选中到 promptPlaza。
+struct ShouldOpenPlazaModifier: ViewModifier {
+    @ObservedObject var bridge: PromptPlazaBridge
+    @Binding var selection: SidebarDestination?
+
+    func body(content: Content) -> some View {
+        content
+            .onChange(of: bridge.shouldOpenPlaza) { shouldOpen in
+                if shouldOpen {
+                    selection = .promptPlaza
+                    bridge.consumeOpenSignal()
+                }
+            }
     }
 }

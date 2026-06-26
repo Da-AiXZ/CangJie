@@ -36,9 +36,8 @@ struct ChapterToolbar: View {
 
             Spacer()
 
-            // M5 单章生成按钮（workflow.ts:375）
-            if workbenchStore.isGeneratingChapter {
-                // 生成中：显示进度
+            // P0-2：生成按钮打开弹窗（不再直接调 consumeGenerateChapterStream）
+            if workbenchStore.isGeneratingChapter || workbenchStore.generateInProgress {
                 ProgressView()
                     .scaleEffect(0.7)
                 if let phase = workbenchStore.generateChapterPhase {
@@ -47,26 +46,18 @@ struct ChapterToolbar: View {
                         .foregroundColor(Theme.primary)
                 }
             } else {
-                // 生成按钮（workflow.ts:375 consumeGenerateChapterStream）
+                // 生成按钮（打开 ChapterGenerateModalView sheet）
                 Button {
-                    Task {
-                        if let novelId = novelStore.currentNovel?.id {
-                            // 风险点 6.3：generationHint 可能为空，处理 nil 情况
-                            let outline = workbenchStore.generationHint.isEmpty ? chapter.title : workbenchStore.generationHint
-                            workbenchStore.consumeGenerateChapterStream(
-                                novelId: novelId,
-                                chapterNumber: chapter.number,
-                                outline: outline
-                            )
-                        }
+                    if let novelId = novelStore.currentNovel?.id {
+                        workbenchStore.openGenerateModal(novelId: novelId, chapter: chapter)
                     }
                 } label: {
                     Label("生成", systemImage: "wand.and.stars")
                         .font(.system(size: 12))
                 }
                 .buttonStyle(.bordered)
-                // 风险点 6.3：generationHint 为 nil 时禁用按钮 + 提示
-                .disabled(workbenchStore.generationHint.isEmpty && chapter.title.isEmpty)
+                // P0-4：辅助侧只读时禁用生成按钮（对齐 WorkArea.vue L183 :disabled）
+                .disabled(workbenchStore.isAssistedReadOnly)
             }
 
             Divider()

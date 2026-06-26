@@ -30,6 +30,7 @@ enum StructureNodeType: String, Codable, CaseIterable {
 // MARK: - 结构节点
 
 /// 故事结构节点
+/// 字段对齐原版 structure.ts:9-30 StoryNode（21 字段 = 原 12 + 新增 9）
 struct StoryNode: Codable, Identifiable, Equatable {
     let id: String
     let novelId: String
@@ -43,6 +44,16 @@ struct StoryNode: Codable, Identifiable, Equatable {
     let chapterStart: Int?
     let chapterEnd: Int?
     let children: [StoryNode]?
+    // P0-9.6 新增 9 字段（对齐 structure.ts:20-28）
+    let chapterCount: Int?
+    let metadata: AnyCodable?
+    let createdAt: String?
+    let updatedAt: String?
+    let level: Int?
+    let icon: String?
+    let displayName: String?
+    let wordCount: Int?
+    let status: String?
 
     enum CodingKeys: String, CodingKey {
         case id
@@ -55,6 +66,16 @@ struct StoryNode: Codable, Identifiable, Equatable {
         case chapterStart = "chapter_start"
         case chapterEnd = "chapter_end"
         case children
+        // P0-9.6 新增 CodingKeys
+        case chapterCount = "chapter_count"
+        case metadata
+        case createdAt = "created_at"
+        case updatedAt = "updated_at"
+        case level
+        case icon
+        case displayName = "display_name"
+        case wordCount = "word_count"
+        case status
     }
 
     init(from decoder: Decoder) throws {
@@ -71,6 +92,16 @@ struct StoryNode: Codable, Identifiable, Equatable {
         self.chapterStart = try c.decodeIfPresent(Int.self, forKey: .chapterStart)
         self.chapterEnd = try c.decodeIfPresent(Int.self, forKey: .chapterEnd)
         self.children = try c.decodeIfPresent([StoryNode].self, forKey: .children)
+        // P0-9.6 新增字段解码
+        self.chapterCount = try c.decodeIfPresent(Int.self, forKey: .chapterCount)
+        self.metadata = try c.decodeIfPresent(AnyCodable.self, forKey: .metadata)
+        self.createdAt = try c.decodeIfPresent(String.self, forKey: .createdAt)
+        self.updatedAt = try c.decodeIfPresent(String.self, forKey: .updatedAt)
+        self.level = try c.decodeIfPresent(Int.self, forKey: .level)
+        self.icon = try c.decodeIfPresent(String.self, forKey: .icon)
+        self.displayName = try c.decodeIfPresent(String.self, forKey: .displayName)
+        self.wordCount = try c.decodeIfPresent(Int.self, forKey: .wordCount)
+        self.status = try c.decodeIfPresent(String.self, forKey: .status)
     }
 }
 

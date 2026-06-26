@@ -67,6 +67,21 @@ struct ContextPanelTabView: View {
                     Label("元素", systemImage: "square.grid.2x2.fill")
                 }
 
+            // P1-VIEW-07 规划 Tab（微观节拍）
+            // E-2：传入实际 microBeats 数据（来自 WorkbenchStore.generateChapterBeats 经 toChapterMicroBeatPayloads 转换）
+            ChapterPlanningRail(microBeats: toChapterMicroBeatPayloads(workbenchStore.generateChapterBeats ?? []))
+                .tabItem {
+                    Label("规划", systemImage: "list.bullet.indent")
+                }
+
+            // P1-VIEW-06 知识库 Tab
+            if let novelId = novelStore.currentNovel?.id {
+                KnowledgePanelView(novelId: novelId)
+                    .tabItem {
+                        Label("知识", systemImage: "network")
+                    }
+            }
+
             // 故事线
             StorylinePanel()
                 .tabItem {

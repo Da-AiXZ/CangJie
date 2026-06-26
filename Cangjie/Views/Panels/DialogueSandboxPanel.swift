@@ -386,13 +386,19 @@ struct DialogueSandboxPanel: View {
     private func generate() async {
         guard let novelId = appState.currentNovelId, let characterId = selectedCharacterId else { return }
         isGenerating = true
+        // P0-9.3：GenerateDialogueRequest 字段对齐原版 sandbox.ts:30-37
+        // novel_id/character_id/scene_prompt（必填）+ mental_state/verbal_tic/idle_behavior（可选，从角色锚点获取）
         let request = GenerateDialogueRequest(
+            novelId: novelId,
             characterId: characterId,
-            scenario: nil, context: nil, maxTurns: 3
+            scenePrompt: "",
+            mentalState: anchor?.mentalState,
+            verbalTic: anchor?.verbalTic,
+            idleBehavior: anchor?.idleBehavior
         )
         do {
             let response: GenerateDialogueResponse = try await APIClient.shared.request(
-                APIEndpoint.Sandbox.generateDialogue(novelId: novelId), body: request
+                APIEndpoint.Sandbox.generateDialogue, body: request
             )
             generatedDialogue = response.dialogue
         } catch {

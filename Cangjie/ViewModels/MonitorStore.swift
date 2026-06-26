@@ -33,6 +33,14 @@ final class MonitorStore: ObservableObject {
     /// 检查模式（advise/enforce） — QualityGuardrailPanel.vue:179
     @Published var guardrailMode: String = "advise"
 
+    // MARK: - D-2 护栏快照退避状态（对齐 useChapterGuardrailSnapshot.ts:19-20）
+
+    /// 退避截止时间（Date），在此时间前跳过请求 — useChapterGuardrailSnapshot.ts:19
+    private var guardrailBackoffUntil: Date = .distantPast
+
+    /// 退避键（slug:chapterNumber），键不匹配时重置退避 — useChapterGuardrailSnapshot.ts:20
+    private var guardrailBackoffKey: String = ""
+
     // MARK: - 依赖
 
     private let apiClient: APIClient
@@ -155,21 +163,56 @@ final class MonitorStore: ObservableObject {
     /// 加载护栏自动快照 — chapter.ts:159-167 getGuardrailSnapshot()
     /// GET /novels/{novelId}/chapters/{chapterNumber}/guardrail-snapshot
     ///
+    /// D-2：退避机制（对齐 useChapterGuardrailSnapshot.ts:19-71）
+    /// - 空结果 → 退避 90s（guardrailEmptyBackoffMs）
+    /// - 请求错误 → 退避 60s（guardrailErrorBackoffMs）
+    /// - 非空结果 → 重置退避
+    /// - 退避键 = slug:chapterNumber，键变化时重置退避
+    ///
     /// 对齐原版 QualityGuardrailPanel.vue:227-238 hydrateFromSnapshot()
     /// - Parameters:
     ///   - novelId: 小说 ID
     ///   - chapterNumber: 章节编号
-    func loadGuardrailSnapshot(novelId: String, chapterNumber: Int) async {
-        // 原版：尚无快照时服务端返回 JSON null（HTTP 200），lastReport 置 null
+    ///   - force: 是否强制刷新（忽略退避）
+    func loadGuardrailSnapshot(novelId: String, chapterNumber: Int, force: Bool = false) async {
+        // D-2：退避检查 — useChapterGuardrailSnapshot.ts:48-54
+        let key = "\(novelId):\(chapterNumber)"
+        if !force && guardrailBackoffKey == key && Date() < guardrailBackoffUntil {
+            // 退避期内，跳过请求
+            return
+        }
+
         do {
             let response: GuardrailCheckResponse? = try await apiClient.request(
                 APIEndpoint.Chapters.guardrailSnapshot(novelId: novelId, chapterNumber: chapterNumber)
             )
             self.guardrailReport = response
+
+            // D-2：空结果退避 — useChapterGuardrailSnapshot.ts:62-64
+            if response == nil {
+                guardrailBackoffKey = key
+                guardrailBackoffUntil = Date().addingTimeInterval(
+                    TimeInterval(RuntimePerformance.workbench.guardrailEmptyBackoffMs) / 1000.0
+                )
+            } else {
+                // 非空结果 → 重置退避 — useChapterGuardrailSnapshot.ts:65-66
+                resetGuardrailBackoff()
+            }
         } catch {
             // 原版 catch 中 lastReport = null
             self.guardrailReport = nil
+            // D-2：错误退避 — useChapterGuardrailSnapshot.ts:68-70
+            guardrailBackoffKey = key
+            guardrailBackoffUntil = Date().addingTimeInterval(
+                TimeInterval(RuntimePerformance.workbench.guardrailErrorBackoffMs) / 1000.0
+            )
         }
+    }
+
+    /// 重置护栏退避状态 — useChapterGuardrailSnapshot.ts:22-25
+    func resetGuardrailBackoff() {
+        guardrailBackoffUntil = .distantPast
+        guardrailBackoffKey = ""
     }
 
     // MARK: - 便捷属性

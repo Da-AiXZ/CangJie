@@ -30,7 +30,7 @@ struct EvolutionSnapshot: Codable, Identifiable, Equatable {
     let createdAt: String?
 
     enum CodingKeys: String, CodingKey {
-        case id
+        case id = "snapshot_id"
         case novelId = "novel_id"
         case branchId = "branch_id"
         case chapterNumber = "chapter_number"
@@ -137,21 +137,67 @@ struct EvolutionGateRequest: Codable {
     }
 }
 
+// MARK: - 闸门违规项
+
+/// 闸门违规项，对齐原版 api/evolution.ts:30-35 violations 数组元素。
+///
+/// C-3：将 EvolutionGateReport.violations 从 [AnyCodable] 结构化为 [GateViolation]。
+struct GateViolation: Codable, Equatable {
+
+    /// 违规级别（error / warning / info）
+    let level: String
+
+    /// 违规类型
+    let type: String
+
+    /// 违规消息
+    let message: String
+
+    /// 修复建议（可选）
+    let suggestion: String?
+
+    enum CodingKeys: String, CodingKey {
+        case level, type, message, suggestion
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.level = try c.decodeIfPresent(String.self, forKey: .level) ?? ""
+        self.type = try c.decodeIfPresent(String.self, forKey: .type) ?? ""
+        self.message = try c.decodeIfPresent(String.self, forKey: .message) ?? ""
+        self.suggestion = try c.decodeIfPresent(String.self, forKey: .suggestion)
+    }
+
+    init(level: String, type: String, message: String, suggestion: String? = nil) {
+        self.level = level
+        self.type = type
+        self.message = message
+        self.suggestion = suggestion
+    }
+}
+
 // MARK: - 闸门响应
 
 /// 闸门检查响应（POST /novels/{id}/evolution/gate），后端返回 report.to_dict()
+///
+/// C-3：violations 从 [AnyCodable]? 结构化为 [GateViolation]?；
+/// 补齐 requiredContinuations / repairPlan 字段（对齐 evolution.ts:36-37）。
 struct EvolutionGateReport: Codable, Equatable {
     let chapterNumber: Int
     let branchId: String
     let passed: Bool?
-    let violations: [AnyCodable]?
+    let violations: [GateViolation]?
+    let requiredContinuations: [String]?
+    let repairPlan: [String]?
     let governanceBudget: AnyCodable?
     let governanceContextRequest: AnyCodable?
 
     enum CodingKeys: String, CodingKey {
-        case passed, violations
+        case passed = "is_pass", violations
         case chapterNumber = "chapter_number"
         case branchId = "branch_id"
+        case requiredContinuations = "required_continuations"
+        case repairPlan = "repair_plan"
         case governanceBudget = "governance_budget"
         case governanceContextRequest = "governance_context_request"
     }
@@ -161,8 +207,29 @@ struct EvolutionGateReport: Codable, Equatable {
         let dict = try c.decode([String: AnyCodable].self)
         self.chapterNumber = dict["chapter_number"]?.intValue ?? 0
         self.branchId = dict["branch_id"]?.stringStringValue ?? "main"
-        self.passed = dict["passed"]?.boolValue
-        self.violations = dict["violations"]?.arrayValue?.map { AnyCodable($0) }
+        self.passed = dict["is_pass"]?.boolValue
+        // violations: 逐元素解码为 GateViolation
+        if let violationsArray = dict["violations"]?.arrayValue {
+            let jsonDecoder = CangjieDecoder.shared
+            self.violations = violationsArray.compactMap { item in
+                guard let data = try? JSONSerialization.data(withJSONObject: item, options: []) else { return nil }
+                return try? jsonDecoder.decode(GateViolation.self, from: data)
+            }
+        } else {
+            self.violations = nil
+        }
+        // requiredContinuations: 字符串数组
+        if let contArray = dict["required_continuations"]?.arrayValue {
+            self.requiredContinuations = contArray.compactMap { $0 as? String }
+        } else {
+            self.requiredContinuations = nil
+        }
+        // repairPlan: 字符串数组
+        if let planArray = dict["repair_plan"]?.arrayValue {
+            self.repairPlan = planArray.compactMap { $0 as? String }
+        } else {
+            self.repairPlan = nil
+        }
         self.governanceBudget = dict["governance_budget"].map { AnyCodable($0) }
         self.governanceContextRequest = dict["governance_context_request"].map { AnyCodable($0) }
     }
