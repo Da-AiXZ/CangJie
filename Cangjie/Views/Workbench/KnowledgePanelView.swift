@@ -346,7 +346,7 @@ struct KnowledgePanelView: View {
                 }
             }
             if !triple.note.isEmpty, triple.note != "null" {
-                Text(note)
+                Text(triple.note)
                     .font(.system(size: 9))
                     .foregroundColor(Theme.textTertiary)
                     .lineLimit(1)

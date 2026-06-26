@@ -7,6 +7,7 @@
 //
 
 import SwiftUI
+import Foundation
 
 // MARK: - 地点预览数据
 
@@ -135,8 +136,8 @@ struct BibleLocationsGraphPreviewView: View {
             } else {
                 let angle: Double = (Double(index) / Double(graphNodes.count)) * 2.0 * .pi - .pi / 2
                 positions[node.id] = CGPoint(
-                    x: center.x + cos(angle) * radius,
-                    y: center.y + sin(angle) * radius
+                    x: center.x + Foundation.cos(angle) * radius,
+                    y: center.y + Foundation.sin(angle) * radius
                 )
             }
         }

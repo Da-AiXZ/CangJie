@@ -154,11 +154,11 @@ struct EngineMatrixView: View {
                 VStack(alignment: .leading, spacing: 4) {
                     detailRow("模型", profile.model)
                     detailRow("Base URL", profile.baseUrl)
-                    if let max = profile.maxTokens {
-                        detailRow("最大 Token", "\(max)")
+                    if profile.maxTokens > 0 {
+                        detailRow("最大 Token", "\(profile.maxTokens)")
                     }
-                    if let temp = profile.temperature {
-                        detailRow("温度", String(format: "%.1f", temp))
+                    if profile.temperature > 0 {
+                        detailRow("温度", String(format: "%.1f", profile.temperature))
                     }
                 }
                 .padding(.horizontal, 10)
