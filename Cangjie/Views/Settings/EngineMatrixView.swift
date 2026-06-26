@@ -129,7 +129,7 @@ struct EngineMatrixView: View {
                         Text(profile.name)
                             .font(.system(size: 12, weight: .medium))
                             .foregroundColor(Theme.textPrimary)
-                        Text(profile.provider)
+                        Text(profile.protocol)
                             .font(.system(size: 9))
                             .foregroundColor(Theme.textSecondary)
                     }
@@ -178,10 +178,10 @@ struct EngineMatrixView: View {
                 .font(.system(size: 11))
                 .foregroundColor(Theme.textPrimary)
             Spacer()
-            Text(profile.provider)
+            Text(profile.protocol)
                 .font(.system(size: 10))
                 .foregroundColor(Theme.textSecondary)
-            if profile.provider.lowercased().contains("openai") {
+            if profile.protocol.lowercased().contains("openai") {
                 Image(systemName: "brain.head.profile")
                     .foregroundColor(Theme.primary)
                     .font(.system(size: 10))

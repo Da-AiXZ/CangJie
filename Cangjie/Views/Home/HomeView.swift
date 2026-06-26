@@ -116,6 +116,7 @@ struct HomeView: View {
                         Image(systemName: "plus.circle.fill")
                             .font(.system(size: 22))
                     }
+                }
             }
         }
         .refreshable {

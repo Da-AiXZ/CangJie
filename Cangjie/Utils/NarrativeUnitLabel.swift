@@ -38,7 +38,7 @@ func narrativeUnitNoun(_ prefs: GenerationPrefsDTO?) -> String {
 ///   - prefs: 生成偏好（可选）
 /// - Returns: 序数标签字符串
 func narrativeOrdinalLabel(_ n: Int, _ prefs: GenerationPrefsDTO?) -> String {
-    if n < 1 || !n.isFinite {
+    if n < 1 {
         return isPhaseDisplayMode(prefs) ? "第\(n)阶段" : "第\(n)章"
     }
     if isPhaseDisplayMode(prefs) {

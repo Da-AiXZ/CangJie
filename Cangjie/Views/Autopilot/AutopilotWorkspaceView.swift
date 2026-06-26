@@ -104,7 +104,7 @@ struct AutopilotWorkspaceView: View {
                     .foregroundColor(Theme.textSecondary)
 
                 // 嵌入自动驾驶控制面板
-                AutopilotControlPanel()
+                AutopilotControlPanel(novelId: appState.currentNovelId ?? "")
             }
             .padding(12)
         }
@@ -204,7 +204,7 @@ struct AutopilotWorkspaceView: View {
                     .foregroundColor(Theme.textPrimary)
 
                 // 嵌入自动驾驶日志流
-                AutopilotLogStream()
+                AutopilotLogStream(novelId: appState.currentNovelId ?? "")
             }
             .padding(12)
         }

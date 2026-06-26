@@ -170,7 +170,7 @@ struct ShouldOpenPlazaModifier: ViewModifier {
             .onChange(of: bridge.shouldOpenPlaza) { shouldOpen in
                 if shouldOpen {
                     selection = .promptPlaza
-                    bridge.consumeOpenSignal()
+                    bridge.consumeOpenRequest()
                 }
             }
     }

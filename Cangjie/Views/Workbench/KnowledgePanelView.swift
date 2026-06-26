@@ -345,7 +345,7 @@ struct KnowledgePanelView: View {
                         .foregroundColor(Theme.textTertiary)
                 }
             }
-            if let note = triple.note, !note.isEmpty, note != "null" {
+            if !triple.note.isEmpty, triple.note != "null" {
                 Text(note)
                     .font(.system(size: 9))
                     .foregroundColor(Theme.textTertiary)

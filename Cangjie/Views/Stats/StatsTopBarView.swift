@@ -60,7 +60,7 @@ struct StatsTopBarView: View {
 
     private var divider: some View {
         Rectangle()
-            .fill(Theme.separator)
+            .fill(Color.gray.opacity(0.3))
             .frame(width: 1, height: 24)
     }
 }

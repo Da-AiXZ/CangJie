@@ -99,14 +99,6 @@ struct LocationGraphView: View {
                     }
                 }
 
-                if !location.aliases.isEmpty {
-                    Section("别名") {
-                        ForEach(location.aliases, id: \.self) { alias in
-                            Text(alias)
-                        }
-                    }
-                }
-
                 Section {
                     Button {
                         selectedLocation = nil
@@ -180,7 +172,7 @@ struct LocationGraphView: View {
     private func loadTriples(novelId: String) async {
         do {
             let response: [KnowledgeTriple] = try await APIClient.shared.request(
-                APIEndpoint.Knowledge.triples(novelId: novelId)
+                APIEndpoint.KnowledgeGraph.triples(novelId: novelId)
             )
             allTriples = response
         } catch {

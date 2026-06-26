@@ -258,9 +258,17 @@ struct WizardSkeletonView: View {
     // MARK: - 骨架条
 
     private func skeletonBar(width: CGFloat, height: CGFloat, shimmer: Bool) -> some View {
-        RoundedRectangle(cornerRadius: 4)
-            .fill(shimmer ? shimmerGradient : Color.gray.opacity(0.15))
-            .frame(width: width, height: height)
+        Group {
+            if shimmer {
+                RoundedRectangle(cornerRadius: 4)
+                    .fill(shimmerGradient)
+                    .frame(width: width, height: height)
+            } else {
+                RoundedRectangle(cornerRadius: 4)
+                    .fill(Color.gray.opacity(0.15))
+                    .frame(width: width, height: height)
+            }
+        }
     }
 
     private var shimmerGradient: LinearGradient {

@@ -502,7 +502,7 @@ struct ChapterEditView: View {
                 .disabled(store.isAiReviewing)
 
                 // 说明文字，对齐 Chapter.vue L104-106
-                Text("基于合并正文（含 chapters/NNN 下分场景 parts）与大纲一句纲；"生成意见"仅填入上方表单项。")
+                Text("基于合并正文（含 chapters/NNN 下分场景 parts）与大纲一句纲；\u{201C}生成意见\u{201D}仅填入上方表单项。")
                     .font(.system(size: 11))
                     .foregroundColor(Theme.textTertiary)
                     .fixedSize(horizontal: false, vertical: true)

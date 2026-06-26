@@ -33,7 +33,7 @@ let AUTOPILOT_AFTER_OUTLINE_PLAN_SUBSTEPS: Set<String> = [
 /// - Parameter substep: 子步骤名
 /// - Returns: 是否在集合中
 func isAutopilotAfterOutlinePlanSubstep(_ substep: Any?) -> Bool {
-    return AUTOPILOT_AFTER_OUTLINE_PLAN_SUBSTEPS.contains(String(substep ?? ""))
+    return AUTOPILOT_AFTER_OUTLINE_PLAN_SUBSTEPS.contains(String(describing: substep ?? ""))
 }
 
 /// 将自动驾驶状态对象转换为 DAG 显示状态，对齐原版 toAutopilotDAGDisplayStatus
@@ -73,17 +73,17 @@ func buildAutopilotDeskSnapshot(_ status: AnyCodable?) -> String {
     guard let status = status, let dict = status.dictionaryValue else { return "" }
     let audit = dict["last_chapter_audit"] as? [String: Any]
     let auditCh = audit != nil ? (audit!["chapter_number"] ?? audit!["chapterNumber"] ?? "") : ""
-    return [
-        dict["completed_chapters"] ?? 0,
-        dict["manuscript_chapters"] ?? 0,
-        dict["current_stage"] ?? "",
-        dict["current_act"] ?? 0,
-        dict["current_chapter_in_act"] ?? 0,
-        dict["current_chapter_number"] ?? "",
-        (dict["needs_review"] as? Bool == true) ? "1" : "0",
-        dict["autopilot_status"] ?? "",
-        auditCh,
-    ].map { "\($0)" }.joined(separator: "|")
+    var parts: [String] = []
+    parts.append(String(describing: dict["completed_chapters"] ?? 0))
+    parts.append(String(describing: dict["manuscript_chapters"] ?? 0))
+    parts.append(String(describing: dict["current_stage"] ?? ""))
+    parts.append(String(describing: dict["current_act"] ?? 0))
+    parts.append(String(describing: dict["current_chapter_in_act"] ?? 0))
+    parts.append(String(describing: dict["current_chapter_number"] ?? ""))
+    parts.append((dict["needs_review"] as? Bool == true) ? "1" : "0")
+    parts.append(String(describing: dict["autopilot_status"] ?? ""))
+    parts.append(String(describing: auditCh))
+    return parts.joined(separator: "|")
 }
 
 /// 构建自动驾驶响应式指纹，对齐原版 buildAutopilotReactiveFingerprint

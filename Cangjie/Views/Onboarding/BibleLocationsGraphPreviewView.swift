@@ -133,7 +133,7 @@ struct BibleLocationsGraphPreviewView: View {
             if graphNodes.count == 1 {
                 positions[node.id] = center
             } else {
-                let angle = (Double(index) / Double(graphNodes.count)) * 2.0 * .pi - .pi / 2
+                let angle: Double = (Double(index) / Double(graphNodes.count)) * 2.0 * .pi - .pi / 2
                 positions[node.id] = CGPoint(
                     x: center.x + cos(angle) * radius,
                     y: center.y + sin(angle) * radius
