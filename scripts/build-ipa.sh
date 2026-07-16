@@ -94,6 +94,20 @@ if entitlements != expected:
 PY
 }
 
+verify_code_signature() {
+  require_tool codesign
+  local app_path="$1"
+  local diagnostics_path="$2"
+  [[ -d "${app_path}" && ! -L "${app_path}" ]] || fail "Signed app bundle is missing or unsafe: ${app_path}"
+  rm -f "${diagnostics_path}"
+  if ! codesign --verify --strict --verbose=2 "${app_path}" >/dev/null 2>"${diagnostics_path}"; then
+    cat "${diagnostics_path}" >&2
+    rm -f "${diagnostics_path}"
+    fail "Signed app failed strict codesign verification"
+  fi
+  rm -f "${diagnostics_path}"
+}
+
 extract_and_verify_signed_entitlements() {
   require_tool codesign
   local app_path="$1"
@@ -211,7 +225,8 @@ case "${1:-}" in
     [[ "$#" == "2" && -n "${2:-}" ]] || fail "Usage: $0 --verify-signed-entitlements <App.app>"
     verification_root="$(mktemp -d)"
     trap 'rm -rf "${verification_root}"' EXIT
-    extract_and_verify_signed_entitlements "$2" "${verification_root}/signed-entitlements.plist" "${verification_root}/codesign.stderr"
+    verify_code_signature "$2" "${verification_root}/codesign-verify.stderr"
+    extract_and_verify_signed_entitlements "$2" "${verification_root}/signed-entitlements.plist" "${verification_root}/codesign-entitlements.stderr"
     exit 0
     ;;
   "")
@@ -375,7 +390,7 @@ codesign \
   --entitlements "${ENTITLEMENTS_CONTRACT}" \
   --generate-entitlement-der \
   "${APP}"
-codesign --verify --strict --verbose=2 "${APP}"
+verify_code_signature "${APP}" "${OUT}/codesign-verify.stderr"
 
 readonly CODESIGN_DETAILS="$(codesign -dvv "${APP}" 2>&1)"
 grep -q '^Signature=adhoc$' <<< "${CODESIGN_DETAILS}" || fail "The app is not ad-hoc signed"

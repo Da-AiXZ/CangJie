@@ -100,8 +100,19 @@ fi
 cat >"${BIN_DIR}/codesign" <<'SH'
 #!/bin/bash
 set -euo pipefail
-expected=(--display --entitlements - --xml "${FAKE_CODESIGN_APP:?}")
 actual=("$@")
+case "${actual[0]:-}" in
+  --verify)
+    expected=(--verify --strict --verbose=2 "${FAKE_CODESIGN_APP:?}")
+    ;;
+  --display)
+    expected=(--display --entitlements - --xml "${FAKE_CODESIGN_APP:?}")
+    ;;
+  *)
+    echo "unexpected codesign operation: ${actual[0]:-missing}" >&2
+    exit 64
+    ;;
+esac
 if [[ "${#actual[@]}" -ne "${#expected[@]}" ]]; then
   echo "unexpected codesign argument count: ${#actual[@]}" >&2
   exit 64
@@ -112,6 +123,14 @@ for index in "${!expected[@]}"; do
     exit 64
   }
 done
+if [[ "${actual[0]}" == "--verify" ]]; then
+  if [[ "${FAKE_CODESIGN_MODE:?}" == "invalid-signature" ]]; then
+    echo 'codesign: simulated invalid signature' >&2
+    exit 1
+  fi
+  echo 'fake app: valid on disk' >&2
+  exit 0
+fi
 case "${FAKE_CODESIGN_MODE:?}" in
   valid)
     cat "${FAKE_CODESIGN_VALID:?}"
@@ -154,6 +173,7 @@ run_fake() {
 }
 
 assert_success fake-valid run_fake valid bash "${BUILD_SCRIPT}" --verify-signed-entitlements "${APP_PATH}"
+assert_failure fake-invalid-signature 'Signed app failed strict codesign verification' run_fake invalid-signature bash "${BUILD_SCRIPT}" --verify-signed-entitlements "${APP_PATH}"
 assert_failure fake-empty-dictionary 'Entitlement contract mismatch: {}' run_fake empty-dictionary bash "${BUILD_SCRIPT}" --verify-signed-entitlements "${APP_PATH}"
 assert_failure fake-empty-output 'codesign returned no signed entitlements' run_fake empty-output bash "${BUILD_SCRIPT}" --verify-signed-entitlements "${APP_PATH}"
 assert_failure fake-stderr-only 'codesign returned no signed entitlements' run_fake stderr-only bash "${BUILD_SCRIPT}" --verify-signed-entitlements "${APP_PATH}"
@@ -186,6 +206,8 @@ with open(sys.argv[1], "wb") as destination:
 PY
   /usr/bin/codesign --force --sign - --timestamp=none --entitlements "${CONTRACT}" --generate-entitlement-der "${REAL_APP}"
   assert_success real-codesign bash "${BUILD_SCRIPT}" --verify-signed-entitlements "${REAL_APP}"
+  printf '\0' >>"${REAL_APP}/RealFixture"
+  assert_failure real-codesign-tampered 'Signed app failed strict codesign verification' bash "${BUILD_SCRIPT}" --verify-signed-entitlements "${REAL_APP}"
   /usr/bin/codesign --force --sign - --timestamp=none "${REAL_APP}"
   assert_failure real-codesign-empty 'codesign returned no signed entitlements' bash "${BUILD_SCRIPT}" --verify-signed-entitlements "${REAL_APP}"
 fi
