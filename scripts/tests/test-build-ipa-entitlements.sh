@@ -198,10 +198,10 @@ cat >"${BIN_DIR}/ldid" <<'SH'
 set -euo pipefail
 operation="${1:-}"
 case "${operation}" in
-  -S*)
-    [[ "$#" == "2" ]] || { echo 'unexpected ldid sign argument count' >&2; exit 64; }
-    [[ "${operation}" == "-S${FAKE_LDID_CONTRACT:?}" ]] || { echo "unexpected ldid entitlement argument: ${operation}" >&2; exit 64; }
-    [[ "$2" == "${FAKE_LDID_EXECUTABLE:?}" ]] || { echo "unexpected ldid executable: $2" >&2; exit 64; }
+  -Cadhoc)
+    [[ "$#" == "3" ]] || { echo 'unexpected ldid sign argument count' >&2; exit 64; }
+    [[ "$2" == "-S${FAKE_LDID_CONTRACT:?}" ]] || { echo "unexpected ldid entitlement argument: $2" >&2; exit 64; }
+    [[ "$3" == "${FAKE_LDID_EXECUTABLE:?}" ]] || { echo "unexpected ldid executable: $3" >&2; exit 64; }
     if [[ "${FAKE_LDID_MODE:?}" == "sign-error" ]]; then
       echo 'ldid: simulated signing failure' >&2
       exit 2

@@ -220,7 +220,7 @@ sign_executable_with_ldid() {
   local codesign_entitlements_diagnostics="${diagnostics_root}/codesign-executable-entitlements.stderr"
   rm -f "${signing_diagnostics}" "${extracted_entitlements}" "${extraction_diagnostics}" "${codesign_diagnostics}" "${codesign_entitlements}" "${codesign_entitlements_diagnostics}"
 
-  if ! "${ldid_path}" "-S${entitlements_path}" "${executable_path}" >/dev/null 2>"${signing_diagnostics}"; then
+  if ! "${ldid_path}" -Cadhoc "-S${entitlements_path}" "${executable_path}" >/dev/null 2>"${signing_diagnostics}"; then
     cat "${signing_diagnostics}" >&2
     rm -f "${signing_diagnostics}"
     fail "ldid failed to sign the main executable"
