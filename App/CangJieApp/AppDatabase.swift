@@ -4,17 +4,55 @@ import GRDB
 struct ToolReceipt: Identifiable, Equatable {
     let id: UUID
     let toolID: String
+    let toolVersion: String?
     let inputSummary: String
+    let inputHash: String?
     let outcome: String
     let conversationID: UUID?
     let projectID: UUID?
+    let approvalRequestID: UUID?
+    let approvalBindingHash: String?
     let idempotencyKey: String?
     let outputReference: String?
     let createdAt: Date
+
+    init(
+        id: UUID,
+        toolID: String,
+        toolVersion: String? = nil,
+        inputSummary: String,
+        inputHash: String? = nil,
+        outcome: String,
+        conversationID: UUID?,
+        projectID: UUID?,
+        approvalRequestID: UUID? = nil,
+        approvalBindingHash: String? = nil,
+        idempotencyKey: String?,
+        outputReference: String?,
+        createdAt: Date
+    ) {
+        self.id = id
+        self.toolID = toolID
+        self.toolVersion = toolVersion
+        self.inputSummary = inputSummary
+        self.inputHash = inputHash
+        self.outcome = outcome
+        self.conversationID = conversationID
+        self.projectID = projectID
+        self.approvalRequestID = approvalRequestID
+        self.approvalBindingHash = approvalBindingHash
+        self.idempotencyKey = idempotencyKey
+        self.outputReference = outputReference
+        self.createdAt = createdAt
+    }
 }
 
 struct AgentArtifact: Identifiable, Equatable {
     let id: UUID
+    let logicalID: UUID
+    let revision: Int
+    let contentHash: String
+    let parentArtifactID: UUID?
     let kind: String
     let title: String
     let body: String
@@ -22,14 +60,52 @@ struct AgentArtifact: Identifiable, Equatable {
     let conversationID: UUID?
     let projectID: UUID?
     let updatedAt: Date
+
+    init(
+        id: UUID,
+        logicalID: UUID? = nil,
+        revision: Int = 1,
+        contentHash: String = "",
+        parentArtifactID: UUID? = nil,
+        kind: String,
+        title: String,
+        body: String,
+        status: String,
+        conversationID: UUID?,
+        projectID: UUID?,
+        updatedAt: Date
+    ) {
+        self.id = id
+        self.logicalID = logicalID ?? id
+        self.revision = revision
+        self.contentHash = contentHash
+        self.parentArtifactID = parentArtifactID
+        self.kind = kind
+        self.title = title
+        self.body = body
+        self.status = status
+        self.conversationID = conversationID
+        self.projectID = projectID
+        self.updatedAt = updatedAt
+    }
 }
 
 struct NovelProject: Identifiable, Equatable {
     let id: UUID
     let title: String
     let premise: String
+    let version: Int
     let createdAt: Date
     let updatedAt: Date
+
+    init(id: UUID, title: String, premise: String, version: Int = 1, createdAt: Date, updatedAt: Date) {
+        self.id = id
+        self.title = title
+        self.premise = premise
+        self.version = version
+        self.createdAt = createdAt
+        self.updatedAt = updatedAt
+    }
 }
 
 struct DraftSnapshot: Equatable {
@@ -47,13 +123,18 @@ struct PersistedCheckpoint: Equatable {
     let createdAt: Date
 }
 
-enum AppDatabaseError: Error {
+enum AppDatabaseError: Error, Equatable {
     case writeAheadLoggingUnavailable(actualMode: String)
     case invalidCheckpointIdentifier
     case checkpointTaskMismatch
     case invalidAgentSession
     case invalidAgentRun
     case invalidToolReceiptReference
+    case idempotencyConflict
+    case invalidApprovalRequest
+    case approvalRequiresReapproval
+    case approvalExpired
+    case approvalBudgetExceeded
 }
 
 final class AppDatabase {
@@ -152,7 +233,7 @@ final class AppDatabase {
     }
 
     func createProject(title: String, premise: String, now: Date = Date()) throws -> NovelProject {
-        let project = NovelProject(id: UUID(), title: title, premise: premise, createdAt: now, updatedAt: now)
+        let project = NovelProject(id: UUID(), title: title, premise: premise, version: 1, createdAt: now, updatedAt: now)
         try queue.write { db in
             try db.execute(sql: "INSERT INTO novelProject (id, title, premise, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?)", arguments: [project.id.uuidString, project.title, project.premise, project.createdAt.timeIntervalSince1970, project.updatedAt.timeIntervalSince1970])
         }
@@ -163,7 +244,7 @@ final class AppDatabase {
         try queue.read { db in
             try Row.fetchAll(db, sql: "SELECT * FROM novelProject ORDER BY updatedAt DESC").compactMap { row in
                 guard let id = UUID(uuidString: row["id"]) else { return nil }
-                return NovelProject(id: id, title: row["title"], premise: row["premise"], createdAt: Date(timeIntervalSince1970: row["createdAt"]), updatedAt: Date(timeIntervalSince1970: row["updatedAt"]))
+                return NovelProject(id: id, title: row["title"], premise: row["premise"], version: row["version"] ?? 1, createdAt: Date(timeIntervalSince1970: row["createdAt"]), updatedAt: Date(timeIntervalSince1970: row["updatedAt"]))
             }
         }
     }
@@ -201,9 +282,32 @@ final class AppDatabase {
     }
 
     func saveArtifact(kind: String, title: String, body: String, status: String, now: Date = Date()) throws -> AgentArtifact {
-        let artifact = AgentArtifact(id: UUID(), kind: kind, title: title, body: body, status: status, conversationID: nil, projectID: nil, updatedAt: now)
+        let id = UUID()
+        let hash = ApprovalFingerprint.artifactHash(
+            conversationID: nil,
+            projectID: nil,
+            kind: kind,
+            title: title,
+            body: body
+        )
+        let artifact = AgentArtifact(
+            id: id,
+            logicalID: id,
+            revision: 1,
+            contentHash: hash,
+            kind: kind,
+            title: title,
+            body: body,
+            status: status,
+            conversationID: nil,
+            projectID: nil,
+            updatedAt: now
+        )
         try queue.write { db in
-            try db.execute(sql: "INSERT INTO agentArtifact (id, kind, title, body, status, updatedAt) VALUES (?, ?, ?, ?, ?, ?)", arguments: [artifact.id.uuidString, artifact.kind, artifact.title, artifact.body, artifact.status, artifact.updatedAt.timeIntervalSince1970])
+            try db.execute(
+                sql: "INSERT INTO agentArtifact (id, logicalID, revision, contentHash, parentArtifactID, kind, title, body, status, updatedAt) VALUES (?, ?, ?, ?, NULL, ?, ?, ?, ?, ?)",
+                arguments: [artifact.id.uuidString, artifact.logicalID.uuidString, artifact.revision, artifact.contentHash, artifact.kind, artifact.title, artifact.body, artifact.status, artifact.updatedAt.timeIntervalSince1970]
+            )
         }
         return artifact
     }
@@ -213,8 +317,14 @@ final class AppDatabase {
             guard let row = try Row.fetchOne(db, sql: "SELECT * FROM agentArtifact WHERE kind = ? ORDER BY updatedAt DESC LIMIT 1", arguments: [kind]), let id = UUID(uuidString: row["id"]) else { return nil }
             let conversationText: String? = row["conversationID"]
             let projectText: String? = row["projectID"]
+            let logicalText: String? = row["logicalID"]
+            let parentText: String? = row["parentArtifactID"]
             return AgentArtifact(
                 id: id,
+                logicalID: logicalText.flatMap { UUID(uuidString: $0) } ?? id,
+                revision: row["revision"] ?? 1,
+                contentHash: row["contentHash"] ?? "",
+                parentArtifactID: parentText.flatMap { UUID(uuidString: $0) },
                 kind: row["kind"],
                 title: row["title"],
                 body: row["body"],
@@ -398,6 +508,117 @@ final class AppDatabase {
                 table.column("startedAt", .double).notNull()
                 table.column("updatedAt", .double).notNull().indexed()
             }
+        }
+        migrator.registerMigration("m1b-exact-approval-v1") { db in
+            try db.alter(table: "novelProject") { table in
+                table.add(column: "version", .integer).notNull().defaults(to: 1)
+            }
+            try db.alter(table: "agentArtifact") { table in
+                table.add(column: "logicalID", .text)
+                table.add(column: "revision", .integer)
+                table.add(column: "contentHash", .text)
+                table.add(column: "parentArtifactID", .text)
+            }
+            try db.alter(table: "toolReceipt") { table in
+                table.add(column: "toolVersion", .text)
+                table.add(column: "inputHash", .text)
+                table.add(column: "approvalRequestID", .text)
+                table.add(column: "approvalBindingHash", .text)
+            }
+
+            let rows = try Row.fetchAll(
+                db,
+                sql: "SELECT rowid, * FROM agentArtifact ORDER BY conversationID, projectID, kind, updatedAt ASC, rowid ASC"
+            )
+            var lineageByScope: [String: UUID] = [:]
+            var revisionByScope: [String: Int] = [:]
+            var previousByScope: [String: UUID] = [:]
+            for row in rows {
+                guard let artifactID = UUID(uuidString: row["id"]) else { continue }
+                let conversation: String? = row["conversationID"]
+                let project: String? = row["projectID"]
+                let kind: String = row["kind"]
+                let scope = [conversation ?? "", project ?? "", kind].joined(separator: "|")
+                let lineage = lineageByScope[scope] ?? artifactID
+                let revision = (revisionByScope[scope] ?? 0) + 1
+                let title: String = row["title"]
+                let body: String = row["body"]
+                let hash = ApprovalFingerprint.artifactHash(
+                    conversationID: conversation.flatMap(UUID.init(uuidString:)),
+                    projectID: project.flatMap(UUID.init(uuidString:)),
+                    kind: kind,
+                    title: title,
+                    body: body
+                )
+                try db.execute(
+                    sql: "UPDATE agentArtifact SET logicalID = ?, revision = ?, contentHash = ?, parentArtifactID = ? WHERE id = ?",
+                    arguments: [lineage.uuidString, revision, hash, previousByScope[scope]?.uuidString, artifactID.uuidString]
+                )
+                lineageByScope[scope] = lineage
+                revisionByScope[scope] = revision
+                previousByScope[scope] = artifactID
+            }
+            try db.execute(sql: "CREATE UNIQUE INDEX agentArtifact_on_logicalID_revision ON agentArtifact(logicalID, revision)")
+            try db.execute(sql: "CREATE INDEX agentArtifact_latest_revision ON agentArtifact(conversationID, projectID, kind, logicalID, revision DESC)")
+
+            try db.create(table: "approvalRequest") { table in
+                table.column("id", .text).primaryKey()
+                table.column("conversationID", .text).notNull().indexed().references("agentConversation", onDelete: .cascade)
+                table.column("projectID", .text).notNull().indexed().references("novelProject", onDelete: .cascade)
+                table.column("artifactID", .text).notNull().references("agentArtifact", onDelete: .restrict)
+                table.column("artifactLogicalID", .text).notNull().indexed()
+                table.column("artifactRevision", .integer).notNull()
+                table.column("artifactHash", .text).notNull()
+                table.column("toolID", .text).notNull()
+                table.column("toolVersion", .text).notNull()
+                table.column("parametersHash", .text).notNull()
+                table.column("targetVersionsJSON", .text).notNull()
+                table.column("targetVersionsHash", .text).notNull()
+                table.column("estimatedCostMinorUnits", .integer).notNull()
+                table.column("budgetCeilingMinorUnits", .integer).notNull()
+                table.column("expiresAt", .integer).notNull().indexed()
+                table.column("expectedDiffHash", .text).notNull()
+                table.column("bindingHash", .text).notNull().unique()
+                table.column("status", .text).notNull().indexed()
+                table.column("invalidationReason", .text)
+                table.column("createdAt", .double).notNull()
+                table.column("updatedAt", .double).notNull()
+                table.column("approvedAt", .double)
+            }
+            try db.execute(sql: "CREATE INDEX approvalRequest_on_artifact_revision ON approvalRequest(artifactLogicalID, artifactRevision DESC)")
+        }
+        migrator.registerMigration("m1b-exact-artifact-integrity-v2") { db in
+            try db.execute(sql: """
+                CREATE TRIGGER agentArtifact_exact_fields_insert
+                BEFORE INSERT ON agentArtifact
+                WHEN NEW.logicalID IS NULL
+                  OR NEW.revision IS NULL
+                  OR NEW.revision <= 0
+                  OR NEW.contentHash IS NULL
+                  OR length(NEW.contentHash) = 0
+                BEGIN
+                    SELECT RAISE(ABORT, 'agentArtifact exact identity is required');
+                END
+                """)
+            try db.execute(sql: """
+                CREATE TRIGGER agentArtifact_exact_fields_update
+                BEFORE UPDATE OF logicalID, revision, contentHash ON agentArtifact
+                WHEN NEW.logicalID IS NULL
+                  OR NEW.revision IS NULL
+                  OR NEW.revision <= 0
+                  OR NEW.contentHash IS NULL
+                  OR length(NEW.contentHash) = 0
+                BEGIN
+                    SELECT RAISE(ABORT, 'agentArtifact exact identity is required');
+                END
+                """)
+            try db.execute(sql: "CREATE INDEX agentArtifact_latest_activity ON agentArtifact(conversationID, projectID, kind, updatedAt DESC)")
+        }
+        migrator.registerMigration("m1b-agent-message-idempotency-v3") { db in
+            try db.alter(table: "agentMessage") { table in
+                table.add(column: "idempotencyKey", .text)
+            }
+            try db.execute(sql: "CREATE UNIQUE INDEX agentMessage_on_idempotencyKey ON agentMessage(idempotencyKey) WHERE idempotencyKey IS NOT NULL")
         }
         return migrator
     }

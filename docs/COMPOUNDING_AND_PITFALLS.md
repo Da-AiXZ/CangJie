@@ -111,3 +111,51 @@ When production selects the latest artifact by `updatedAt DESC`, a test that ins
 ## P-028 Candidate identity is commit plus manifest hash, not a legacy filename
 
 The packaging workflow still emits `CangJie-M0.ipa` while later milestone slices are under test. Never infer milestone content from that filename. Device acceptance must bind the Git commit, Actions run, manifest, bundle identifier, and exact SHA-256. Renaming can improve presentation later, but it must not change or obscure the verified bytes.
+
+## P-029 Transient lifecycle notices must not overwrite Agent workflow status
+
+A scene-inactive/background checkpoint is operational evidence, not the primary business state. Publishing `Saved checkpoint` through the same scalar used for `opening plan approved`, waiting approval, errors, and run progress makes the UI lie by omission after every app switch. Keep durable Agent/run status separate from transient lifecycle notices, define display priority, and test background/foreground projection without losing the governed stage.
+
+## P-030 Silent refresh is indistinguishable from a broken control
+
+Reloading an unchanged project list can correctly produce identical data, but a button with no acknowledgement looks nonfunctional. Preserve immutable data flow and show a short non-destructive refresh result or timestamp without replacing Agent workflow status, clearing selection, or recreating the center conversation.
+
+## P-031 Approval must bind the displayed request
+
+Approval is not consent to a category such as ?the opening plan.? It must bind the request ID and canonical hash visible to the user, including exact artifact identity, tool version, parameters, targets, budget, expiration, and expected diff. Never approve by querying whatever record is currently latest.
+
+## P-032 Artifact revision and approval decision are separate records
+
+Artifact workflow status cannot represent immutable content identity, a user's historical decision, and current executable authorization at the same time. Keep immutable artifact revisions, approval requests, and execution receipts separate and verify their relationships explicitly.
+
+## P-033 Recovery must use exact idempotency identity
+
+A successful side effect followed by a crash is reconciled only through the original request, binding hash, tool/version, scopes, output reference, and idempotency key. ?Latest receipt? or ?latest artifact? is not proof and can cross project or lineage boundaries.
+
+## P-034 Legacy approval cannot be promoted silently
+
+A legacy `approved` artifact status lacks the exact request and receipt relationship required by the governed runtime. Migrate artifact identity, but require a fresh explicit ApprovalRequest rather than manufacturing authorization from old presentation state.
+
+## P-035 Candidate binding must use current trusted policy
+
+Validation is meaningless if the candidate copies tool version, parameters, cost, budget, or target versions from the stored request. Rebuild the candidate from current trusted app policy and current target versions, then compare it to what the user approved.
+
+## P-036 Artifact and approval must be projected as one paired state
+
+Restoring the newest artifact and newest approval in separate queries can combine records from different projects, lineages, or revisions. Query and return a paired projection scoped to the focused conversation and project.
+
+## P-037 Success messages require durable idempotent reconciliation
+
+The approval transaction may commit before the assistant success message is appended. Give that message its own durable idempotency key so restart can create the missing message exactly once without repeating the mutation or charge.
+
+## P-038 Approved history differs from pending authorization
+
+Pending authorization expires at its deadline. A completed historical decision does not become unapproved only because time passes, but current execution authority can still be invalidated by changed artifacts, target versions, tool policy, budget, or a missing exact receipt. Model those concepts deliberately.
+
+## P-039 PowerShell singleton arrays can pass paths character by character
+
+When a pipeline returns one file, PowerShell may unwrap the collection to a scalar string. Splatting that value can pass `F`, `:`, and each remaining character as separate compiler arguments. Force an array with `@(...)` or invoke the single known path directly before diagnosing a source failure.
+
+## P-040 Never round-trip UTF-8 Swift files through unsafe PowerShell encoding
+
+Console mojibake is not a reason to rewrite source. PowerShell defaults and lossy pipelines can replace valid Chinese literals. Use explicit UTF-8 APIs, inspect bytes and `git diff`, and avoid read-modify-write commands whose encoding behavior is uncertain.

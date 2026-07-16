@@ -48,7 +48,17 @@ struct ContentView: View {
                 }
                 .padding(.vertical, 4)
             }
-            Button { model.reloadProjects() } label: { Label("Refresh", systemImage: "arrow.clockwise") }
+            Button { model.reloadProjects() } label: {
+                Label("Refresh", systemImage: "arrow.clockwise")
+            }
+            .accessibilityIdentifier("projects-refresh-button")
+
+            if let notice = model.transientNotice, notice.kind == .projectRefresh {
+                Label(notice.message, systemImage: "checkmark.circle")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .accessibilityIdentifier("project-refresh-feedback")
+            }
         }
         .navigationTitle("Novel Projects")
     }
@@ -59,7 +69,22 @@ struct ContentView: View {
                 VStack(alignment: .leading) {
                     Text("Agent Control Plane").font(.title2.bold())
                         .accessibilityIdentifier("agent-control-plane-title")
-                    Text(model.status).font(.caption).foregroundStyle(.secondary)
+                    Text(model.businessStatus)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .accessibilityIdentifier("agent-business-status")
+                    if let errorMessage = model.errorMessage {
+                        Label(errorMessage, systemImage: "exclamationmark.triangle.fill")
+                            .font(.caption)
+                            .foregroundStyle(.red)
+                            .accessibilityIdentifier("app-error-message")
+                    }
+                    if let notice = model.transientNotice {
+                        Label(notice.message, systemImage: "checkmark.circle")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .accessibilityIdentifier("transient-notice")
+                    }
                 }
                 Spacer()
                 Button { model.isArtifactDrawerPresented.toggle() } label: { Image(systemName: "sidebar.right") }
@@ -76,17 +101,46 @@ struct ContentView: View {
                     }
                 }.padding()
             }
-            if model.planAwaitingApproval {
+            if let approval = model.openingPlanApproval {
                 VStack(alignment: .leading, spacing: 8) {
-                    HStack { Text("Opening plan awaiting approval").font(.headline); Spacer(); Button("Approve") { model.approveOpeningPlan() }.buttonStyle(.borderedProminent) }
+                    HStack {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Opening plan approval").font(.headline)
+                            Text("Status: \(approval.status.rawValue)")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .accessibilityIdentifier("opening-plan-approval-status")
+                        }
+                        Spacer()
+                        if approval.status == .pending {
+                            Button("Approve exact revision") {
+                                model.approveOpeningPlan(
+                                    requestID: approval.id,
+                                    displayedBindingHash: approval.bindingHash
+                                )
+                            }
+                                .buttonStyle(.borderedProminent)
+                                .disabled(model.isAgentWorking)
+                                .accessibilityIdentifier("opening-plan-approve-button")
+                        }
+                    }
+                    approvalBindingSummary(approval)
                     Text(model.planBody).font(.footnote).lineLimit(6)
-                }.padding().background(.background, in: RoundedRectangle(cornerRadius: 12)).padding(.horizontal)
+                }
+                .padding()
+                .background(.background, in: RoundedRectangle(cornerRadius: 12))
+                .padding(.horizontal)
+                .accessibilityIdentifier("opening-plan-approval-card")
             }
             HStack(alignment: .bottom) {
                 TextEditor(text: $model.draft)
                     .accessibilityIdentifier("agent-composer")
                     .frame(minHeight: 70, maxHeight: 130).padding(6).background(.background, in: RoundedRectangle(cornerRadius: 12))
-                Button { model.sendAgentMessage() } label: { Image(systemName: "arrow.up.circle.fill").font(.system(size: 32)) }.disabled(model.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                Button { model.sendAgentMessage() } label: {
+                    Image(systemName: "arrow.up.circle.fill").font(.system(size: 32))
+                }
+                .disabled(model.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                .accessibilityIdentifier("agent-send-button")
             }.padding()
         }
     }
@@ -99,9 +153,38 @@ struct ContentView: View {
                 Text("Last tool: \(receipt.toolID)").font(.footnote)
                 Text("Outcome: \(receipt.outcome)").font(.footnote).foregroundStyle(.secondary)
             }
+            if let approval = model.openingPlanApproval {
+                Divider()
+                Text("Bound opening-plan approval").font(.subheadline.bold())
+                approvalBindingSummary(approval)
+            }
             Divider()
             Text("Tool receipts, plans, diffs, approvals, and chapter versions will appear here.").font(.footnote).foregroundStyle(.secondary)
             Spacer()
         }.padding()
     }
+    private func approvalBindingSummary(_ approval: ApprovalRequest) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text("Request: \(approval.id.uuidString.prefix(12))...")
+                .accessibilityIdentifier("opening-plan-approval-request-id")
+            Text("Artifact revision: \(approval.artifactRevision)")
+                .accessibilityIdentifier("opening-plan-approval-revision")
+            Text("Artifact hash: \(approval.artifactHash.prefix(12))...")
+                .accessibilityIdentifier("opening-plan-approval-artifact-hash")
+            Text("Tool: \(approval.toolID) v\(approval.toolVersion)")
+                .accessibilityIdentifier("opening-plan-approval-tool")
+            Text("Estimated cost / ceiling: \(approval.estimatedCostMinorUnits) / \(approval.budgetCeilingMinorUnits) minor units")
+                .accessibilityIdentifier("opening-plan-approval-budget")
+            Text("Expires: \(approval.expiresAt.formatted(date: .abbreviated, time: .shortened))")
+                .accessibilityIdentifier("opening-plan-approval-expiration")
+            Text("Expected diff: \(approval.expectedDiffHash.prefix(12))...")
+                .accessibilityIdentifier("opening-plan-approval-expected-diff")
+            Text("Binding: \(approval.bindingHash.prefix(12))...")
+                .accessibilityIdentifier("opening-plan-approval-binding-hash")
+        }
+        .font(.caption.monospaced())
+        .foregroundStyle(.secondary)
+        .textSelection(.enabled)
+    }
+
 }

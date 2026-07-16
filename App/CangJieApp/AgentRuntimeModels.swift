@@ -54,6 +54,15 @@ enum AgentRunStatus: String, Codable, Equatable {
     case failed
     case completed
     case cancelled
+
+    var canReconcileSuccessfulApproval: Bool {
+        switch self {
+        case .queued, .running, .waitingUser:
+            return true
+        case .paused, .failed, .completed, .cancelled:
+            return false
+        }
+    }
 }
 
 struct AgentRunSnapshot: Identifiable, Equatable {
@@ -82,6 +91,7 @@ struct AgentRuntimeSnapshot {
     let projects: [NovelProject]
     let session: AgentSessionState
     let openingPlan: AgentArtifact?
+    let openingPlanApproval: ApprovalRequest?
     let lastReceipt: ToolReceipt?
     let latestRun: AgentRunSnapshot?
 }

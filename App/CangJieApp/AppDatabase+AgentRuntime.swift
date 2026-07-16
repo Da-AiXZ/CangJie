@@ -47,20 +47,44 @@ extension AppDatabase {
         conversationID: UUID,
         role: AgentMessageRole,
         content: String,
+        idempotencyKey: String? = nil,
         now: Date = Date()
     ) throws -> AgentMessage {
-        let message = AgentMessage(id: UUID(), role: role, content: content, createdAt: now)
         try queue.write { db in
+            if let idempotencyKey,
+               let row = try Row.fetchOne(
+                   db,
+                   sql: "SELECT * FROM agentMessage WHERE idempotencyKey = ? LIMIT 1",
+                   arguments: [idempotencyKey]
+               ) {
+                let storedConversationID: String = row["conversationID"]
+                guard let existing = Self.decodeAgentMessage(row),
+                      storedConversationID == conversationID.uuidString,
+                      existing.role == role,
+                      existing.content == content else {
+                    throw AppDatabaseError.idempotencyConflict
+                }
+                return existing
+            }
+
+            let message = AgentMessage(id: UUID(), role: role, content: content, createdAt: now)
             try db.execute(
-                sql: "INSERT INTO agentMessage (id, conversationID, role, content, createdAt) VALUES (?, ?, ?, ?, ?)",
-                arguments: [message.id.uuidString, conversationID.uuidString, message.role.rawValue, message.content, message.createdAt.timeIntervalSince1970]
+                sql: "INSERT INTO agentMessage (id, conversationID, role, content, idempotencyKey, createdAt) VALUES (?, ?, ?, ?, ?, ?)",
+                arguments: [
+                    message.id.uuidString,
+                    conversationID.uuidString,
+                    message.role.rawValue,
+                    message.content,
+                    idempotencyKey,
+                    message.createdAt.timeIntervalSince1970
+                ]
             )
             try db.execute(
                 sql: "UPDATE agentConversation SET updatedAt = ? WHERE id = ?",
                 arguments: [now.timeIntervalSince1970, conversationID.uuidString]
             )
+            return message
         }
-        return message
     }
 
     func listAgentMessages(conversationID: UUID) throws -> [AgentMessage] {
@@ -158,6 +182,12 @@ extension AppDatabase {
         }
     }
 
+    func toolReceipt(idempotencyKey: String) throws -> ToolReceipt? {
+        try queue.read { db in
+            try Self.receipt(idempotencyKey: idempotencyKey, in: db)
+        }
+    }
+
     func executeProjectCreateTool(
         conversationID: UUID,
         title: String,
@@ -199,24 +229,91 @@ extension AppDatabase {
         idempotencyKey: String,
         now: Date = Date()
     ) throws -> ArtifactToolResult {
+        let expectedHash = ApprovalFingerprint.artifactHash(
+            conversationID: conversationID,
+            projectID: projectID,
+            kind: kind,
+            title: title,
+            body: body
+        )
+        let expectedInputSummary = kind + ":" + status
         try queue.write { db in
             if let receipt = try Self.receipt(idempotencyKey: idempotencyKey, in: db) {
-                guard receipt.conversationID == conversationID,
+                guard receipt.toolID == toolID,
+                      receipt.toolVersion == "1",
+                      receipt.inputSummary == expectedInputSummary,
+                      receipt.inputHash == expectedHash,
+                      receipt.conversationID == conversationID,
+                      receipt.projectID == projectID,
                       let reference = receipt.outputReference,
-                      let artifact = try Self.artifact(id: reference, in: db) else { throw AppDatabaseError.invalidToolReceiptReference }
+                      let artifact = try Self.artifact(id: reference, in: db),
+                      artifact.contentHash == expectedHash,
+                      artifact.kind == kind,
+                      artifact.title == title,
+                      artifact.body == body,
+                      artifact.status == status,
+                      artifact.conversationID == conversationID,
+                      artifact.projectID == projectID else {
+                    throw AppDatabaseError.idempotencyConflict
+                }
                 return ArtifactToolResult(artifact: artifact, receipt: receipt)
             }
 
+            let previousRow: Row?
+            if let projectID {
+                previousRow = try Row.fetchOne(
+                    db,
+                    sql: "SELECT * FROM agentArtifact WHERE kind = ? AND conversationID = ? AND projectID = ? ORDER BY updatedAt DESC, rowid DESC LIMIT 1",
+                    arguments: [kind, conversationID.uuidString, projectID.uuidString]
+                )
+            } else {
+                previousRow = try Row.fetchOne(
+                    db,
+                    sql: "SELECT * FROM agentArtifact WHERE kind = ? AND conversationID = ? AND projectID IS NULL ORDER BY updatedAt DESC, rowid DESC LIMIT 1",
+                    arguments: [kind, conversationID.uuidString]
+                )
+            }
+            let previous = previousRow.flatMap(Self.decodeAgentArtifact)
+            let artifactID = UUID()
             let artifact = AgentArtifact(
-                id: UUID(), kind: kind, title: title, body: body, status: status,
-                conversationID: conversationID, projectID: projectID, updatedAt: now
+                id: artifactID,
+                logicalID: previous?.logicalID ?? artifactID,
+                revision: (previous?.revision ?? 0) + 1,
+                contentHash: expectedHash,
+                parentArtifactID: previous?.id,
+                kind: kind,
+                title: title,
+                body: body,
+                status: status,
+                conversationID: conversationID,
+                projectID: projectID,
+                updatedAt: now
             )
             try db.execute(
-                sql: "INSERT INTO agentArtifact (id, kind, title, body, status, conversationID, projectID, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                arguments: [artifact.id.uuidString, kind, title, body, status, conversationID.uuidString, projectID?.uuidString, now.timeIntervalSince1970]
+                sql: """
+                INSERT INTO agentArtifact (
+                    id, logicalID, revision, contentHash, parentArtifactID, kind, title, body,
+                    status, conversationID, projectID, updatedAt
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                arguments: [
+                    artifact.id.uuidString,
+                    artifact.logicalID.uuidString,
+                    artifact.revision,
+                    artifact.contentHash,
+                    artifact.parentArtifactID?.uuidString,
+                    artifact.kind,
+                    artifact.title,
+                    artifact.body,
+                    artifact.status,
+                    artifact.conversationID?.uuidString,
+                    artifact.projectID?.uuidString,
+                    artifact.updatedAt.timeIntervalSince1970
+                ]
             )
             let receipt = ToolReceipt(
-                id: UUID(), toolID: toolID, inputSummary: kind + ":" + status, outcome: "completed",
+                id: UUID(), toolID: toolID, toolVersion: "1",
+                inputSummary: expectedInputSummary, inputHash: artifact.contentHash, outcome: "completed",
                 conversationID: conversationID, projectID: projectID,
                 idempotencyKey: idempotencyKey, outputReference: artifact.id.uuidString, createdAt: now
             )
@@ -254,15 +351,35 @@ extension AppDatabase {
         return AgentRunSnapshot(id: id, kind: row["kind"], status: status, idempotencyKey: row["idempotencyKey"], currentStage: row["currentStage"], startedAt: Date(timeIntervalSince1970: row["startedAt"]), updatedAt: Date(timeIntervalSince1970: row["updatedAt"]))
     }
 
-    private static func receipt(idempotencyKey: String, in db: Database) throws -> ToolReceipt? {
+    static func receipt(idempotencyKey: String, in db: Database) throws -> ToolReceipt? {
         guard let row = try Row.fetchOne(db, sql: "SELECT * FROM toolReceipt WHERE idempotencyKey = ? LIMIT 1", arguments: [idempotencyKey]) else { return nil }
         return decodeToolReceipt(row)
     }
 
     static func insertToolReceipt(_ receipt: ToolReceipt, in db: Database) throws {
         try db.execute(
-            sql: "INSERT INTO toolReceipt (id, toolID, inputSummary, outcome, conversationID, projectID, idempotencyKey, outputReference, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            arguments: [receipt.id.uuidString, receipt.toolID, receipt.inputSummary, receipt.outcome, receipt.conversationID?.uuidString, receipt.projectID?.uuidString, receipt.idempotencyKey, receipt.outputReference, receipt.createdAt.timeIntervalSince1970]
+            sql: """
+            INSERT INTO toolReceipt (
+                id, toolID, toolVersion, inputSummary, inputHash, outcome, conversationID,
+                projectID, approvalRequestID, approvalBindingHash, idempotencyKey,
+                outputReference, createdAt
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            arguments: [
+                receipt.id.uuidString,
+                receipt.toolID,
+                receipt.toolVersion,
+                receipt.inputSummary,
+                receipt.inputHash,
+                receipt.outcome,
+                receipt.conversationID?.uuidString,
+                receipt.projectID?.uuidString,
+                receipt.approvalRequestID?.uuidString,
+                receipt.approvalBindingHash,
+                receipt.idempotencyKey,
+                receipt.outputReference,
+                receipt.createdAt.timeIntervalSince1970
+            ]
         )
     }
 
@@ -270,33 +387,61 @@ extension AppDatabase {
         guard let id = UUID(uuidString: row["id"]) else { return nil }
         let conversationText: String? = row["conversationID"]
         let projectText: String? = row["projectID"]
+        let approvalRequestText: String? = row["approvalRequestID"]
         return ToolReceipt(
-            id: id, toolID: row["toolID"], inputSummary: row["inputSummary"], outcome: row["outcome"],
+            id: id,
+            toolID: row["toolID"],
+            toolVersion: row["toolVersion"],
+            inputSummary: row["inputSummary"],
+            inputHash: row["inputHash"],
+            outcome: row["outcome"],
             conversationID: conversationText.flatMap { UUID(uuidString: $0) },
             projectID: projectText.flatMap { UUID(uuidString: $0) },
-            idempotencyKey: row["idempotencyKey"], outputReference: row["outputReference"],
+            approvalRequestID: approvalRequestText.flatMap { UUID(uuidString: $0) },
+            approvalBindingHash: row["approvalBindingHash"],
+            idempotencyKey: row["idempotencyKey"],
+            outputReference: row["outputReference"],
             createdAt: Date(timeIntervalSince1970: row["createdAt"])
         )
     }
 
     static func decodeAgentArtifact(_ row: Row) -> AgentArtifact? {
-        guard let id = UUID(uuidString: row["id"]) else { return nil }
+        let idText: String = row["id"]
+        let logicalText: String? = row["logicalID"]
+        let revision: Int? = row["revision"]
+        let contentHash: String? = row["contentHash"]
+        guard let id = UUID(uuidString: idText),
+              let logicalText,
+              let logicalID = UUID(uuidString: logicalText),
+              let revision,
+              revision > 0,
+              let contentHash,
+              !contentHash.isEmpty else { return nil }
         let conversationText: String? = row["conversationID"]
         let projectText: String? = row["projectID"]
+        let parentText: String? = row["parentArtifactID"]
         return AgentArtifact(
-            id: id, kind: row["kind"], title: row["title"], body: row["body"], status: row["status"],
+            id: id,
+            logicalID: logicalID,
+            revision: revision,
+            contentHash: contentHash,
+            parentArtifactID: parentText.flatMap { UUID(uuidString: $0) },
+            kind: row["kind"],
+            title: row["title"],
+            body: row["body"],
+            status: row["status"],
             conversationID: conversationText.flatMap { UUID(uuidString: $0) },
             projectID: projectText.flatMap { UUID(uuidString: $0) },
             updatedAt: Date(timeIntervalSince1970: row["updatedAt"])
         )
     }
 
-    private static func project(id: String, in db: Database) throws -> NovelProject? {
+    static func project(id: String, in db: Database) throws -> NovelProject? {
         guard let row = try Row.fetchOne(db, sql: "SELECT * FROM novelProject WHERE id = ?", arguments: [id]), let uuid = UUID(uuidString: row["id"]) else { return nil }
-        return NovelProject(id: uuid, title: row["title"], premise: row["premise"], createdAt: Date(timeIntervalSince1970: row["createdAt"]), updatedAt: Date(timeIntervalSince1970: row["updatedAt"]))
+        return NovelProject(id: uuid, title: row["title"], premise: row["premise"], version: row["version"] ?? 1, createdAt: Date(timeIntervalSince1970: row["createdAt"]), updatedAt: Date(timeIntervalSince1970: row["updatedAt"]))
     }
 
-    private static func artifact(id: String, in db: Database) throws -> AgentArtifact? {
+    static func artifact(id: String, in db: Database) throws -> AgentArtifact? {
         guard let row = try Row.fetchOne(db, sql: "SELECT * FROM agentArtifact WHERE id = ?", arguments: [id]) else { return nil }
         return decodeAgentArtifact(row)
     }
