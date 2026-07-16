@@ -412,7 +412,23 @@ with open(sys.argv[1], "wb") as destination:
         destination,
     )
 PY
-    assert_success real-ldid-app bash "${BUILD_SCRIPT}" --sign-app-with-ldid "${LDID_PATH}" "${CONTRACT}" "${REAL_LDID_APP}" "${REAL_LDID_APP_EXECUTABLE}"
+    if ! bash "${BUILD_SCRIPT}" --sign-app-with-ldid "${LDID_PATH}" "${CONTRACT}" "${REAL_LDID_APP}" "${REAL_LDID_APP_EXECUTABLE}" >"${TEMP_ROOT}/real-ldid-app.stdout" 2>"${TEMP_ROOT}/real-ldid-app.stderr"; then
+      cat "${TEMP_ROOT}/real-ldid-app.stdout" >&2 || true
+      cat "${TEMP_ROOT}/real-ldid-app.stderr" >&2 || true
+      printf '%s\n' 'real ldid app diagnostic: bundle files' >&2
+      find "${REAL_LDID_APP}" -maxdepth 3 -print >&2 || true
+      printf '%s\n' 'real ldid app diagnostic: executable codesign details' >&2
+      /usr/bin/codesign -dvv "${REAL_LDID_APP_EXECUTABLE}" >&2 || true
+      printf '%s\n' 'real ldid app diagnostic: executable requirement' >&2
+      /usr/bin/codesign -d -r- "${REAL_LDID_APP_EXECUTABLE}" >&2 || true
+      printf '%s\n' 'real ldid app diagnostic: executable entitlements' >&2
+      /usr/bin/codesign --display --entitlements - --xml "${REAL_LDID_APP_EXECUTABLE}" >&2 || true
+      printf '%s\n' 'real ldid app diagnostic: ldid entitlements' >&2
+      "${LDID_PATH}" -e "${REAL_LDID_APP_EXECUTABLE}" >&2 || true
+      printf '%s\n' 'real ldid app diagnostic: code signature load command' >&2
+      otool -l "${REAL_LDID_APP_EXECUTABLE}" | awk '/cmd LC_CODE_SIGNATURE/{show=1; count=0} show{print; count++} count==5{show=0}' >&2 || true
+      exit 1
+    fi
     [[ -f "${REAL_LDID_APP}/_CodeSignature/CodeResources" && ! -L "${REAL_LDID_APP}/_CodeSignature/CodeResources" ]] || {
       echo 'real ldid app did not produce a regular CodeResources file' >&2
       exit 1
