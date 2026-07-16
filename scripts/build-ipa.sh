@@ -7,6 +7,7 @@ readonly EXPECTED_DEVICE_FAMILY="2"
 readonly EXPECTED_GRDB_VERSION="6.29.3"
 readonly EXPECTED_GRDB_REVISION="2cf6c756e1e5ef6901ebae16576a7e4e4b834622"
 readonly EXPECTED_GRDB_BUNDLE_NAME="GRDB_GRDB.bundle"
+readonly EXPECTED_GRDB_BUNDLE_IDENTIFIER="grdb.swift.GRDB.resources"
 readonly EXPECTED_GRDB_URL="https://github.com/groue/GRDB.swift.git"
 readonly EXPECTED_GRDB_PRIVACY_SHA256="17784da62e51f74c5859df32fe402e01e25cdf6f797a4add06e2a3ce15c911f4"
 readonly ROOT="$(cd "$(dirname "$0")/.." && pwd -P)"
@@ -31,7 +32,7 @@ contract_path, project_path = sys.argv[1:]
 revision = "2cf6c756e1e5ef6901ebae16576a7e4e4b834622"
 url = "https://github.com/groue/GRDB.swift.git"
 contract = json.loads(open(contract_path, encoding="utf-8").read())
-expected = {"schemaVersion": 1, "packages": [{"identity": "grdb.swift", "repositoryURL": url, "tag": "v6.29.3", "version": "6.29.3", "revision": revision, "resourceBundle": {"name": "GRDB_GRDB.bundle", "privacyManifestSHA256": "17784da62e51f74c5859df32fe402e01e25cdf6f797a4add06e2a3ce15c911f4"}}]}
+expected = {"schemaVersion": 2, "packages": [{"identity": "grdb.swift", "repositoryURL": url, "tag": "v6.29.3", "version": "6.29.3", "revision": revision, "resourceBundle": {"name": "GRDB_GRDB.bundle", "identifier": "grdb.swift.GRDB.resources", "privacyManifestSHA256": "17784da62e51f74c5859df32fe402e01e25cdf6f797a4add06e2a3ce15c911f4"}}]}
 if contract != expected:
     raise SystemExit("SwiftPM contract mismatch")
 project = open(project_path, encoding="utf-8").read()
@@ -106,13 +107,13 @@ verify_grdb_resource_bundle() {
   local bundle_path="$1"
   [[ -d "${bundle_path}" && ! -L "${bundle_path}" ]] || fail "Required GRDB resource bundle is missing or unsafe: ${bundle_path}"
   verify_grdb_privacy_manifest "${bundle_path}/PrivacyInfo.xcprivacy"
-  python3 - "${bundle_path}" <<'PY'
+  python3 - "${bundle_path}" "${EXPECTED_GRDB_BUNDLE_IDENTIFIER}" <<'PY'
 import os
 import plistlib
-import re
 import sys
 from pathlib import Path
 bundle = Path(sys.argv[1])
+expected_identifier = sys.argv[2]
 required = {"Info.plist", "PrivacyInfo.xcprivacy"}
 allowed = required | {"PkgInfo"}
 seen = set()
@@ -133,7 +134,7 @@ if not required.issubset(seen) or not seen.issubset(allowed):
 with (bundle / "Info.plist").open("rb") as source:
     info = plistlib.load(source)
 identifier = info.get("CFBundleIdentifier")
-if not isinstance(identifier, str) or not re.fullmatch(r"(?:org\.swift\.swiftpm\.)?GRDB\.GRDB\.resources", identifier):
+if identifier != expected_identifier:
     raise SystemExit(f"Unexpected GRDB resource bundle identifier: {identifier!r}")
 if info.get("CFBundlePackageType") != "BNDL" or "CFBundleExecutable" in info:
     raise SystemExit("GRDB resource bundle has an invalid package type or executable")
@@ -156,6 +157,11 @@ case "${1:-}" in
   --verify-grdb-privacy-manifest)
     [[ "$#" == "2" && -n "${2:-}" ]] || fail "Usage: $0 --verify-grdb-privacy-manifest <PrivacyInfo.xcprivacy>"
     verify_grdb_privacy_manifest "$2"
+    exit 0
+    ;;
+  --verify-grdb-resource-bundle)
+    [[ "$#" == "2" && -n "${2:-}" ]] || fail "Usage: $0 --verify-grdb-resource-bundle <GRDB_GRDB.bundle>"
+    verify_grdb_resource_bundle "$2"
     exit 0
     ;;
   "")
@@ -388,6 +394,7 @@ python3 - \
   "${EXPECTED_GRDB_VERSION}" \
   "${EXPECTED_GRDB_REVISION}" \
   "${EXPECTED_GRDB_BUNDLE_NAME}" \
+  "${EXPECTED_GRDB_BUNDLE_IDENTIFIER}" \
   "${EXPECTED_GRDB_PRIVACY_SHA256}" \
   "${GITHUB_REPOSITORY:-unknown}" \
   "${GITHUB_REF:-unknown}" \
@@ -413,6 +420,7 @@ import sys
     grdb_version,
     grdb_revision,
     grdb_bundle,
+    grdb_bundle_identifier,
     grdb_privacy_sha256,
     repository,
     git_ref,
@@ -427,7 +435,7 @@ entitlements = {
     "keychain-access-groups": [bundle_identifier],
 }
 manifest = {
-    "schemaVersion": 2,
+    "schemaVersion": 3,
     "artifact": artifact,
     "sha256": sha256,
     "bundleIdentifier": bundle_identifier,
@@ -449,8 +457,11 @@ manifest = {
             "identity": "grdb.swift",
             "version": grdb_version,
             "revision": grdb_revision,
-            "resourceBundle": grdb_bundle,
-            "privacyManifestSHA256": grdb_privacy_sha256,
+            "resourceBundle": {
+                "name": grdb_bundle,
+                "identifier": grdb_bundle_identifier,
+                "privacyManifestSHA256": grdb_privacy_sha256,
+            },
         }
     ],
     "signing": {

@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "packages": [
     {
       "identity": "grdb.swift",
@@ -9,6 +9,7 @@
       "revision": "2cf6c756e1e5ef6901ebae16576a7e4e4b834622",
       "resourceBundle": {
         "name": "GRDB_GRDB.bundle",
+        "identifier": "grdb.swift.GRDB.resources",
         "privacyManifestSHA256": "17784da62e51f74c5859df32fe402e01e25cdf6f797a4add06e2a3ce15c911f4"
       }
     }

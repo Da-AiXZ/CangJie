@@ -26,7 +26,7 @@ jobs:
         with:
           persist-credentials: false
       - name: Static validation
-        run: bash -n scripts/build-ipa.sh scripts/find-ipad-simulator.sh scripts/tests/test-find-ipad-simulator.sh
+        run: bash -n scripts/build-ipa.sh scripts/find-ipad-simulator.sh scripts/tests/test-find-ipad-simulator.sh scripts/tests/test-build-ipa-contracts.sh
       - name: Test simulator selector failure handling
         run: bash scripts/tests/test-find-ipad-simulator.sh
       - name: Select pinned Xcode
@@ -48,6 +48,8 @@ jobs:
           bash scripts/build-ipa.sh --verify-resolved-packages \
             CangJie.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved
           bash scripts/build-ipa.sh --verify-grdb-privacy-manifest \
+            "$RUNNER_TEMP/CangJie-SourcePackages/checkouts/GRDB.swift/GRDB/PrivacyInfo.xcprivacy"
+          bash scripts/tests/test-build-ipa-contracts.sh \
             "$RUNNER_TEMP/CangJie-SourcePackages/checkouts/GRDB.swift/GRDB/PrivacyInfo.xcprivacy"
 
       - name: Select and boot an eligible iPad Simulator
