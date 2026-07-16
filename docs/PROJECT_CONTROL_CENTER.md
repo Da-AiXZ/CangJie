@@ -15,7 +15,7 @@ CangJie is agent-first: persistent center conversation controls a governed novel
 
 ## Current milestone
 
-M1 First-Chapter Agent Vertical Slice. Commit `648c8da` contains the M1-B recoverable runtime slice. Core CI is green; iPadOS CI exposed one regression-test fixture ordering error. The current worktree fixes that test contract and is not yet a validated M1-B exit.
+M1 First-Chapter Agent Vertical Slice. Commit `a0fa83b` is the current M1-B recoverable-runtime device candidate. Core CI, iPadOS App tests, and Agent-first UI smoke are green. The slice is paused only at the required TrollStore physical-device acceptance gate; it is not yet a complete M1-B exit.
 
 ```text
 open -> restore conversation/session/run/messages -> center conversation
@@ -42,14 +42,25 @@ User confirmed TrollStore install, launch, immediate restart persistence, and no
 Latest committed software evidence:
 
 ```text
-commit 648c8da feat: add recoverable agent runtime
-Core CI 29526906495: success
-iPadOS CI 29526906476: failure
+commit a0fa83be8980825651a798d7de9a9c1b083ed55c
+Core CI 29527519632: success
+iPadOS CI 29527519653: success
+Build TrollStore IPA 29528048015: success
 ```
 
-The iPadOS run compiled the App and executed 18 App tests; 17 passed. Its first and only real failure was `AppViewModelTests.testApprovedPlanReconcilesAnInterruptedApprovalRun` at line 236. The test inserted an approved artifact with epoch timestamp `701`, but the original waiting-approval plan had a current wall-clock `updatedAt`. Because production correctly selects `latestArtifact` by `updatedAt DESC`, the older approved fixture could not supersede the plan. The fix makes the approved fixture exactly one second newer than `plan.updatedAt`; production ordering semantics are unchanged.
+The corrective commit preserved production `latestArtifact(updatedAt DESC)` semantics and made the approved test fixture newer than the waiting plan it supersedes. The successful iPadOS run includes App unit/integration tests and the Agent-first UI smoke flow.
 
-Current verification remains partial until the corrective commit passes iPadOS CI and the Agent-first UI smoke test. M1 device acceptance, complete Keychain tests, real Provider SSE/cancel/reconcile, exact plan/budget approval, bible confirmation, generation, canon, import, and serial flow remain unproven.
+Candidate artifact:
+
+```text
+GitHub artifact CangJie-M0-device-validation-required-21-a0fa83be8980825651a798d7de9a9c1b083ed55c
+IPA CangJie-M0.ipa (legacy filename; identity comes from manifest, commit, and hash)
+SHA-256 6060dc1bcf511467484b4af0a99805c7a49249bd59e653063738ab2ea8065a78
+Bundle ID com.juyang.CangJie | arm64 | deployment target 16.6
+Local verified copy F:\project\CangJie\artifacts\CangJie-M1B-run-29528048015-verified\CangJie-M0-device-validation-required-21-a0fa83be8980825651a798d7de9a9c1b083ed55c\CangJie-M0.ipa
+```
+
+Manifest acceptance remains fail-closed until the exact SHA-256 IPA passes TrollStore device checks. Complete Keychain lifecycle/isolation, real Provider SSE/cancel/reconcile, exact plan/budget approval, bible confirmation, generation, canon, import, and serial flow remain unproven.
 
 ## Source boundaries
 
@@ -57,12 +68,11 @@ Novel package concepts are recorded in the plan. `cc.zip` is clean-room abstract
 
 ## Immediate queue
 
-1. Commit and push the artifact-version test fixture correction after minimum deterministic checks.
-2. Run App database/view-model/restart tests and Agent-first UI smoke test in the new iPadOS CI run.
-3. If CI fails, inspect and fix only the first causal error; do not weaken production ordering or safety gates.
-4. When Core and iPadOS CI are green, trigger the TrollStore IPA workflow and verify its manifest and SHA-256.
-5. Pause only at the physical-device acceptance gate with a complete install and test script.
-6. Do not enter M1-C until exact revision/budget approval and approval invalidation are implemented and verified.
+1. User installs the exact SHA-256 candidate with TrollStore and executes the M1-B runtime acceptance script.
+2. Record pass/fail evidence, including screenshots and the first reproducible failure step when applicable.
+3. If accepted, settle the device gate and continue M1-B exact revision/budget approval plus invalidation work automatically.
+4. If rejected, inspect the first reproducible device failure before changing code and preserve the accepted M0 rollback artifact.
+5. Do not enter M1-C until exact revision/budget approval and approval invalidation are implemented and verified.
 
 ## Change log
 
@@ -105,7 +115,7 @@ Excluded or still incomplete:
 
 Verification:
 
-- Commit `648c8da`: Core CI `29526906495` succeeded; iPadOS CI `29526906476` compiled and ran the suite but failed one App test because its manually inserted approved artifact was timestamped earlier than the plan it was intended to supersede.
-- The corrective test uses `plan.updatedAt.addingTimeInterval(1)` and intentionally preserves production `updatedAt DESC` selection.
-- Windows `swift test` previously passed 35 core tests; this does not compile or run the iPadOS App/XCTest targets.
-- Next required evidence: a green Core and iPadOS CI run for the corrective commit, then a successful TrollStore IPA workflow and physical-device acceptance.
+- Commit `648c8da`: Core CI `29526906495` succeeded; iPadOS CI `29526906476` found the test-fixture chronology error.
+- Corrective commit `a0fa83b`: Core CI `29527519632` and iPadOS CI `29527519653` succeeded, including Agent-first UI smoke.
+- TrollStore candidate workflow `29528048015` succeeded for exact commit `a0fa83be8980825651a798d7de9a9c1b083ed55c`; downloaded IPA hash matches the manifest and `.sha256` file.
+- Required next evidence is physical-device acceptance of exact SHA-256 `6060dc1bcf511467484b4af0a99805c7a49249bd59e653063738ab2ea8065a78`.

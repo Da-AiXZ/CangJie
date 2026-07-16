@@ -107,3 +107,7 @@ After the opening plan is approved, the next ordinary message must not be append
 ## P-027 Version-order tests must create a genuinely newer revision
 
 When production selects the latest artifact by `updatedAt DESC`, a test that inserts a supposed replacement with an arbitrary ancient epoch does not model a replacement. Derive the new fixture time from the artifact it supersedes, for example `plan.updatedAt.addingTimeInterval(1)`. Do not change correct production ordering to accommodate an impossible fixture, and always distinguish fixture chronology failures from reconciliation logic failures.
+
+## P-028 Candidate identity is commit plus manifest hash, not a legacy filename
+
+The packaging workflow still emits `CangJie-M0.ipa` while later milestone slices are under test. Never infer milestone content from that filename. Device acceptance must bind the Git commit, Actions run, manifest, bundle identifier, and exact SHA-256. Renaming can improve presentation later, but it must not change or obscure the verified bytes.
