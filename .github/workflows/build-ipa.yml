@@ -37,7 +37,8 @@ jobs:
           set -euo pipefail
           ldid_path="$(bash scripts/install-ldid.sh)"
           [[ -x "${ldid_path}" && ! -L "${ldid_path}" ]] || { echo "Unsafe ldid installation result" >&2; exit 1; }
-          [[ "${ldid_path}" != *$'\r'* && "${ldid_path}" != *$'\n'* && "${ldid_path}" != *$'\0'* ]] || { echo "Unsafe control character in ldid path" >&2; exit 1; }
+          # Bash variables cannot contain NUL bytes; reject the representable line-breaking controls.
+          [[ "${ldid_path}" != *$'\r'* && "${ldid_path}" != *$'\n'* ]] || { echo "Unsafe line break in ldid path" >&2; exit 1; }
           [[ "${ldid_path}" == /* ]] || { echo "ldid path is not absolute" >&2; exit 1; }
           printf 'LDID_PATH=%s\n' "${ldid_path}" >> "${GITHUB_ENV}"
       - name: Test codesign and ldid entitlement contracts
