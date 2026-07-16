@@ -203,6 +203,24 @@ extract_and_verify_ldid_entitlements() {
   rm -f "${diagnostics_path}"
 }
 
+compile_designated_requirement() {
+  require_tool csreq
+  local identifier="$1"
+  local output_path="$2"
+  local diagnostics_path="$3"
+  [[ "${identifier}" =~ ^[A-Za-z0-9.-]+$ ]] || fail "Unsafe code-signing identifier: ${identifier}"
+  [[ "${output_path}" != "${diagnostics_path}" ]] || fail "Requirement output and diagnostics paths must differ"
+  rm -f "${output_path}" "${diagnostics_path}"
+  local requirement_text="=designated => identifier \"${identifier}\""
+  if ! csreq -r "${requirement_text}" -b "${output_path}" >/dev/null 2>"${diagnostics_path}"; then
+    cat "${diagnostics_path}" >&2
+    rm -f "${output_path}" "${diagnostics_path}"
+    fail "Failed to compile the designated requirement"
+  fi
+  [[ -s "${output_path}" && -f "${output_path}" && ! -L "${output_path}" ]] || fail "Compiled designated requirement is missing or unsafe"
+  rm -f "${diagnostics_path}"
+}
+
 sign_executable_with_ldid() {
   local ldid_path="$1"
   local entitlements_path="$2"
@@ -218,9 +236,12 @@ sign_executable_with_ldid() {
   local codesign_diagnostics="${diagnostics_root}/codesign-executable-verify.stderr"
   local codesign_entitlements="${diagnostics_root}/codesign-executable-entitlements.plist"
   local codesign_entitlements_diagnostics="${diagnostics_root}/codesign-executable-entitlements.stderr"
-  rm -f "${signing_diagnostics}" "${extracted_entitlements}" "${extraction_diagnostics}" "${codesign_diagnostics}" "${codesign_entitlements}" "${codesign_entitlements_diagnostics}"
+  local requirements_path="${diagnostics_root}/designated-requirement.bin"
+  local requirements_diagnostics="${diagnostics_root}/csreq.stderr"
+  rm -f "${signing_diagnostics}" "${extracted_entitlements}" "${extraction_diagnostics}" "${codesign_diagnostics}" "${codesign_entitlements}" "${codesign_entitlements_diagnostics}" "${requirements_path}" "${requirements_diagnostics}"
+  compile_designated_requirement "${EXPECTED_BUNDLE_ID}" "${requirements_path}" "${requirements_diagnostics}"
 
-  if ! "${ldid_path}" -Cadhoc "-S${entitlements_path}" "${executable_path}" >/dev/null 2>"${signing_diagnostics}"; then
+  if ! "${ldid_path}" -Cadhoc "-I${EXPECTED_BUNDLE_ID}" "-Q${requirements_path}" "-S${entitlements_path}" "${executable_path}" >/dev/null 2>"${signing_diagnostics}"; then
     cat "${signing_diagnostics}" >&2
     rm -f "${signing_diagnostics}"
     fail "ldid failed to sign the main executable"

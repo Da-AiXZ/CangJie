@@ -193,15 +193,29 @@ readonly EXECUTABLE_PATH="${TEMP_ROOT}/Executable With Spaces.exe"
 printf 'fixture' >"${EXECUTABLE_PATH}"
 chmod +x "${EXECUTABLE_PATH}"
 
+cat >"${BIN_DIR}/csreq" <<'SH'
+#!/bin/bash
+set -euo pipefail
+[[ "$#" == "4" ]] || { echo 'unexpected csreq argument count' >&2; exit 64; }
+[[ "$1" == "-r" ]] || { echo "unexpected csreq operation: $1" >&2; exit 64; }
+[[ "$2" == '=designated => identifier "com.juyang.CangJie"' ]] || { echo "unexpected designated requirement: $2" >&2; exit 64; }
+[[ "$3" == "-b" ]] || { echo "unexpected csreq output option: $3" >&2; exit 64; }
+[[ "$(basename "$4")" == "designated-requirement.bin" ]] || { echo "unexpected csreq output path: $4" >&2; exit 64; }
+printf 'compiled designated requirement' >"$4"
+SH
+chmod +x "${BIN_DIR}/csreq"
+
 cat >"${BIN_DIR}/ldid" <<'SH'
 #!/bin/bash
 set -euo pipefail
 operation="${1:-}"
 case "${operation}" in
   -Cadhoc)
-    [[ "$#" == "3" ]] || { echo 'unexpected ldid sign argument count' >&2; exit 64; }
-    [[ "$2" == "-S${FAKE_LDID_CONTRACT:?}" ]] || { echo "unexpected ldid entitlement argument: $2" >&2; exit 64; }
-    [[ "$3" == "${FAKE_LDID_EXECUTABLE:?}" ]] || { echo "unexpected ldid executable: $3" >&2; exit 64; }
+    [[ "$#" == "5" ]] || { echo 'unexpected ldid sign argument count' >&2; exit 64; }
+    [[ "$2" == "-Icom.juyang.CangJie" ]] || { echo "unexpected ldid identifier argument: $2" >&2; exit 64; }
+    [[ "$3" == -Q* && -s "${3#-Q}" ]] || { echo "unexpected ldid requirement argument: $3" >&2; exit 64; }
+    [[ "$4" == "-S${FAKE_LDID_CONTRACT:?}" ]] || { echo "unexpected ldid entitlement argument: $4" >&2; exit 64; }
+    [[ "$5" == "${FAKE_LDID_EXECUTABLE:?}" ]] || { echo "unexpected ldid executable: $5" >&2; exit 64; }
     if [[ "${FAKE_LDID_MODE:?}" == "sign-error" ]]; then
       echo 'ldid: simulated signing failure' >&2
       exit 2
