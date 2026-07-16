@@ -287,6 +287,26 @@ sign_app_with_ldid() {
   rm -f "${shallow_signing_diagnostics}" "${executable_signing_diagnostics}" "${app_codesign_diagnostics}" "${executable_codesign_diagnostics}" "${extracted_entitlements}" "${extraction_diagnostics}" "${codesign_entitlements}" "${codesign_entitlements_diagnostics}" "${requirements_path}" "${requirements_diagnostics}"
   compile_designated_requirement "${EXPECTED_BUNDLE_ID}" "${requirements_path}" "${requirements_diagnostics}"
 
+  if [[ "${LDID_DIAGNOSTICS:-0}" == "1" ]]; then
+    # Xcode may leave a linker-produced LC_CODE_SIGNATURE or entitlement blob
+    # on the device executable. Capture its pre-ldid state so a future signing
+    # failure distinguishes an input Mach-O problem from an ldid output problem.
+    printf '%s\n' 'ldid pre-sign diagnostic: executable file' >&2
+    file "${executable_path}" >&2 || true
+    printf '%s\n' 'ldid pre-sign diagnostic: ldid entitlements' >&2
+    "${ldid_path}" -e "${executable_path}" >&2 || true
+    printf '%s\n' 'ldid pre-sign diagnostic: codesign details' >&2
+    codesign -dvv "${executable_path}" >&2 || true
+    printf '%s\n' 'ldid pre-sign diagnostic: codesign entitlements' >&2
+    codesign --display --entitlements - --xml "${executable_path}" >&2 || true
+    printf '%s\n' 'ldid pre-sign diagnostic: designated requirement' >&2
+    codesign -d -r- "${executable_path}" >&2 || true
+    if command -v otool >/dev/null 2>&1; then
+      printf '%s\n' 'ldid pre-sign diagnostic: signature load command' >&2
+      otool -l "${executable_path}" | awk '/cmd LC_CODE_SIGNATURE/{show=1; count=0} show{print; count++} count==8{show=0}' >&2 || true
+    fi
+  fi
+
   # Procursus ldid v2.1.5-procursus7 hard-codes flags=0 for the executable
   # when it is reached through bundle signing. Use that mode only to produce
   # the resource seal, then sign the executable directly with CS_ADHOC and
