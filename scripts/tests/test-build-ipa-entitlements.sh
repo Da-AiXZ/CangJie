@@ -422,7 +422,7 @@ PY
     readonly REAL_LDID_APP="${TEMP_ROOT}/RealLdidFixture.app"
     readonly REAL_LDID_APP_EXECUTABLE="${REAL_LDID_APP}/RealLdidFixture"
     mkdir -p "${REAL_LDID_APP}"
-    cp "${REAL_LDID_EXECUTABLE}" "${REAL_LDID_APP_EXECUTABLE}"
+    xcrun --sdk iphoneos clang -arch arm64 -miphoneos-version-min=16.6 "${TEMP_ROOT}/main.c" -o "${REAL_LDID_APP_EXECUTABLE}"
     printf 'resource fixture' >"${REAL_LDID_APP}/Resource.txt"
     python3 - "${REAL_LDID_APP}/Info.plist" <<'PY'
 import plistlib

@@ -307,8 +307,12 @@ sign_app_with_ldid() {
   rm -f "${executable_signing_diagnostics}"
   verify_code_signature "${app_path}" "${app_codesign_diagnostics}"
   verify_executable_signature "${executable_path}" "${executable_codesign_diagnostics}"
-  extract_and_verify_ldid_entitlements "${ldid_path}" "${executable_path}" "${extracted_entitlements}" "${extraction_diagnostics}"
-  extract_and_verify_codesign_executable_entitlements "${executable_path}" "${codesign_entitlements}" "${codesign_entitlements_diagnostics}"
+  if ! extract_and_verify_ldid_entitlements "${ldid_path}" "${executable_path}" "${extracted_entitlements}" "${extraction_diagnostics}"; then
+    fail "ldid entitlement verification failed for the app executable"
+  fi
+  if ! extract_and_verify_codesign_executable_entitlements "${executable_path}" "${codesign_entitlements}" "${codesign_entitlements_diagnostics}"; then
+    fail "codesign entitlement verification failed for the app executable"
+  fi
 }
 
 verify_final_executable() {
