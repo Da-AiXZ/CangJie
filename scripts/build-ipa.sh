@@ -129,6 +129,25 @@ if pkg_info.exists() and pkg_info.read_bytes() != b"BNDL????":
     raise SystemExit("Unexpected GRDB resource bundle PkgInfo contents")
 PY
 }
+case "${1:-}" in
+  --verify-dependency-contract)
+    [[ "$#" == "1" ]] || fail "--verify-dependency-contract does not accept additional arguments"
+    verify_dependency_contract
+    exit 0
+    ;;
+  --verify-resolved-packages)
+    [[ "$#" == "2" && -n "${2:-}" ]] || fail "Usage: $0 --verify-resolved-packages <Package.resolved>"
+    verify_resolved_packages "$2"
+    exit 0
+    ;;
+  "")
+    [[ "$#" == "0" ]] || fail "Unexpected empty build argument"
+    ;;
+  *)
+    fail "Unknown build-ipa option: $1"
+    ;;
+esac
+
 [[ "${ROOT}" != "/" && "${OUT}" == "${ROOT}/.build-ipa" ]] || fail "Refusing to clean an unexpected output path: ${OUT}"
 for tool in xcodegen xcodebuild xcrun lipo codesign file git python3 zip unzip shasum; do
   require_tool "${tool}"
@@ -154,7 +173,45 @@ readonly CHECKOUT_COUNT="$(find "${SOURCE_PACKAGES}/checkouts" -mindepth 1 -maxd
 readonly CHECKOUT_REVISION="$(git -C "${GRDB_CHECKOUT}" rev-parse HEAD)"
 [[ "${CHECKOUT_REVISION}" == "${EXPECTED_GRDB_REVISION}" ]] || fail "GRDB checkout revision mismatch: ${CHECKOUT_REVISION}"
 readonly CHECKOUT_REMOTE="$(git -C "${GRDB_CHECKOUT}" remote get-url origin)"
-[[ "${CHECKOUT_REMOTE}" == "${EXPECTED_GRDB_URL}" ]] || fail "GRDB checkout remote mismatch: ${CHECKOUT_REMOTE}"
+if [[ "${CHECKOUT_REMOTE}" == "${EXPECTED_GRDB_URL}" || "${CHECKOUT_REMOTE}" == "${EXPECTED_GRDB_URL%.git}" ]]; then
+  readonly AUDITED_GRDB_REMOTE="${CHECKOUT_REMOTE}"
+  readonly GRDB_GIT_DIRECTORY="${GRDB_CHECKOUT}/.git"
+else
+  readonly REPOSITORY_CACHE_ROOT="${SOURCE_PACKAGES}/repositories"
+  readonly GRDB_REPOSITORY_CACHE="$(python3 - "${CHECKOUT_REMOTE}" "${REPOSITORY_CACHE_ROOT}" <<'PY'
+import sys
+from pathlib import Path
+from urllib.parse import unquote, urlparse
+
+remote, cache_root = sys.argv[1:]
+if remote.startswith("file://"):
+    parsed = urlparse(remote)
+    if parsed.netloc not in ("", "localhost"):
+        raise SystemExit(f"Unsupported local SwiftPM cache authority: {parsed.netloc!r}")
+    remote = unquote(parsed.path)
+
+candidate = Path(remote)
+if not candidate.is_absolute():
+    raise SystemExit(f"SwiftPM checkout origin is neither HTTPS nor an absolute cache path: {remote!r}")
+root_candidate = Path(cache_root)
+if root_candidate.is_symlink():
+    raise SystemExit(f"SwiftPM repository cache root is a symlink: {root_candidate}")
+root = root_candidate.resolve(strict=True)
+resolved = candidate.resolve(strict=True)
+if resolved == root or root not in resolved.parents:
+    raise SystemExit(f"SwiftPM repository cache escapes the expected root: {resolved}")
+if candidate.is_symlink() or not resolved.is_dir():
+    raise SystemExit(f"SwiftPM repository cache is unsafe: {candidate}")
+print(resolved)
+PY
+)"
+  [[ "$(git --git-dir="${GRDB_REPOSITORY_CACHE}" rev-parse --is-bare-repository)" == "true" ]] || fail "SwiftPM GRDB repository cache is not bare: ${GRDB_REPOSITORY_CACHE}"
+  readonly AUDITED_GRDB_REMOTE="$(git --git-dir="${GRDB_REPOSITORY_CACHE}" remote get-url origin)"
+  readonly GRDB_GIT_DIRECTORY="${GRDB_REPOSITORY_CACHE}"
+fi
+[[ "${AUDITED_GRDB_REMOTE}" == "${EXPECTED_GRDB_URL}" || "${AUDITED_GRDB_REMOTE}" == "${EXPECTED_GRDB_URL%.git}" ]] || fail "GRDB repository origin mismatch: ${AUDITED_GRDB_REMOTE}"
+readonly AUDITED_GRDB_REVISION="$(git --git-dir="${GRDB_GIT_DIRECTORY}" rev-parse "${EXPECTED_GRDB_REVISION}^{commit}")"
+[[ "${AUDITED_GRDB_REVISION}" == "${EXPECTED_GRDB_REVISION}" ]] || fail "GRDB repository cache is missing the pinned revision: ${AUDITED_GRDB_REVISION}"
 [[ -z "$(git -C "${GRDB_CHECKOUT}" status --porcelain --untracked-files=all)" ]] || fail "GRDB checkout is not clean"
 
 xcodebuild build \
