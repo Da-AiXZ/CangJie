@@ -14,12 +14,16 @@ final class AppViewModel: ObservableObject {
 
     private static let maximumStreamOutputBytes = 256 * 1_024
     private let database: AppDatabase?
-    private let keychain: KeychainSecretRepository
+    private let keychain: any SecretRepository
     private let taskID: UUID
     private var streamTask: Task<Void, Never>?
     private var streamGeneration: UUID?
 
-    init(database: AppDatabase? = nil, keychain: KeychainSecretRepository = .init()) {
+    init(
+        database: AppDatabase? = nil,
+        databaseFactory: () throws -> AppDatabase = { try AppDatabase.makeDefault() },
+        keychain: any SecretRepository = KeychainSecretRepository()
+    ) {
         self.keychain = keychain
         let defaultsKey = "m0TaskID"
         if let stored = UserDefaults.standard.string(forKey: defaultsKey),
@@ -31,23 +35,27 @@ final class AppViewModel: ObservableObject {
             UserDefaults.standard.set(id.uuidString, forKey: defaultsKey)
         }
 
+        let databaseState: (database: AppDatabase?, draft: String, status: String)
         do {
-            let resolved = try database ?? AppDatabase.makeDefault()
-            self.database = resolved
-            draft = try resolved.loadDraft()?.content ?? ""
+            let resolved = try database ?? databaseFactory()
+            let restoredDraft = try resolved.loadDraft()?.content ?? ""
+            let restoredStatus: String
             if let checkpoint = try resolved.latestCheckpoint(taskID: taskID) {
-                if Self.payloadHash(for: draft) == checkpoint.payloadHash {
-                    status = "已恢复 checkpoint #\(checkpoint.sequence)"
+                if Self.payloadHash(for: restoredDraft) == checkpoint.payloadHash {
+                    restoredStatus = "已恢复 checkpoint #\(checkpoint.sequence)"
                 } else {
-                    status = "草稿比 checkpoint 更新，请手动建立新检查点"
+                    restoredStatus = "草稿比 checkpoint 更新，请手动建立新检查点"
                 }
             } else {
-                status = "SQLite 已就绪，尚无 checkpoint"
+                restoredStatus = "SQLite 已就绪，尚无 checkpoint"
             }
+            databaseState = (resolved, restoredDraft, restoredStatus)
         } catch {
-            self.database = nil
-            status = "SQLite 初始化失败（DB-INIT）"
+            databaseState = (nil, "", "SQLite 初始化失败（DB-INIT）")
         }
+        self.database = databaseState.database
+        draft = databaseState.draft
+        status = databaseState.status
 
         do {
             hasStoredKey = try keychain.contains(account: "m0-probe")

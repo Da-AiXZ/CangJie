@@ -5,7 +5,13 @@ enum KeychainError: Error {
     case unexpectedStatus(OSStatus)
 }
 
-struct KeychainSecretRepository {
+protocol SecretRepository {
+    func save(_ secret: String, account: String) throws
+    func contains(account: String) throws -> Bool
+    func delete(account: String) throws
+}
+
+struct KeychainSecretRepository: SecretRepository {
     private let service = "com.juyang.CangJie.providers.v1"
 
     func save(_ secret: String, account: String) throws {
