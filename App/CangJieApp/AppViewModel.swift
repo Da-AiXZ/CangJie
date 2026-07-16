@@ -81,7 +81,7 @@ final class AppViewModel: ObservableObject {
         guard !text.isEmpty else { return }
         conversationMessages.append("You: " + text)
         draft = ""
-        if text.localizedCaseInsensitiveContains("create") || text.localizedCaseInsensitiveContains("novel") || text.unicodeScalars.contains(where: { $0.value >= 0x4E00 && $0.value <= 0x9FFF }) {
+        if text.localizedCaseInsensitiveContains("create") || text.localizedCaseInsensitiveContains("novel") || text.contains("\u{521B}\u{5EFA}") || text.contains("\u{5C0F}\u{8BF4}") {
             isAgentWorking = true
             do {
                 let project = try database?.createProject(title: "Untitled Novel", premise: text)
