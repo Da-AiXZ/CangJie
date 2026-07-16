@@ -271,7 +271,8 @@ sign_app_with_ldid() {
   [[ -f "${executable_path}" && ! -L "${executable_path}" ]] || fail "Main executable is missing or unsafe: ${executable_path}"
   [[ "${executable_path}" == "${app_path}/"* ]] || fail "Main executable is outside the app bundle: ${executable_path}"
   mkdir -p "${diagnostics_root}"
-  local signing_diagnostics="${diagnostics_root}/ldid-app-sign.stderr"
+  local shallow_signing_diagnostics="${diagnostics_root}/ldid-app-shallow-sign.stderr"
+  local executable_signing_diagnostics="${diagnostics_root}/ldid-app-executable-sign.stderr"
   local app_codesign_diagnostics="${diagnostics_root}/codesign-app-verify.stderr"
   local executable_codesign_diagnostics="${diagnostics_root}/codesign-executable-verify.stderr"
   local extracted_entitlements="${diagnostics_root}/ldid-entitlements.plist"
@@ -280,16 +281,30 @@ sign_app_with_ldid() {
   local codesign_entitlements_diagnostics="${diagnostics_root}/codesign-executable-entitlements.stderr"
   local requirements_path="${diagnostics_root}/designated-requirement.bin"
   local requirements_diagnostics="${diagnostics_root}/csreq.stderr"
-  rm -f "${signing_diagnostics}" "${app_codesign_diagnostics}" "${executable_codesign_diagnostics}" "${extracted_entitlements}" "${extraction_diagnostics}" "${codesign_entitlements}" "${codesign_entitlements_diagnostics}" "${requirements_path}" "${requirements_diagnostics}"
+  local info_path="${app_path}/Info.plist"
+  local resources_path="${app_path}/_CodeSignature/CodeResources"
+  [[ -f "${info_path}" && ! -L "${info_path}" ]] || fail "App Info.plist is missing or unsafe: ${info_path}"
+  rm -f "${shallow_signing_diagnostics}" "${executable_signing_diagnostics}" "${app_codesign_diagnostics}" "${executable_codesign_diagnostics}" "${extracted_entitlements}" "${extraction_diagnostics}" "${codesign_entitlements}" "${codesign_entitlements_diagnostics}" "${requirements_path}" "${requirements_diagnostics}"
   compile_designated_requirement "${EXPECTED_BUNDLE_ID}" "${requirements_path}" "${requirements_diagnostics}"
 
-  if ! "${ldid_path}" -w -Cadhoc "-I${EXPECTED_BUNDLE_ID}" "-Q${requirements_path}" "-S${entitlements_path}" "${app_path}" >/dev/null 2>"${signing_diagnostics}"; then
-    cat "${signing_diagnostics}" >&2
-    rm -f "${signing_diagnostics}"
-    fail "ldid failed to sign the app bundle"
+  # Procursus ldid v2.1.5-procursus7 hard-codes flags=0 for the executable
+  # when it is reached through bundle signing. Use that mode only to produce
+  # the resource seal, then sign the executable directly with CS_ADHOC and
+  # explicitly bind Info.plist and CodeResources as special slots.
+  if ! "${ldid_path}" -w "-I${EXPECTED_BUNDLE_ID}" "-Q${requirements_path}" "-S${entitlements_path}" "${app_path}" >/dev/null 2>"${shallow_signing_diagnostics}"; then
+    cat "${shallow_signing_diagnostics}" >&2
+    rm -f "${shallow_signing_diagnostics}"
+    fail "ldid failed to shallow-sign the app bundle"
   fi
-  rm -f "${signing_diagnostics}"
+  rm -f "${shallow_signing_diagnostics}"
   verify_code_resources "${app_path}"
+
+  if ! "${ldid_path}" -Cadhoc "-I${EXPECTED_BUNDLE_ID}" "-Q${requirements_path}" "-E1${info_path}" "-E3${resources_path}" "-S${entitlements_path}" "${executable_path}" >/dev/null 2>"${executable_signing_diagnostics}"; then
+    cat "${executable_signing_diagnostics}" >&2
+    rm -f "${executable_signing_diagnostics}"
+    fail "ldid failed to ad-hoc sign the app executable"
+  fi
+  rm -f "${executable_signing_diagnostics}"
   verify_code_signature "${app_path}" "${app_codesign_diagnostics}"
   verify_executable_signature "${executable_path}" "${executable_codesign_diagnostics}"
   extract_and_verify_ldid_entitlements "${ldid_path}" "${executable_path}" "${extracted_entitlements}" "${extraction_diagnostics}"

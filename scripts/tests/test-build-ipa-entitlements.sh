@@ -203,6 +203,19 @@ readonly APP_EXECUTABLE="${APP_FIXTURE}/Fixture With Resources"
 mkdir -p "${APP_FIXTURE}"
 printf 'fixture executable' >"${APP_EXECUTABLE}"
 chmod +x "${APP_EXECUTABLE}"
+python3 - "${APP_FIXTURE}/Info.plist" <<'PY'
+import plistlib
+import sys
+with open(sys.argv[1], "wb") as destination:
+    plistlib.dump(
+        {
+            "CFBundleExecutable": "Fixture With Resources",
+            "CFBundleIdentifier": "com.juyang.CangJie",
+            "CFBundlePackageType": "APPL",
+        },
+        destination,
+    )
+PY
 
 cat >"${BIN_DIR}/csreq" <<'SH'
 #!/bin/bash
@@ -222,23 +235,37 @@ set -euo pipefail
 operation="${1:-}"
 case "${operation}" in
   -Cadhoc)
-    [[ "$#" == "5" ]] || { echo 'unexpected ldid sign argument count' >&2; exit 64; }
-    [[ "$2" == "-Icom.juyang.CangJie" ]] || { echo "unexpected ldid identifier argument: $2" >&2; exit 64; }
-    [[ "$3" == -Q* && -s "${3#-Q}" ]] || { echo "unexpected ldid requirement argument: $3" >&2; exit 64; }
-    [[ "$4" == "-S${FAKE_LDID_CONTRACT:?}" ]] || { echo "unexpected ldid entitlement argument: $4" >&2; exit 64; }
-    [[ "$5" == "${FAKE_LDID_EXECUTABLE:?}" ]] || { echo "unexpected ldid executable: $5" >&2; exit 64; }
-    if [[ "${FAKE_LDID_MODE:?}" == "sign-error" ]]; then
-      echo 'ldid: simulated signing failure' >&2
-      exit 2
+    if [[ "$#" == "5" ]]; then
+      [[ "$2" == "-Icom.juyang.CangJie" ]] || { echo "unexpected ldid identifier argument: $2" >&2; exit 64; }
+      [[ "$3" == -Q* && -s "${3#-Q}" ]] || { echo "unexpected ldid requirement argument: $3" >&2; exit 64; }
+      [[ "$4" == "-S${FAKE_LDID_CONTRACT:?}" ]] || { echo "unexpected ldid entitlement argument: $4" >&2; exit 64; }
+      [[ "$5" == "${FAKE_LDID_EXECUTABLE:?}" ]] || { echo "unexpected ldid executable: $5" >&2; exit 64; }
+      if [[ "${FAKE_LDID_MODE:?}" == "sign-error" ]]; then
+        echo 'ldid: simulated signing failure' >&2
+        exit 2
+      fi
+    elif [[ "$#" == "7" ]]; then
+      [[ "$2" == "-Icom.juyang.CangJie" ]] || { echo "unexpected ldid identifier argument: $2" >&2; exit 64; }
+      [[ "$3" == -Q* && -s "${3#-Q}" ]] || { echo "unexpected ldid requirement argument: $3" >&2; exit 64; }
+      [[ "$4" == "-E1${FAKE_LDID_APP:?}/Info.plist" ]] || { echo "unexpected ldid Info.plist slot: $4" >&2; exit 64; }
+      [[ "$5" == "-E3${FAKE_LDID_APP:?}/_CodeSignature/CodeResources" ]] || { echo "unexpected ldid CodeResources slot: $5" >&2; exit 64; }
+      [[ "$6" == "-S${FAKE_LDID_CONTRACT:?}" ]] || { echo "unexpected ldid entitlement argument: $6" >&2; exit 64; }
+      [[ "$7" == "${FAKE_LDID_EXECUTABLE:?}" ]] || { echo "unexpected ldid executable: $7" >&2; exit 64; }
+      if [[ "${FAKE_LDID_MODE:?}" == "app-executable-sign-error" ]]; then
+        echo 'ldid: simulated app executable signing failure' >&2
+        exit 2
+      fi
+    else
+      echo 'unexpected ldid sign argument count' >&2
+      exit 64
     fi
     ;;
   -w)
-    [[ "$#" == "6" ]] || { echo 'unexpected ldid shallow sign argument count' >&2; exit 64; }
-    [[ "$2" == "-Cadhoc" ]] || { echo "unexpected ldid shallow sign flags: $2" >&2; exit 64; }
-    [[ "$3" == "-Icom.juyang.CangJie" ]] || { echo "unexpected ldid identifier argument: $3" >&2; exit 64; }
-    [[ "$4" == -Q* && -s "${4#-Q}" ]] || { echo "unexpected ldid requirement argument: $4" >&2; exit 64; }
-    [[ "$5" == "-S${FAKE_LDID_CONTRACT:?}" ]] || { echo "unexpected ldid entitlement argument: $5" >&2; exit 64; }
-    [[ "$6" == "${FAKE_LDID_APP:?}" ]] || { echo "unexpected ldid app path: $6" >&2; exit 64; }
+    [[ "$#" == "5" ]] || { echo 'unexpected ldid shallow sign argument count' >&2; exit 64; }
+    [[ "$2" == "-Icom.juyang.CangJie" ]] || { echo "unexpected ldid identifier argument: $2" >&2; exit 64; }
+    [[ "$3" == -Q* && -s "${3#-Q}" ]] || { echo "unexpected ldid requirement argument: $3" >&2; exit 64; }
+    [[ "$4" == "-S${FAKE_LDID_CONTRACT:?}" ]] || { echo "unexpected ldid entitlement argument: $4" >&2; exit 64; }
+    [[ "$5" == "${FAKE_LDID_APP:?}" ]] || { echo "unexpected ldid app path: $5" >&2; exit 64; }
     mkdir -p "${FAKE_LDID_APP}/_CodeSignature"
     printf 'fake CodeResources' >"${FAKE_LDID_APP}/_CodeSignature/CodeResources"
     if [[ "${FAKE_LDID_MODE:?}" == "app-sign-error" ]]; then
@@ -327,7 +354,8 @@ run_fake_ldid_app() {
 }
 
 assert_success fake-ldid-app-valid run_fake_ldid_app valid valid bash "${BUILD_SCRIPT}" --sign-app-with-ldid "${BIN_DIR}/ldid" "${CONTRACT}" "${APP_FIXTURE}" "${APP_EXECUTABLE}"
-assert_failure fake-ldid-app-sign-error 'ldid failed to sign the app bundle' run_fake_ldid_app app-sign-error valid bash "${BUILD_SCRIPT}" --sign-app-with-ldid "${BIN_DIR}/ldid" "${CONTRACT}" "${APP_FIXTURE}" "${APP_EXECUTABLE}"
+assert_failure fake-ldid-app-sign-error 'ldid failed to shallow-sign the app bundle' run_fake_ldid_app app-sign-error valid bash "${BUILD_SCRIPT}" --sign-app-with-ldid "${BIN_DIR}/ldid" "${CONTRACT}" "${APP_FIXTURE}" "${APP_EXECUTABLE}"
+assert_failure fake-ldid-app-executable-sign-error 'ldid failed to ad-hoc sign the app executable' run_fake_ldid_app app-executable-sign-error valid bash "${BUILD_SCRIPT}" --sign-app-with-ldid "${BIN_DIR}/ldid" "${CONTRACT}" "${APP_FIXTURE}" "${APP_EXECUTABLE}"
 assert_failure sign-app-with-ldid-arity 'Usage:' bash "${BUILD_SCRIPT}" --sign-app-with-ldid
 
 readonly EXECUTABLE_SHA256="$(python3 - "${EXECUTABLE_PATH}" <<'PY'
