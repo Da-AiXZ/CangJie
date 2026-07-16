@@ -103,13 +103,13 @@ set -euo pipefail
 actual=("$@")
 case "${actual[0]:-}" in
   --verify)
-    expected=(--verify --strict --verbose=2 "${FAKE_CODESIGN_APP:?}")
+    expected=(--verify --strict --verbose=2 "${actual[$(( ${#actual[@]} - 1 ))]}")
     ;;
   --display)
-    expected=(--display --entitlements - --xml "${FAKE_CODESIGN_APP:?}")
+    expected=(--display --entitlements - --xml "${actual[$(( ${#actual[@]} - 1 ))]}")
     ;;
   -dvv)
-    expected=(-dvv "${FAKE_CODESIGN_APP:?}")
+    expected=(-dvv "${actual[$(( ${#actual[@]} - 1 ))]}")
     ;;
   *)
     echo "unexpected codesign operation: ${actual[0]:-missing}" >&2
@@ -126,6 +126,11 @@ for index in "${!expected[@]}"; do
     exit 64
   }
 done
+target="${actual[$(( ${#actual[@]} - 1 ))]}"
+case ":${FAKE_CODESIGN_ALLOWED_TARGETS:-${FAKE_CODESIGN_APP:?}}:" in
+  *":${target}:"*) ;;
+  *) echo "unexpected codesign target: ${target}" >&2; exit 64 ;;
+esac
 if [[ "${actual[0]}" == "--verify" ]]; then
   if [[ "${FAKE_CODESIGN_MODE:?}" == "invalid-signature" ]]; then
     echo 'codesign: simulated invalid signature' >&2
@@ -193,6 +198,12 @@ readonly EXECUTABLE_PATH="${TEMP_ROOT}/Executable With Spaces.exe"
 printf 'fixture' >"${EXECUTABLE_PATH}"
 chmod +x "${EXECUTABLE_PATH}"
 
+readonly APP_FIXTURE="${TEMP_ROOT}/Fixture With Resources.app"
+readonly APP_EXECUTABLE="${APP_FIXTURE}/Fixture With Resources"
+mkdir -p "${APP_FIXTURE}"
+printf 'fixture executable' >"${APP_EXECUTABLE}"
+chmod +x "${APP_EXECUTABLE}"
+
 cat >"${BIN_DIR}/csreq" <<'SH'
 #!/bin/bash
 set -euo pipefail
@@ -218,6 +229,20 @@ case "${operation}" in
     [[ "$5" == "${FAKE_LDID_EXECUTABLE:?}" ]] || { echo "unexpected ldid executable: $5" >&2; exit 64; }
     if [[ "${FAKE_LDID_MODE:?}" == "sign-error" ]]; then
       echo 'ldid: simulated signing failure' >&2
+      exit 2
+    fi
+    ;;
+  -w)
+    [[ "$#" == "6" ]] || { echo 'unexpected ldid shallow sign argument count' >&2; exit 64; }
+    [[ "$2" == "-Cadhoc" ]] || { echo "unexpected ldid shallow sign flags: $2" >&2; exit 64; }
+    [[ "$3" == "-Icom.juyang.CangJie" ]] || { echo "unexpected ldid identifier argument: $3" >&2; exit 64; }
+    [[ "$4" == -Q* && -s "${4#-Q}" ]] || { echo "unexpected ldid requirement argument: $4" >&2; exit 64; }
+    [[ "$5" == "-S${FAKE_LDID_CONTRACT:?}" ]] || { echo "unexpected ldid entitlement argument: $5" >&2; exit 64; }
+    [[ "$6" == "${FAKE_LDID_APP:?}" ]] || { echo "unexpected ldid app path: $6" >&2; exit 64; }
+    mkdir -p "${FAKE_LDID_APP}/_CodeSignature"
+    printf 'fake CodeResources' >"${FAKE_LDID_APP}/_CodeSignature/CodeResources"
+    if [[ "${FAKE_LDID_MODE:?}" == "app-sign-error" ]]; then
+      echo 'ldid: simulated app signing failure' >&2
       exit 2
     fi
     ;;
@@ -261,11 +286,13 @@ run_fake_ldid() {
   shift 2
   PATH="${BIN_DIR}:${PATH}" \
     FAKE_CODESIGN_APP="${EXECUTABLE_PATH}" \
+    FAKE_CODESIGN_ALLOWED_TARGETS="${EXECUTABLE_PATH}" \
     FAKE_CODESIGN_MODE="${codesign_mode}" \
     FAKE_CODESIGN_VALID="${FIXTURES}/valid.xml" \
     FAKE_CODESIGN_EMPTY="${FIXTURES}/empty.xml" \
     FAKE_LDID_CONTRACT="${CONTRACT}" \
     FAKE_LDID_EXECUTABLE="${EXECUTABLE_PATH}" \
+    FAKE_LDID_APP="${APP_FIXTURE}" \
     FAKE_LDID_MODE="${ldid_mode}" \
     FAKE_LDID_VALID="${FIXTURES}/valid.xml" \
     FAKE_LDID_EMPTY="${FIXTURES}/empty.xml" \
@@ -279,6 +306,29 @@ assert_failure fake-ldid-empty-dictionary 'Entitlement contract mismatch: {}' ru
 assert_failure fake-ldid-empty-output 'ldid returned no signed entitlements' run_fake_ldid empty-output valid bash "${BUILD_SCRIPT}" --sign-with-ldid "${BIN_DIR}/ldid" "${CONTRACT}" "${EXECUTABLE_PATH}"
 assert_failure fake-ldid-extract-error 'Failed to extract ldid-signed entitlements' run_fake_ldid extract-error valid bash "${BUILD_SCRIPT}" --sign-with-ldid "${BIN_DIR}/ldid" "${CONTRACT}" "${EXECUTABLE_PATH}"
 assert_failure sign-with-ldid-arity 'Usage:' bash "${BUILD_SCRIPT}" --sign-with-ldid
+
+run_fake_ldid_app() {
+  local ldid_mode="$1"
+  local codesign_mode="$2"
+  shift 2
+  PATH="${BIN_DIR}:${PATH}" \
+    FAKE_CODESIGN_APP="${APP_FIXTURE}" \
+    FAKE_CODESIGN_ALLOWED_TARGETS="${APP_FIXTURE}:${APP_EXECUTABLE}" \
+    FAKE_CODESIGN_MODE="${codesign_mode}" \
+    FAKE_CODESIGN_VALID="${FIXTURES}/valid.xml" \
+    FAKE_CODESIGN_EMPTY="${FIXTURES}/empty.xml" \
+    FAKE_LDID_CONTRACT="${CONTRACT}" \
+    FAKE_LDID_EXECUTABLE="${APP_EXECUTABLE}" \
+    FAKE_LDID_APP="${APP_FIXTURE}" \
+    FAKE_LDID_MODE="${ldid_mode}" \
+    FAKE_LDID_VALID="${FIXTURES}/valid.xml" \
+    FAKE_LDID_EMPTY="${FIXTURES}/empty.xml" \
+    "$@"
+}
+
+assert_success fake-ldid-app-valid run_fake_ldid_app valid valid bash "${BUILD_SCRIPT}" --sign-app-with-ldid "${BIN_DIR}/ldid" "${CONTRACT}" "${APP_FIXTURE}" "${APP_EXECUTABLE}"
+assert_failure fake-ldid-app-sign-error 'ldid failed to sign the app bundle' run_fake_ldid_app app-sign-error valid bash "${BUILD_SCRIPT}" --sign-app-with-ldid "${BIN_DIR}/ldid" "${CONTRACT}" "${APP_FIXTURE}" "${APP_EXECUTABLE}"
+assert_failure sign-app-with-ldid-arity 'Usage:' bash "${BUILD_SCRIPT}" --sign-app-with-ldid
 
 readonly EXECUTABLE_SHA256="$(python3 - "${EXECUTABLE_PATH}" <<'PY'
 import hashlib
@@ -340,6 +390,34 @@ PY
       "${LDID_PATH}" -e "${REAL_LDID_EXECUTABLE}" >&2 || true
       exit 1
     fi
+
+    readonly REAL_LDID_APP="${TEMP_ROOT}/RealLdidFixture.app"
+    readonly REAL_LDID_APP_EXECUTABLE="${REAL_LDID_APP}/RealLdidFixture"
+    mkdir -p "${REAL_LDID_APP}"
+    cp "${REAL_LDID_EXECUTABLE}" "${REAL_LDID_APP_EXECUTABLE}"
+    printf 'resource fixture' >"${REAL_LDID_APP}/Resource.txt"
+    python3 - "${REAL_LDID_APP}/Info.plist" <<'PY'
+import plistlib
+import sys
+with open(sys.argv[1], "wb") as destination:
+    plistlib.dump(
+        {
+            "CFBundleExecutable": "RealLdidFixture",
+            "CFBundleIdentifier": "com.juyang.CangJie",
+            "CFBundleName": "RealLdidFixture",
+            "CFBundlePackageType": "APPL",
+            "MinimumOSVersion": "16.6",
+            "UIDeviceFamily": [2],
+        },
+        destination,
+    )
+PY
+    assert_success real-ldid-app bash "${BUILD_SCRIPT}" --sign-app-with-ldid "${LDID_PATH}" "${CONTRACT}" "${REAL_LDID_APP}" "${REAL_LDID_APP_EXECUTABLE}"
+    [[ -f "${REAL_LDID_APP}/_CodeSignature/CodeResources" && ! -L "${REAL_LDID_APP}/_CodeSignature/CodeResources" ]] || {
+      echo 'real ldid app did not produce a regular CodeResources file' >&2
+      exit 1
+    }
+    assert_success real-ldid-app-verify bash "${BUILD_SCRIPT}" --verify-signed-entitlements "${REAL_LDID_APP}"
   fi
 fi
 

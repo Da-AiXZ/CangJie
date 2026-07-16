@@ -252,6 +252,50 @@ sign_executable_with_ldid() {
   extract_and_verify_codesign_executable_entitlements "${executable_path}" "${codesign_entitlements}" "${codesign_entitlements_diagnostics}"
 }
 
+
+verify_code_resources() {
+  local app_path="$1"
+  local resources_path="${app_path}/_CodeSignature/CodeResources"
+  [[ -f "${resources_path}" && ! -L "${resources_path}" && -s "${resources_path}" ]] || fail "Signed app CodeResources is missing, unsafe, or empty: ${resources_path}"
+}
+
+sign_app_with_ldid() {
+  local ldid_path="$1"
+  local entitlements_path="$2"
+  local app_path="$3"
+  local executable_path="$4"
+  local diagnostics_root="$5"
+  [[ -x "${ldid_path}" && -f "${ldid_path}" && ! -L "${ldid_path}" ]] || fail "ldid executable is missing or unsafe: ${ldid_path}"
+  [[ -f "${entitlements_path}" && ! -L "${entitlements_path}" ]] || fail "Entitlements file is missing or unsafe: ${entitlements_path}"
+  [[ -d "${app_path}" && ! -L "${app_path}" ]] || fail "App bundle is missing or unsafe: ${app_path}"
+  [[ -f "${executable_path}" && ! -L "${executable_path}" ]] || fail "Main executable is missing or unsafe: ${executable_path}"
+  [[ "${executable_path}" == "${app_path}/"* ]] || fail "Main executable is outside the app bundle: ${executable_path}"
+  mkdir -p "${diagnostics_root}"
+  local signing_diagnostics="${diagnostics_root}/ldid-app-sign.stderr"
+  local app_codesign_diagnostics="${diagnostics_root}/codesign-app-verify.stderr"
+  local executable_codesign_diagnostics="${diagnostics_root}/codesign-executable-verify.stderr"
+  local extracted_entitlements="${diagnostics_root}/ldid-entitlements.plist"
+  local extraction_diagnostics="${diagnostics_root}/ldid-entitlements.stderr"
+  local codesign_entitlements="${diagnostics_root}/codesign-executable-entitlements.plist"
+  local codesign_entitlements_diagnostics="${diagnostics_root}/codesign-executable-entitlements.stderr"
+  local requirements_path="${diagnostics_root}/designated-requirement.bin"
+  local requirements_diagnostics="${diagnostics_root}/csreq.stderr"
+  rm -f "${signing_diagnostics}" "${app_codesign_diagnostics}" "${executable_codesign_diagnostics}" "${extracted_entitlements}" "${extraction_diagnostics}" "${codesign_entitlements}" "${codesign_entitlements_diagnostics}" "${requirements_path}" "${requirements_diagnostics}"
+  compile_designated_requirement "${EXPECTED_BUNDLE_ID}" "${requirements_path}" "${requirements_diagnostics}"
+
+  if ! "${ldid_path}" -w -Cadhoc "-I${EXPECTED_BUNDLE_ID}" "-Q${requirements_path}" "-S${entitlements_path}" "${app_path}" >/dev/null 2>"${signing_diagnostics}"; then
+    cat "${signing_diagnostics}" >&2
+    rm -f "${signing_diagnostics}"
+    fail "ldid failed to sign the app bundle"
+  fi
+  rm -f "${signing_diagnostics}"
+  verify_code_resources "${app_path}"
+  verify_code_signature "${app_path}" "${app_codesign_diagnostics}"
+  verify_executable_signature "${executable_path}" "${executable_codesign_diagnostics}"
+  extract_and_verify_ldid_entitlements "${ldid_path}" "${executable_path}" "${extracted_entitlements}" "${extraction_diagnostics}"
+  extract_and_verify_codesign_executable_entitlements "${executable_path}" "${codesign_entitlements}" "${codesign_entitlements_diagnostics}"
+}
+
 verify_final_executable() {
   require_tool shasum
   require_tool codesign
@@ -409,6 +453,13 @@ case "${1:-}" in
     verification_root="$(mktemp -d)"
     trap 'rm -rf "${verification_root}"' EXIT
     sign_executable_with_ldid "$2" "$3" "$4" "${verification_root}"
+    exit 0
+    ;;
+  --sign-app-with-ldid)
+    [[ "$#" == "5" && -n "${2:-}" && -n "${3:-}" && -n "${4:-}" && -n "${5:-}" ]] || fail "Usage: $0 --sign-app-with-ldid <ldid> <entitlements.plist> <App.app> <executable>"
+    verification_root="$(mktemp -d)"
+    trap 'rm -rf "${verification_root}"' EXIT
+    sign_app_with_ldid "$2" "$3" "$4" "$5" "${verification_root}"
     exit 0
     ;;
   --verify-final-executable)
@@ -582,7 +633,7 @@ read -r LDID_ASSET LDID_SHA256 LDID_ARCH LDID_EXTRA <<< "${LDID_METADATA}"
 [[ -n "${LDID_ASSET}" && -n "${LDID_SHA256}" && -n "${LDID_ARCH}" && -z "${LDID_EXTRA}" ]] || fail "Invalid pinned ldid metadata"
 readonly LDID_ASSET LDID_SHA256 LDID_ARCH
 readonly UNSIGNED_EXECUTABLE_SHA256="$(shasum -a 256 "${EXECUTABLE}" | awk '{print $1}')"
-sign_executable_with_ldid "${LDID_PATH}" "${ENTITLEMENTS_CONTRACT}" "${EXECUTABLE}" "${OUT}/signing"
+sign_app_with_ldid "${LDID_PATH}" "${ENTITLEMENTS_CONTRACT}" "${APP}" "${EXECUTABLE}" "${OUT}/signing"
 readonly SIGNED_EXECUTABLE_SHA256="$(shasum -a 256 "${EXECUTABLE}" | awk '{print $1}')"
 [[ "${SIGNED_EXECUTABLE_SHA256}" != "${UNSIGNED_EXECUTABLE_SHA256}" ]] || fail "ldid did not change the main executable signature"
 
@@ -595,7 +646,11 @@ fi
 cp "${OUT}/signing/ldid-entitlements.plist" "${SIGNED_ENTITLEMENTS}"
 
 cp -R "${APP}" "${PAYLOAD}/CangJie.app"
-readonly PAYLOAD_EXECUTABLE="${PAYLOAD}/CangJie.app/${EXECUTABLE_NAME}"
+readonly PAYLOAD_APP="${PAYLOAD}/CangJie.app"
+readonly PAYLOAD_EXECUTABLE="${PAYLOAD_APP}/${EXECUTABLE_NAME}"
+verify_code_resources "${PAYLOAD_APP}"
+verify_code_signature "${PAYLOAD_APP}" "${OUT}/payload-verification/codesign-app-verify.stderr"
+extract_and_verify_signed_entitlements "${PAYLOAD_APP}" "${OUT}/payload-verification/app-entitlements.plist" "${OUT}/payload-verification/app-entitlements.stderr"
 verify_final_executable "${LDID_PATH}" "${PAYLOAD_EXECUTABLE}" "${SIGNED_EXECUTABLE_SHA256}" "${OUT}/payload-verification"
 cd "${OUT}"
 zip -qry "${IPA_NAME}" Payload
@@ -645,6 +700,9 @@ if find "${FINAL_APP}" -type l -print -quit | grep -q .; then
   fail "Final IPA app contains a symbolic link"
 fi
 cmp -s "${INFO_PLIST}" "${FINAL_INFO_PLIST}" || fail "Final IPA Info.plist differs from the validated build"
+verify_code_resources "${FINAL_APP}"
+verify_code_signature "${FINAL_APP}" "${OUT}/ipa-executable-verification/codesign-app-verify.stderr"
+extract_and_verify_signed_entitlements "${FINAL_APP}" "${OUT}/ipa-executable-verification/app-entitlements.plist" "${OUT}/ipa-executable-verification/app-entitlements.stderr"
 verify_final_executable "${LDID_PATH}" "${FINAL_EXECUTABLE}" "${SIGNED_EXECUTABLE_SHA256}" "${OUT}/ipa-executable-verification"
 readonly FINAL_ARCHS="$(lipo -archs "${FINAL_EXECUTABLE}" | xargs)"
 [[ "${FINAL_ARCHS}" == "arm64" ]] || fail "Final IPA executable architecture mismatch: ${FINAL_ARCHS}"
