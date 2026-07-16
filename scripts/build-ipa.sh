@@ -308,9 +308,17 @@ sign_app_with_ldid() {
   verify_code_signature "${app_path}" "${app_codesign_diagnostics}"
   verify_executable_signature "${executable_path}" "${executable_codesign_diagnostics}"
   if ! extract_and_verify_ldid_entitlements "${ldid_path}" "${executable_path}" "${extracted_entitlements}" "${extraction_diagnostics}"; then
+    printf '%s\n' 'ldid entitlement diagnostic: raw extraction' >&2
+    cat "${extracted_entitlements}" >&2 || true
+    printf '%s\n' 'ldid entitlement diagnostic: codesign details' >&2
+    codesign -dvv "${executable_path}" >&2 || true
     fail "ldid entitlement verification failed for the app executable"
   fi
   if ! extract_and_verify_codesign_executable_entitlements "${executable_path}" "${codesign_entitlements}" "${codesign_entitlements_diagnostics}"; then
+    printf '%s\n' 'codesign entitlement diagnostic: raw extraction' >&2
+    cat "${codesign_entitlements}" >&2 || true
+    printf '%s\n' 'codesign entitlement diagnostic: ldid extraction' >&2
+    "${ldid_path}" -e "${executable_path}" >&2 || true
     fail "codesign entitlement verification failed for the app executable"
   fi
 }
