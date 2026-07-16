@@ -20,6 +20,7 @@ final class AppViewModel: ObservableObject {
     @Published private(set) var planBody = ""
     @Published private(set) var planAwaitingApproval = false
     @Published private(set) var interviewStep = 0
+    @Published private(set) var lastToolReceipt: ToolReceipt?
 
     private static let maximumStreamOutputBytes = 256 * 1_024
     private let database: AppDatabase?
@@ -67,6 +68,7 @@ final class AppViewModel: ObservableObject {
         status = databaseState.status
         reloadProjects()
         restorePlanningArtifact()
+        if let database { lastToolReceipt = try? database.latestToolReceipt() }
 
         do {
             hasStoredKey = try keychain.contains(account: "m0-probe")
@@ -114,6 +116,9 @@ final class AppViewModel: ObservableObject {
                 let project = try database?.createProject(title: "Untitled Novel", premise: text)
                 reloadProjects()
                 conversationMessages.append(project.map { "Agent: Project created: \($0.title)" } ?? "Agent: Database unavailable; proposal not executed")
+                if let project, let database {
+                    lastToolReceipt = try? database.recordToolReceipt(toolID: "project.create", inputSummary: text, outcome: "completed")
+                }
                 status = project == nil ? "Project tool unavailable" : "Verified: project.create"
                 if project != nil { conversationMessages.append("Agent: " + interviewQuestion) }
             } catch { conversationMessages.append("Agent: Project creation failed"); status = "Project tool failed" }

@@ -77,6 +77,14 @@ final class AppDatabaseTests: XCTestCase {
         XCTAssertEqual(restored, saved)
     }
 
+
+    func testToolReceiptRoundTripIsAuditable() throws {
+        let (database, directory) = try makeDatabase()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let receipt = try database.recordToolReceipt(toolID: "project.create", inputSummary: "premise", outcome: "completed", now: Date(timeIntervalSince1970: 400))
+        XCTAssertEqual(try database.latestToolReceipt(), receipt)
+    }
+
     private func makeDatabase() throws -> (AppDatabase, URL) {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)

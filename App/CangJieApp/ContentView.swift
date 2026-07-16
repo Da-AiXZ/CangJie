@@ -91,6 +91,10 @@ struct ContentView: View {
         VStack(alignment: .leading, spacing: 12) {
             Text("Conversation artifacts").font(.headline)
             Text("Projects: \(model.projects.count)")
+            if let receipt = model.lastToolReceipt {
+                Text("Last tool: \(receipt.toolID)").font(.footnote)
+                Text("Outcome: \(receipt.outcome)").font(.footnote).foregroundStyle(.secondary)
+            }
             Divider()
             Text("Tool receipts, plans, diffs, approvals, and chapter versions will appear here.").font(.footnote).foregroundStyle(.secondary)
             Spacer()

@@ -1,6 +1,14 @@
 import Foundation
 import GRDB
 
+struct ToolReceipt: Identifiable, Equatable {
+    let id: UUID
+    let toolID: String
+    let inputSummary: String
+    let outcome: String
+    let createdAt: Date
+}
+
 struct AgentArtifact: Identifiable, Equatable {
     let id: UUID
     let kind: String
@@ -151,6 +159,21 @@ final class AppDatabase {
         }
     }
 
+    func recordToolReceipt(toolID: String, inputSummary: String, outcome: String, now: Date = Date()) throws -> ToolReceipt {
+        let receipt = ToolReceipt(id: UUID(), toolID: toolID, inputSummary: inputSummary, outcome: outcome, createdAt: now)
+        try queue.write { db in
+            try db.execute(sql: "INSERT INTO toolReceipt (id, toolID, inputSummary, outcome, createdAt) VALUES (?, ?, ?, ?, ?)", arguments: [receipt.id.uuidString, receipt.toolID, receipt.inputSummary, receipt.outcome, receipt.createdAt.timeIntervalSince1970])
+        }
+        return receipt
+    }
+
+    func latestToolReceipt() throws -> ToolReceipt? {
+        try queue.read { db in
+            guard let row = try Row.fetchOne(db, sql: "SELECT * FROM toolReceipt ORDER BY createdAt DESC LIMIT 1"), let id = UUID(uuidString: row["id"]) else { return nil }
+            return ToolReceipt(id: id, toolID: row["toolID"], inputSummary: row["inputSummary"], outcome: row["outcome"], createdAt: Date(timeIntervalSince1970: row["createdAt"]))
+        }
+    }
+
     func saveArtifact(kind: String, title: String, body: String, status: String, now: Date = Date()) throws -> AgentArtifact {
         let artifact = AgentArtifact(id: UUID(), kind: kind, title: title, body: body, status: status, updatedAt: now)
         try queue.write { db in
@@ -274,6 +297,15 @@ final class AppDatabase {
                 table.column("premise", .text).notNull()
                 table.column("createdAt", .double).notNull()
                 table.column("updatedAt", .double).notNull()
+            }
+        }
+        migrator.registerMigration("m1-tool-receipts") { db in
+            try db.create(table: "toolReceipt") { table in
+                table.column("id", .text).primaryKey()
+                table.column("toolID", .text).notNull().indexed()
+                table.column("inputSummary", .text).notNull()
+                table.column("outcome", .text).notNull()
+                table.column("createdAt", .double).notNull()
             }
         }
         migrator.registerMigration("m1-agent-artifacts") { db in
