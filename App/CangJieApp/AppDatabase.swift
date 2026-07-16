@@ -6,6 +6,10 @@ struct ToolReceipt: Identifiable, Equatable {
     let toolID: String
     let inputSummary: String
     let outcome: String
+    let conversationID: UUID?
+    let projectID: UUID?
+    let idempotencyKey: String?
+    let outputReference: String?
     let createdAt: Date
 }
 
@@ -15,6 +19,8 @@ struct AgentArtifact: Identifiable, Equatable {
     let title: String
     let body: String
     let status: String
+    let conversationID: UUID?
+    let projectID: UUID?
     let updatedAt: Date
 }
 
@@ -45,10 +51,13 @@ enum AppDatabaseError: Error {
     case writeAheadLoggingUnavailable(actualMode: String)
     case invalidCheckpointIdentifier
     case checkpointTaskMismatch
+    case invalidAgentSession
+    case invalidAgentRun
+    case invalidToolReceiptReference
 }
 
 final class AppDatabase {
-    private let queue: DatabaseQueue
+    let queue: DatabaseQueue
 
     init(path: String) throws {
         var configuration = Configuration()
@@ -159,23 +168,40 @@ final class AppDatabase {
         }
     }
 
-    func recordToolReceipt(toolID: String, inputSummary: String, outcome: String, now: Date = Date()) throws -> ToolReceipt {
-        let receipt = ToolReceipt(id: UUID(), toolID: toolID, inputSummary: inputSummary, outcome: outcome, createdAt: now)
+    func recordToolReceipt(
+        toolID: String,
+        inputSummary: String,
+        outcome: String,
+        idempotencyKey: String? = nil,
+        outputReference: String? = nil,
+        now: Date = Date()
+    ) throws -> ToolReceipt {
+        let receipt = ToolReceipt(
+            id: UUID(),
+            toolID: toolID,
+            inputSummary: inputSummary,
+            outcome: outcome,
+            conversationID: nil,
+            projectID: nil,
+            idempotencyKey: idempotencyKey,
+            outputReference: outputReference,
+            createdAt: now
+        )
         try queue.write { db in
-            try db.execute(sql: "INSERT INTO toolReceipt (id, toolID, inputSummary, outcome, createdAt) VALUES (?, ?, ?, ?, ?)", arguments: [receipt.id.uuidString, receipt.toolID, receipt.inputSummary, receipt.outcome, receipt.createdAt.timeIntervalSince1970])
+            try Self.insertToolReceipt(receipt, in: db)
         }
         return receipt
     }
 
     func latestToolReceipt() throws -> ToolReceipt? {
         try queue.read { db in
-            guard let row = try Row.fetchOne(db, sql: "SELECT * FROM toolReceipt ORDER BY createdAt DESC LIMIT 1"), let id = UUID(uuidString: row["id"]) else { return nil }
-            return ToolReceipt(id: id, toolID: row["toolID"], inputSummary: row["inputSummary"], outcome: row["outcome"], createdAt: Date(timeIntervalSince1970: row["createdAt"]))
+            guard let row = try Row.fetchOne(db, sql: "SELECT * FROM toolReceipt ORDER BY createdAt DESC, rowid DESC LIMIT 1") else { return nil }
+            return Self.decodeToolReceipt(row)
         }
     }
 
     func saveArtifact(kind: String, title: String, body: String, status: String, now: Date = Date()) throws -> AgentArtifact {
-        let artifact = AgentArtifact(id: UUID(), kind: kind, title: title, body: body, status: status, updatedAt: now)
+        let artifact = AgentArtifact(id: UUID(), kind: kind, title: title, body: body, status: status, conversationID: nil, projectID: nil, updatedAt: now)
         try queue.write { db in
             try db.execute(sql: "INSERT INTO agentArtifact (id, kind, title, body, status, updatedAt) VALUES (?, ?, ?, ?, ?, ?)", arguments: [artifact.id.uuidString, artifact.kind, artifact.title, artifact.body, artifact.status, artifact.updatedAt.timeIntervalSince1970])
         }
@@ -185,7 +211,18 @@ final class AppDatabase {
     func latestArtifact(kind: String) throws -> AgentArtifact? {
         try queue.read { db in
             guard let row = try Row.fetchOne(db, sql: "SELECT * FROM agentArtifact WHERE kind = ? ORDER BY updatedAt DESC LIMIT 1", arguments: [kind]), let id = UUID(uuidString: row["id"]) else { return nil }
-            return AgentArtifact(id: id, kind: row["kind"], title: row["title"], body: row["body"], status: row["status"], updatedAt: Date(timeIntervalSince1970: row["updatedAt"]))
+            let conversationText: String? = row["conversationID"]
+            let projectText: String? = row["projectID"]
+            return AgentArtifact(
+                id: id,
+                kind: row["kind"],
+                title: row["title"],
+                body: row["body"],
+                status: row["status"],
+                conversationID: conversationText.flatMap { UUID(uuidString: $0) },
+                projectID: projectText.flatMap { UUID(uuidString: $0) },
+                updatedAt: Date(timeIntervalSince1970: row["updatedAt"])
+            )
         }
     }
 
@@ -316,6 +353,50 @@ final class AppDatabase {
                 table.column("body", .text).notNull()
                 table.column("status", .text).notNull()
                 table.column("updatedAt", .double).notNull()
+            }
+        }
+        migrator.registerMigration("m1-agent-runtime") { db in
+            try db.alter(table: "toolReceipt") { table in
+                table.add(column: "conversationID", .text)
+                table.add(column: "projectID", .text)
+                table.add(column: "idempotencyKey", .text)
+                table.add(column: "outputReference", .text)
+            }
+            try db.alter(table: "agentArtifact") { table in
+                table.add(column: "conversationID", .text)
+                table.add(column: "projectID", .text)
+            }
+            try db.execute(sql: "CREATE UNIQUE INDEX toolReceipt_on_idempotencyKey ON toolReceipt(idempotencyKey)")
+            try db.create(table: "agentConversation") { table in
+                table.column("id", .text).primaryKey()
+                table.column("title", .text).notNull()
+                table.column("createdAt", .double).notNull()
+                table.column("updatedAt", .double).notNull().indexed()
+            }
+            try db.create(table: "agentMessage") { table in
+                table.column("id", .text).primaryKey()
+                table.column("conversationID", .text).notNull().indexed().references("agentConversation", onDelete: .cascade)
+                table.column("role", .text).notNull()
+                table.column("content", .text).notNull()
+                table.column("createdAt", .double).notNull().indexed()
+            }
+            try db.create(table: "agentSession") { table in
+                table.column("conversationID", .text).primaryKey().references("agentConversation", onDelete: .cascade)
+                table.column("focusedProjectID", .text)
+                table.column("interviewStep", .integer).notNull()
+                table.column("currentQuestion", .text).notNull()
+                table.column("interviewAnswersJSON", .text).notNull()
+                table.column("updatedAt", .double).notNull()
+            }
+            try db.create(table: "agentRun") { table in
+                table.column("id", .text).primaryKey()
+                table.column("conversationID", .text).notNull().indexed().references("agentConversation", onDelete: .cascade)
+                table.column("kind", .text).notNull()
+                table.column("status", .text).notNull().indexed()
+                table.column("idempotencyKey", .text).notNull().unique()
+                table.column("currentStage", .text).notNull()
+                table.column("startedAt", .double).notNull()
+                table.column("updatedAt", .double).notNull().indexed()
             }
         }
         return migrator

@@ -25,6 +25,7 @@ struct ContentView: View {
                 Section("Navigate") {
                     NavigationLink("Conversations", destination: Text("Conversation history"))
                     NavigationLink("Novel Projects", destination: projectPage)
+                        .accessibilityIdentifier("novel-projects-link")
                     NavigationLink("Workbenches", destination: Text("Novel workbenches"))
                     NavigationLink("Research", destination: Text("Research center"))
                 }
@@ -57,6 +58,7 @@ struct ContentView: View {
             HStack {
                 VStack(alignment: .leading) {
                     Text("Agent Control Plane").font(.title2.bold())
+                        .accessibilityIdentifier("agent-control-plane-title")
                     Text(model.status).font(.caption).foregroundStyle(.secondary)
                 }
                 Spacer()
@@ -81,7 +83,9 @@ struct ContentView: View {
                 }.padding().background(.background, in: RoundedRectangle(cornerRadius: 12)).padding(.horizontal)
             }
             HStack(alignment: .bottom) {
-                TextEditor(text: $model.draft).frame(minHeight: 70, maxHeight: 130).padding(6).background(.background, in: RoundedRectangle(cornerRadius: 12))
+                TextEditor(text: $model.draft)
+                    .accessibilityIdentifier("agent-composer")
+                    .frame(minHeight: 70, maxHeight: 130).padding(6).background(.background, in: RoundedRectangle(cornerRadius: 12))
                 Button { model.sendAgentMessage() } label: { Image(systemName: "arrow.up.circle.fill").font(.system(size: 32)) }.disabled(model.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }.padding()
         }

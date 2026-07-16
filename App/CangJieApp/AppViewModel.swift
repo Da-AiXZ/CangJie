@@ -5,7 +5,7 @@ import SwiftUI
 @MainActor
 final class AppViewModel: ObservableObject {
     @Published var draft = ""
-    @Published var status = "正在初始化…"
+    @Published var status = "Initializing..."
     @Published var apiKeyInput = ""
     @Published var hasStoredKey = false
     @Published var streamURL = ""
@@ -16,14 +16,16 @@ final class AppViewModel: ObservableObject {
     @Published var isArtifactDrawerPresented = false
     @Published var conversationMessages: [String] = []
     @Published var isAgentWorking = false
-    @Published private(set) var interviewQuestion = "What is the one-sentence hook that makes this novel impossible to confuse with another?"
+    @Published private(set) var interviewQuestion = AgentRuntime.interviewQuestions[0]
     @Published private(set) var planBody = ""
     @Published private(set) var planAwaitingApproval = false
     @Published private(set) var interviewStep = 0
     @Published private(set) var lastToolReceipt: ToolReceipt?
+    @Published private(set) var latestAgentRun: AgentRunSnapshot?
 
     private static let maximumStreamOutputBytes = 256 * 1_024
     private let database: AppDatabase?
+    private let runtime: AgentRuntime?
     private let keychain: any SecretRepository
     private let taskID: UUID
     private var streamTask: Task<Void, Never>?
@@ -51,29 +53,38 @@ final class AppViewModel: ObservableObject {
             let restoredDraft = try resolved.loadDraft()?.content ?? ""
             let restoredStatus: String
             if let checkpoint = try resolved.latestCheckpoint(taskID: taskID) {
-                if Self.payloadHash(for: restoredDraft) == checkpoint.payloadHash {
-                    restoredStatus = "已恢复 checkpoint #\(checkpoint.sequence)"
-                } else {
-                    restoredStatus = "草稿比 checkpoint 更新，请手动建立新检查点"
-                }
+                restoredStatus = Self.payloadHash(for: restoredDraft) == checkpoint.payloadHash
+                    ? "Restored checkpoint #\(checkpoint.sequence)"
+                    : "Draft is newer than the latest checkpoint"
             } else {
-                restoredStatus = "SQLite 已就绪，尚无 checkpoint"
+                restoredStatus = "SQLite ready; no checkpoint yet"
             }
             databaseState = (resolved, restoredDraft, restoredStatus)
         } catch {
-            databaseState = (nil, "", "SQLite 初始化失败（DB-INIT）")
+            databaseState = (nil, "", "SQLite initialization failed (DB-INIT)")
         }
+
         self.database = databaseState.database
+        if let resolvedDatabase = databaseState.database {
+            self.runtime = try? AgentRuntime(database: resolvedDatabase)
+        } else {
+            self.runtime = nil
+        }
         draft = databaseState.draft
         status = databaseState.status
-        reloadProjects()
-        restorePlanningArtifact()
-        if let database { lastToolReceipt = try? database.latestToolReceipt() }
+
+        if let runtime {
+            do {
+                apply(runtimeSnapshot: try runtime.restore())
+            } catch {
+                status = "\(status); Agent restore failed (AGENT-RESTORE)"
+            }
+        }
 
         do {
             hasStoredKey = try keychain.contains(account: "m0-probe")
         } catch {
-            status = "\(status)；Keychain 状态不可用（KEY-READ）"
+            status = "\(status); Keychain unavailable (KEY-READ)"
         }
     }
 
@@ -83,82 +94,62 @@ final class AppViewModel: ObservableObject {
         catch { status = "Project list failed (DB-PROJECT-LIST)" }
     }
 
-    private func restorePlanningArtifact() {
-        guard let database else { return }
-        do {
-            if let artifact = try database.latestArtifact(kind: "openingPlan") {
-                planBody = artifact.body
-                planAwaitingApproval = artifact.status == "waitingApproval"
-                interviewStep = artifact.status == "approved" ? 3 : 2
-            }
-        } catch { status = "Planning restore failed (DB-ARTIFACT-READ)" }
-    }
-
     func approveOpeningPlan() {
-        guard let database, !planBody.isEmpty else { return }
+        guard let runtime, !planBody.isEmpty else { return }
+        isAgentWorking = true
+        defer { isAgentWorking = false }
         do {
-            _ = try database.saveArtifact(kind: "openingPlan", title: "Opening plan", body: planBody, status: "approved")
-            planAwaitingApproval = false
-            conversationMessages.append("Agent: Opening plan approved and persisted. Chapter planning is now unlocked.")
-            status = "Verified: opening plan approved"
-        } catch { status = "Plan approval failed (DB-ARTIFACT-WRITE)" }
+            let result = try runtime.approveOpeningPlan()
+            apply(runtimeSnapshot: result.snapshot)
+            status = result.status
+        } catch {
+            status = "Plan approval failed (AGENT-APPROVAL)"
+        }
     }
 
     func sendAgentMessage() {
         let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
-        conversationMessages.append("You: " + text)
+        guard let runtime else {
+            conversationMessages.append("You: " + text)
+            conversationMessages.append("Agent: Database unavailable; no tool was executed.")
+            draft = ""
+            status = "Agent runtime unavailable"
+            return
+        }
+
         draft = ""
-        let creationIntent = text.localizedCaseInsensitiveContains("create") || text.localizedCaseInsensitiveContains("novel") || text.contains("\u{521B}\u{5EFA}") || text.contains("\u{5C0F}\u{8BF4}")
-        if projects.isEmpty && creationIntent {
-            isAgentWorking = true
-            do {
-                let project = try database?.createProject(title: "Untitled Novel", premise: text)
-                reloadProjects()
-                conversationMessages.append(project.map { "Agent: Project created: \($0.title)" } ?? "Agent: Database unavailable; proposal not executed")
-                if let project, let database {
-                    lastToolReceipt = try? database.recordToolReceipt(toolID: "project.create", inputSummary: text, outcome: "completed")
-                }
-                status = project == nil ? "Project tool unavailable" : "Verified: project.create"
-                if project != nil { conversationMessages.append("Agent: " + interviewQuestion) }
-            } catch { conversationMessages.append("Agent: Project creation failed"); status = "Project tool failed" }
-            isAgentWorking = false
-            return
+        isAgentWorking = true
+        defer { isAgentWorking = false }
+        do {
+            let result = try runtime.handleUserMessage(text)
+            apply(runtimeSnapshot: result.snapshot)
+            status = result.status
+        } catch {
+            status = "Agent turn failed (AGENT-TURN)"
         }
-        guard !projects.isEmpty else {
-            conversationMessages.append("Agent: Tell me the idea or ask me to create a novel, and I will lead the next step.")
-            return
-        }
-        guard !planAwaitingApproval else {
-            conversationMessages.append("Agent: The opening plan is waiting for your approval. Review the plan card before we continue.")
-            return
-        }
-        interviewStep += 1
-        if interviewStep < 3 {
-            let questions = [
-                "Who is the protagonist before the first major change, and what do they want right now?",
-                "What concrete cost or danger makes the first victory matter?"
-            ]
-            interviewQuestion = questions[min(interviewStep - 1, questions.count - 1)]
-            conversationMessages.append("Agent: " + interviewQuestion)
-        } else {
-            planBody = "Opening plan\n\nHook: " + text + "\n\nChapter 1 promise: reveal the protagonist's immediate desire, establish the first pressure, and end on an irreversible question.\n\nGuardrails: preserve the user's confirmed premise; do not add unapproved genre contamination or character knowledge."
-            do {
-                _ = try database?.saveArtifact(kind: "openingPlan", title: "Opening plan", body: planBody, status: "waitingApproval")
-                planAwaitingApproval = true
-                conversationMessages.append("Agent: I have compiled the opening plan. Review it in the artifact drawer and approve it before chapter planning.")
-                status = "Waiting for opening plan approval"
-            } catch { status = "Plan save failed (DB-ARTIFACT-WRITE)" }
-        }
+    }
+
+    private func apply(runtimeSnapshot snapshot: AgentRuntimeSnapshot) {
+        conversationMessages = snapshot.messages.map(\.displayText)
+        projects = snapshot.projects
+        interviewQuestion = snapshot.session.currentQuestion.isEmpty
+            ? AgentRuntime.interviewQuestions[0]
+            : snapshot.session.currentQuestion
+        interviewStep = snapshot.session.interviewStep
+        planBody = snapshot.openingPlan?.body ?? ""
+        planAwaitingApproval = snapshot.openingPlan?.status == "waitingApproval"
+        lastToolReceipt = snapshot.lastReceipt
+        latestAgentRun = snapshot.latestRun
     }
 
     func saveDraft() {
         guard let database else { return }
         do {
             try database.saveDraft(draft)
-            status = "草稿已保存：\(Date().formatted(date: .omitted, time: .standard))"
+            status = "Draft saved: \(Date().formatted(date: .omitted, time: .standard))"
         } catch {
-            status = "草稿保存失败（DB-WRITE）"
+            status = "Draft save failed (DB-WRITE)"
         }
     }
 
@@ -171,9 +162,9 @@ final class AppViewModel: ObservableObject {
                 reason: reason,
                 payloadHash: Self.payloadHash(for: draft)
             )
-            status = "已写入 checkpoint #\(checkpoint.sequence)（\(reason)）"
+            status = "Saved checkpoint #\(checkpoint.sequence) (\(reason))"
         } catch {
-            status = "checkpoint 写入失败（DB-CHECKPOINT）"
+            status = "Checkpoint write failed (DB-CHECKPOINT)"
         }
     }
 
@@ -192,16 +183,16 @@ final class AppViewModel: ObservableObject {
 
     func saveProbeKey() {
         guard !apiKeyInput.isEmpty else {
-            status = "Keychain 测试值不能为空"
+            status = "Keychain test value cannot be empty"
             return
         }
         do {
             try keychain.save(apiKeyInput, account: "m0-probe")
             apiKeyInput = ""
             hasStoredKey = true
-            status = "测试值已保存到 ThisDeviceOnly Keychain"
+            status = "Saved test value in ThisDeviceOnly Keychain"
         } catch {
-            status = "Keychain 写入失败（KEY-WRITE）"
+            status = "Keychain write failed (KEY-WRITE)"
         }
     }
 
@@ -210,9 +201,9 @@ final class AppViewModel: ObservableObject {
             try keychain.delete(account: "m0-probe")
             apiKeyInput = ""
             hasStoredKey = false
-            status = "Keychain 测试值已删除"
+            status = "Keychain test value deleted"
         } catch {
-            status = "Keychain 删除失败（KEY-DELETE）"
+            status = "Keychain delete failed (KEY-DELETE)"
         }
     }
 
@@ -222,7 +213,7 @@ final class AppViewModel: ObservableObject {
         streamGeneration = generation
         streamOutput = ""
         isStreaming = true
-        status = "正在连接 HTTPS SSE…"
+        status = "Connecting to HTTPS SSE..."
 
         streamTask = Task { [weak self] in
             guard let self else { return }
@@ -238,16 +229,16 @@ final class AppViewModel: ObservableObject {
                 }
                 try Task.checkCancellation()
                 guard self.streamGeneration == generation else { return }
-                self.status = "流式探针已完成"
+                self.status = "Streaming probe completed"
             } catch is CancellationError {
                 guard self.streamGeneration == generation else { return }
-                self.status = "流式探针已取消"
+                self.status = "Streaming probe cancelled"
             } catch let error as StreamingHTTPError {
                 guard self.streamGeneration == generation else { return }
-                self.status = error.errorDescription ?? "流式探针失败（NET-SSE）"
+                self.status = error.errorDescription ?? "Streaming probe failed (NET-SSE)"
             } catch {
                 guard self.streamGeneration == generation else { return }
-                self.status = "流式探针失败（NET-SSE）"
+                self.status = "Streaming probe failed (NET-SSE)"
             }
 
             guard self.streamGeneration == generation else { return }
@@ -258,9 +249,7 @@ final class AppViewModel: ObservableObject {
     }
 
     private static func payloadHash(for text: String) -> String {
-        SHA256.hash(data: Data(text.utf8)).map {
-            String(format: "%02x", $0)
-        }.joined()
+        SHA256.hash(data: Data(text.utf8)).map { String(format: "%02x", $0) }.joined()
     }
 
     func cancelStreamingProbe() {
@@ -268,6 +257,6 @@ final class AppViewModel: ObservableObject {
         streamTask?.cancel()
         streamTask = nil
         isStreaming = false
-        status = "流式探针已取消"
+        status = "Streaming probe cancelled"
     }
 }

@@ -13,6 +13,7 @@ TestResults/
 CangJie.xcodeproj/
 
 # Build and release artifacts
+artifacts/
 *.ipa
 *.app
 *.xcarchive
