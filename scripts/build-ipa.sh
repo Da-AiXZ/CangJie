@@ -300,6 +300,10 @@ sign_app_with_ldid() {
     # failure distinguishes an input Mach-O problem from an ldid output problem.
     printf '%s\n' 'ldid pre-sign diagnostic: executable file' >&2
     file "${executable_path}" >&2 || true
+    printf '%s\n' 'ldid pre-sign diagnostic: entitlement input' >&2
+    wc -c "${entitlements_path}" >&2 || true
+    shasum -a 256 "${entitlements_path}" >&2 || true
+    plutil -p "${entitlements_path}" >&2 || true
     printf '%s\n' 'ldid pre-sign diagnostic: ldid entitlements' >&2
     "${ldid_path}" -e "${executable_path}" >&2 || true
     printf '%s\n' 'ldid pre-sign diagnostic: codesign details' >&2
@@ -337,10 +341,18 @@ sign_app_with_ldid() {
   if ! extract_and_verify_ldid_entitlements "${ldid_path}" "${executable_path}" "${extracted_entitlements}" "${extraction_diagnostics}"; then
     if [[ "${LDID_DIAGNOSTICS:-0}" == "1" && -f "${pre_sign_executable}" ]]; then
       printf '%s\n' 'ldid entitlement diagnostic: variant experiments' >&2
-      for variant in no-special-slots merge-with-special-slots remove-then-sign; do
+      copied_entitlements="${diagnostics_root}/variant-entitlements.plist"
+      cp -p "${entitlements_path}" "${copied_entitlements}"
+      for variant in minimal copied-entitlements no-special-slots merge-with-special-slots remove-then-sign; do
         variant_path="${diagnostics_root}/variant-${variant}"
         cp -p "${pre_sign_executable}" "${variant_path}"
         case "${variant}" in
+          minimal)
+            "${ldid_path}" -Cadhoc "-S${entitlements_path}" "${variant_path}" >/dev/null 2>"${diagnostics_root}/variant-${variant}.stderr" || true
+            ;;
+          copied-entitlements)
+            "${ldid_path}" -Cadhoc "-I${EXPECTED_BUNDLE_ID}" "-Q${requirements_path}" "-S${copied_entitlements}" "${variant_path}" >/dev/null 2>"${diagnostics_root}/variant-${variant}.stderr" || true
+            ;;
           no-special-slots)
             "${ldid_path}" -Cadhoc "-I${EXPECTED_BUNDLE_ID}" "-Q${requirements_path}" "-S${entitlements_path}" "${variant_path}" >/dev/null 2>"${diagnostics_root}/variant-${variant}.stderr" || true
             ;;
