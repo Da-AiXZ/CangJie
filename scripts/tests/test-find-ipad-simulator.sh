@@ -17,7 +17,11 @@ mkdir -p "${MOCK_BIN}" "${MOCK_PROJECT}"
 cat > "${MOCK_BIN}/xcodebuild" <<'MOCK'
 #!/bin/bash
 set -euo pipefail
-printf '%s\n' "${MOCK_DESTINATIONS:?MOCK_DESTINATIONS is required}"
+if [[ -n "${MOCK_DESTINATIONS_AFTER_CREATE:-}" && -e "${MOCK_CREATED_STATE:-/nonexistent}" ]]; then
+  printf '%s\n' "${MOCK_DESTINATIONS_AFTER_CREATE}"
+else
+  printf '%s\n' "${MOCK_DESTINATIONS:?MOCK_DESTINATIONS is required}"
+fi
 MOCK
 
 cat > "${MOCK_BIN}/xcrun" <<'MOCK'
@@ -26,12 +30,36 @@ set -euo pipefail
 [[ "${1:-}" == "simctl" ]] || { echo "Unexpected xcrun command: $*" >&2; exit 2; }
 case "${2:-}" in
   list)
-    [[ "${3:-}" == "devices" && "${4:-}" == "available" ]] || { echo "Unexpected simctl list command: $*" >&2; exit 2; }
-    if [[ "${MOCK_SIMCTL_LIST_EXIT:-0}" != "0" ]]; then
-      echo "simctl list failed" >&2
-      exit "${MOCK_SIMCTL_LIST_EXIT}"
-    fi
-    printf '%s\n' "${MOCK_DEVICES:?MOCK_DEVICES is required}"
+    case "${3:-}" in
+      devices)
+        [[ "${4:-}" == "available" ]] || { echo "Unexpected simctl devices command: $*" >&2; exit 2; }
+        if [[ "${MOCK_SIMCTL_LIST_EXIT:-0}" != "0" ]]; then
+          echo "simctl list failed" >&2
+          exit "${MOCK_SIMCTL_LIST_EXIT}"
+        fi
+        if [[ -n "${MOCK_DEVICES_AFTER_CREATE:-}" && -e "${MOCK_CREATED_STATE:-/nonexistent}" ]]; then
+          printf '%s\n' "${MOCK_DEVICES_AFTER_CREATE}"
+        else
+          printf '%s\n' "${MOCK_DEVICES:?MOCK_DEVICES is required}"
+        fi
+        ;;
+      runtimes)
+        printf '%s\n' "${MOCK_RUNTIMES:-}"
+        ;;
+      devicetypes)
+        printf '%s\n' "${MOCK_DEVICE_TYPES:-}"
+        ;;
+      *)
+        echo "Unexpected simctl list command: $*" >&2
+        exit 2
+        ;;
+    esac
+    ;;
+  create)
+    : > "${MOCK_CREATED_STATE:?MOCK_CREATED_STATE is required}"
+    printf '%s\n' "${MOCK_CREATE_UDID:?MOCK_CREATE_UDID is required}"
+    ;;
+  delete)
     ;;
   boot)
     printf '%s\n' "${3:-missing}" >> "${MOCK_BOOT_LOG:?MOCK_BOOT_LOG is required}"
@@ -54,10 +82,14 @@ run_selector() {
   local devices="$3"
   local boot_exit="${4:-0}"
   local list_exit="${5:-0}"
+  local destinations_after_create="${6:-}"
+  local devices_after_create="${7:-}"
   CASE_OUTPUT_FILE="${TEST_ROOT}/${case_name}.stdout"
   CASE_ERROR_FILE="${TEST_ROOT}/${case_name}.stderr"
   CASE_BOOT_LOG="${TEST_ROOT}/${case_name}.boot.log"
+  CASE_CREATED_STATE="${TEST_ROOT}/${case_name}.created"
   : > "${CASE_BOOT_LOG}"
+  rm -f -- "${CASE_CREATED_STATE}"
 
   set +e
   PATH="${MOCK_BIN}:${PATH}" \
@@ -67,6 +99,12 @@ run_selector() {
     MOCK_BOOT_LOG="${CASE_BOOT_LOG}" \
     MOCK_BOOT_EXIT="${boot_exit}" \
     MOCK_SIMCTL_LIST_EXIT="${list_exit}" \
+    MOCK_DESTINATIONS_AFTER_CREATE="${destinations_after_create}" \
+    MOCK_DEVICES_AFTER_CREATE="${devices_after_create}" \
+    MOCK_CREATED_STATE="${CASE_CREATED_STATE}" \
+    MOCK_RUNTIMES="iOS 18.5 (18.5 - 22F76) - com.apple.CoreSimulator.SimRuntime.iOS-18-5" \
+    MOCK_DEVICE_TYPES="iPad Air (11-inch) (M3) (com.apple.CoreSimulator.SimDeviceType.iPad-Air-11-inch-M3)" \
+    MOCK_CREATE_UDID="${IPAD_C:-CCCCCCCC-CCCC-CCCC-CCCC-CCCCCCCCCCCC}" \
     bash "${SELECTOR}" > "${CASE_OUTPUT_FILE}" 2> "${CASE_ERROR_FILE}"
   CASE_STATUS=$?
   set -e
@@ -122,6 +160,21 @@ run_selector \
   9
 assert_success_with_udid "${IPAD_A}"
 [[ ! -s "${CASE_BOOT_LOG}" ]] || { echo "Booting device was booted again" >&2; exit 1; }
+
+# When the runner has only the generic placeholder, create an eligible iPad and retry discovery.
+run_selector \
+  'create-missing-device' \
+  "Available destinations for the \"CangJie\" scheme:
+    { platform:iOS Simulator, id:dvtdevice-DVTiOSDeviceSimulatorPlaceholder-iphonesimulator:placeholder, name:Any iOS Simulator Device }" \
+  '== Devices ==' \
+  0 \
+  0 \
+  "Available destinations for the \"CangJie\" scheme:
+    { platform:iOS Simulator, arch:arm64, id:${IPAD_C}, OS:18.5, name:iPad CangJie CI }" \
+  "== Devices ==
+    iPad CangJie CI (${IPAD_C}) (Shutdown)"
+assert_success_with_udid "${IPAD_C}"
+[[ -e "${CASE_CREATED_STATE}" ]] || { echo "Expected selector to create a missing simulator" >&2; exit 1; }
 
 # A real simctl failure must remain a command failure.
 run_selector \

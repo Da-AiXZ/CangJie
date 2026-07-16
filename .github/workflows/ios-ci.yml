@@ -77,3 +77,6 @@ jobs:
           path: TestResults/CangJie.xcresult
           if-no-files-found: warn
           retention-days: 7
+      - name: Delete selected Simulator
+        if: always() && steps.simulator.outputs.udid != ''
+        run: xcrun simctl delete "${{ steps.simulator.outputs.udid }}" || echo "::warning::Unable to delete CI Simulator"
