@@ -206,10 +206,12 @@ with open(sys.argv[1], "wb") as destination:
 PY
   /usr/bin/codesign --force --sign - --timestamp=none --entitlements "${CONTRACT}" --generate-entitlement-der "${REAL_APP}"
   assert_success real-codesign bash "${BUILD_SCRIPT}" --verify-signed-entitlements "${REAL_APP}"
+  readonly REAL_EMPTY_APP="${TEMP_ROOT}/RealFixtureWithoutEntitlements.app"
+  cp -R "${REAL_APP}" "${REAL_EMPTY_APP}"
   printf '\0' >>"${REAL_APP}/RealFixture"
   assert_failure real-codesign-tampered 'Signed app failed strict codesign verification' bash "${BUILD_SCRIPT}" --verify-signed-entitlements "${REAL_APP}"
-  /usr/bin/codesign --force --sign - --timestamp=none "${REAL_APP}"
-  assert_failure real-codesign-empty 'codesign returned no signed entitlements' bash "${BUILD_SCRIPT}" --verify-signed-entitlements "${REAL_APP}"
+  /usr/bin/codesign --force --sign - --timestamp=none "${REAL_EMPTY_APP}"
+  assert_failure real-codesign-empty 'codesign returned no signed entitlements' bash "${BUILD_SCRIPT}" --verify-signed-entitlements "${REAL_EMPTY_APP}"
 fi
 
 printf 'build-ipa entitlement contract tests passed\n'
