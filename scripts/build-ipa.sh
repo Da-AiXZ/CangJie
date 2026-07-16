@@ -283,9 +283,16 @@ sign_app_with_ldid() {
   local requirements_diagnostics="${diagnostics_root}/csreq.stderr"
   local info_path="${app_path}/Info.plist"
   local resources_path="${app_path}/_CodeSignature/CodeResources"
+  local pre_sign_executable="${diagnostics_root}/pre-sign-executable"
   [[ -f "${info_path}" && ! -L "${info_path}" ]] || fail "App Info.plist is missing or unsafe: ${info_path}"
   rm -f "${shallow_signing_diagnostics}" "${executable_signing_diagnostics}" "${app_codesign_diagnostics}" "${executable_codesign_diagnostics}" "${extracted_entitlements}" "${extraction_diagnostics}" "${codesign_entitlements}" "${codesign_entitlements_diagnostics}" "${requirements_path}" "${requirements_diagnostics}"
   compile_designated_requirement "${EXPECTED_BUNDLE_ID}" "${requirements_path}" "${requirements_diagnostics}"
+
+  if [[ "${LDID_DIAGNOSTICS:-0}" == "1" ]]; then
+    cp -p "${executable_path}" "${pre_sign_executable}"
+  else
+    rm -f "${pre_sign_executable}"
+  fi
 
   if [[ "${LDID_DIAGNOSTICS:-0}" == "1" ]]; then
     # Xcode may leave a linker-produced LC_CODE_SIGNATURE or entitlement blob
@@ -328,6 +335,32 @@ sign_app_with_ldid() {
   verify_code_signature "${app_path}" "${app_codesign_diagnostics}"
   verify_executable_signature "${executable_path}" "${executable_codesign_diagnostics}"
   if ! extract_and_verify_ldid_entitlements "${ldid_path}" "${executable_path}" "${extracted_entitlements}" "${extraction_diagnostics}"; then
+    if [[ "${LDID_DIAGNOSTICS:-0}" == "1" && -f "${pre_sign_executable}" ]]; then
+      printf '%s\n' 'ldid entitlement diagnostic: variant experiments' >&2
+      for variant in no-special-slots merge-with-special-slots remove-then-sign; do
+        variant_path="${diagnostics_root}/variant-${variant}"
+        cp -p "${pre_sign_executable}" "${variant_path}"
+        case "${variant}" in
+          no-special-slots)
+            "${ldid_path}" -Cadhoc "-I${EXPECTED_BUNDLE_ID}" "-Q${requirements_path}" "-S${entitlements_path}" "${variant_path}" >/dev/null 2>"${diagnostics_root}/variant-${variant}.stderr" || true
+            ;;
+          merge-with-special-slots)
+            "${ldid_path}" -Cadhoc -M "-I${EXPECTED_BUNDLE_ID}" "-Q${requirements_path}" "-E1:${info_path}" "-E3:${resources_path}" "-S${entitlements_path}" "${variant_path}" >/dev/null 2>"${diagnostics_root}/variant-${variant}.stderr" || true
+            ;;
+          remove-then-sign)
+            "${ldid_path}" -r "${variant_path}" >/dev/null 2>"${diagnostics_root}/variant-${variant}.stderr" || true
+            "${ldid_path}" -Cadhoc "-I${EXPECTED_BUNDLE_ID}" "-Q${requirements_path}" "-E1:${info_path}" "-E3:${resources_path}" "-S${entitlements_path}" "${variant_path}" >>"${diagnostics_root}/variant-${variant}.stdout" 2>>"${diagnostics_root}/variant-${variant}.stderr" || true
+            ;;
+        esac
+        printf 'variant=%s ldid-entitlements\n' "${variant}" >&2
+        "${ldid_path}" -e "${variant_path}" >&2 || true
+        printf 'variant=%s codesign-details\n' "${variant}" >&2
+        codesign -dvv "${variant_path}" >&2 || true
+        printf 'variant=%s codesign-entitlements\n' "${variant}" >&2
+        codesign --display --entitlements - --xml "${variant_path}" >&2 || true
+        cat "${diagnostics_root}/variant-${variant}.stderr" >&2 || true
+      done
+    fi
     printf '%s\n' 'ldid entitlement diagnostic: raw extraction' >&2
     cat "${extracted_entitlements}" >&2 || true
     printf '%s\n' 'ldid entitlement diagnostic: codesign details' >&2
