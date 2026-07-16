@@ -182,3 +182,7 @@ A restore test that uses a fixed expiration near the Unix epoch will eventually 
 ## P-045 Accessibility identifiers on SwiftUI containers can hide child contracts
 
 Attaching a UI-test identifier to a compound container can collapse or overwrite descendant accessibility identifiers. Put the card-level identifier on a visible semantic heading, and keep each governed approval field and action independently addressable. Passing visual rendering is not enough; inspect the accessibility hierarchy through UI tests.
+
+## P-046 Manual visible persistence does not prove every structured field
+
+Seeing all interview exchanges after force-quit proves that the conversation projection is durable, but it does not by itself prove that the structured interview answer array retained every element or that the plan compiler consumed all of them. Keep the evidence layers explicit: physical-device tests validate what the user can observe, while deterministic database/runtime restore tests validate hidden structured state and its downstream use. Do not overclaim either layer, and do not dismiss a valid device result merely because part of the invariant is intentionally non-visible.

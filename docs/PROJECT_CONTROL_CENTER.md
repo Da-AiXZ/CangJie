@@ -15,7 +15,7 @@ CangJie is agent-first: persistent center conversation controls a governed novel
 
 ## Current milestone
 
-M1 First-Chapter Agent Vertical Slice. The recoverable-runtime device gate for commit `a0fa83b` is accepted. Exact opening-plan approval binding, paired restore/reconciliation, visible Refresh feedback, and separation of durable Agent status from transient notices are implemented in the current worktree and awaiting Xcode CI plus a new physical-device gate; M1-B is not yet complete.
+M1 First-Chapter Agent Vertical Slice. The recoverable-runtime candidate at commit `a0fa83b` passed the user's detailed physical-device gate. That test exposed two non-blocking presentation defects: an unchanged project Refresh had no acknowledgement, and lifecycle checkpoint text could replace the durable Agent business status. Both fixes, plus exact opening-plan approval binding and paired restore/reconciliation, passed Core/iPadOS CI and were packaged from commit `874f73d`; the new candidate now awaits a focused physical-device differential gate. M1-B is not yet complete.
 
 ```text
 open -> restore conversation/session/run/messages -> center conversation
@@ -42,27 +42,40 @@ User confirmed TrollStore install, launch, immediate restart persistence, and no
 Latest committed software evidence:
 
 ```text
+commit 874f73d1aa1336e6f7fbae9ed503d5096e1e2759
+Core CI 29538641046: success (47 tests, coverage gate passed)
+iPadOS CI 29538641041: success (App, integration, Agent-first UI, exact-approval metadata, Refresh feedback)
+Build TrollStore IPA 29539149285: success
+```
+
+The preceding device-accepted recoverable-runtime candidate remains:
+
+```text
 commit a0fa83be8980825651a798d7de9a9c1b083ed55c
 Core CI 29527519632: success
 iPadOS CI 29527519653: success
 Build TrollStore IPA 29528048015: success
+SHA-256 6060dc1bcf511467484b4af0a99805c7a49249bd59e653063738ab2ea8065a78
 ```
 
-The corrective commit preserved production `latestArtifact(updatedAt DESC)` semantics and made the approved test fixture newer than the waiting plan it supersedes. The successful iPadOS run includes App unit/integration tests and the Agent-first UI smoke flow.
+The user confirmed on the target iPad that overwrite installation retained prior composer text; the app launched without a crash; a project did not appear before the actual `project.create` action; `Untitled Novel` appeared after that action; navigation and draft retention behaved correctly; all three visible interview exchanges survived force-quit; opening-plan generation and approval completed; `artifact.openingPlan.approve` appeared as the expected durable tool receipt; the approval result survived restart; and the post-approval planning guard behaved correctly. Automated database/runtime tests separately prove that all three structured interview answers, rather than only the last visible message, survive restore and are compiled into the plan.
 
-Candidate artifact:
+The same device run confirmed the two presentation defects described above: Refresh appeared inert when the list was unchanged, and `Saved checkpoint #5 (sceneInactive)` could temporarily replace the business stage. These are fixed in the new candidate and require only differential retesting.
+
+New exact-approval candidate artifact:
 
 ```text
-GitHub artifact CangJie-M0-device-validation-required-21-a0fa83be8980825651a798d7de9a9c1b083ed55c
-IPA CangJie-M0.ipa (legacy filename; identity comes from manifest, commit, and hash)
-SHA-256 6060dc1bcf511467484b4af0a99805c7a49249bd59e653063738ab2ea8065a78
+GitHub artifact CangJie-M0-device-validation-required-22-874f73d1aa1336e6f7fbae9ed503d5096e1e2759
+IPA CangJie-M0.ipa (legacy filename; identity is manifest + commit + run + hash)
+Build run 29539149285 | run number 22
+Commit 874f73d1aa1336e6f7fbae9ed503d5096e1e2759
+SHA-256 fb8da1d86c0ebfb475161c38b7381083f49bc63c4a11588d229a270020e7f109
 Bundle ID com.juyang.CangJie | arm64 | deployment target 16.6
-Local verified copy F:\project\CangJie\artifacts\CangJie-M1B-run-29528048015-verified\CangJie-M0-device-validation-required-21-a0fa83be8980825651a798d7de9a9c1b083ed55c\CangJie-M0.ipa
+Xcode 16.4 | iPhoneOS SDK 18.5 | GRDB 6.29.3
+Local verified copy F:\project\CangJie\artifacts\CangJie-M1B-exact-approval-run-29539149285-verified\CangJie-M0-device-validation-required-22-874f73d1aa1336e6f7fbae9ed503d5096e1e2759\CangJie-M0.ipa
 ```
 
-Device result: the user installed this exact candidate over the prior version. Launch, retained composer text, natural-language project creation, independent Novel Projects navigation, draft retention across left navigation, three-question interview, opening-plan creation/approval, post-approval guard, background return, force-quit recovery, and no crash all behaved as expected. The prior M0 database correctly contained no novel project; `Untitled Novel` appeared only after the real `project.create` action. Conversation persistence was visible on device, while automated restart tests additionally verify all three interview answers are retained in session state and compiled into the plan.
-
-Two non-blocking issues became the next work items: `Refresh` silently reloads an unchanged list without feedback, and lifecycle checkpoint text such as `Saved checkpoint #5 (sceneInactive)` overwrites the visible Agent business status. Complete Keychain lifecycle/isolation, real Provider SSE/cancel/reconcile, exact plan/budget approval, bible confirmation, generation, canon, import, and serial flow remain unproven.
+The downloaded checksum matches the manifest and local SHA-256; the archive contains `Payload/CangJie.app`; the repository verifier passed; the manifest is correctly fail-closed at `blocked-pending-trollstore-device-keychain-validation`. That acceptance status is expected and is not a build failure.
 
 ## Source boundaries
 
@@ -70,13 +83,18 @@ Novel package concepts are recorded in the plan. `cc.zip` is clean-room abstract
 
 ## Immediate queue
 
-1. Complete correctness/security/Xcode-risk review of the exact-approval worktree and fix every blocking finding.
-2. Run deterministic Core, parse, migration, encoding, secret, private-artifact, and signing-material gates.
-3. Push the exact-approval slice to `main`; inspect the first real error in Core CI or iPadOS CI and repair only from evidence until both are green.
-4. Build and verify a new TrollStore IPA bound to commit, Actions run, manifest, and SHA-256.
-5. Do not enter M1-C until exact approval metadata, Refresh acknowledgement, durable business status, approval/restart reconciliation, and no-crash behavior pass physical-device acceptance.
+1. Install the exact run `29539149285` candidate over the existing app and confirm launch plus old-data retention.
+2. Differentially verify that Novel Projects Refresh now shows an acknowledgement while leaving the Agent business status unchanged.
+3. Put the app inactive/background and return; checkpoint feedback may appear as a secondary notice, but the durable business status must remain the actual creative stage.
+4. Create a fresh project through conversation, reach the Opening Plan, inspect the exact request/revision/hash/tool/budget/expiration/diff/binding/status fields, approve through `Approve exact revision`, and verify the result survives force-quit.
+5. Keep the manifest's separate Keychain device gate fail-closed until create/read/update/delete/reinstall/isolation can be exercised through an explicit device-validation surface.
+6. Do not enter M1-C implementation until items 1-4 pass physical-device acceptance; then begin V1 chapter generation, evidence review, locked ranges, diagnostic rejection, confirmed rewrite scope, V2 diff, acceptance, and retained history.
 
 ## Change log
+
+### 2026-07-16 M1-B exact-approval candidate and prior-device acceptance
+
+Recorded the user's detailed acceptance of the `a0fa83b` recoverable-runtime candidate. Classified retained visible interview messages as device evidence for conversation persistence and retained structured answer arrays/plan compilation as automated-test evidence; neither is substituted for the other. Confirmed `artifact.openingPlan.approve` is the expected tool receipt. Recorded silent Refresh and checkpoint/status collision as real non-blocking presentation defects already corrected in `874f73d`. Core CI `29538641046`, iPadOS CI `29538641041`, and TrollStore build `29539149285` are green. Downloaded and verified the run-22 artifact with SHA-256 `fb8da1d86c0ebfb475161c38b7381083f49bc63c4a11588d229a270020e7f109`; the next stop is the focused physical-device differential gate.
 
 ### 2026-07-16 Agent-first reset
 
