@@ -143,3 +143,10 @@ Implemented:
 - Recorded the governing decision in `docs/adr/0003-exact-approval-binding.md` and pitfalls P-031 through P-040.
 
 Local deterministic evidence before remote Xcode validation: `swift test` passed 47 Core tests; App, AppTests, and UITests Swift parse checks passed; `git diff --check` passed apart from a non-blocking CRLF normalization warning in one test working copy. Windows cannot typecheck SwiftUI/GRDB iOS targets, so GitHub Actions remains the build authority.
+
+
+## 2026-07-16 Exact-approval CI compile correction
+
+GitHub iPadOS CI run `29536878074` reached the Xcode 16.4 simulator compile step and exposed two concrete Swift errors in `AppDatabase+Approval.swift`: a throwing call embedded on the right side of `||` without marking the operator expression as throwing, and a parameter named `approval` shadowing the static relationship predicate. The repair evaluates the receipt lookup in an explicit branch and qualifies the predicate as `Self.approval(...)`; no approval, receipt, budget, or fail-closed behavior was removed.
+
+Local evidence after the repair: all 47 `CangJieCore` tests pass, every App/AppTests/UI test Swift file parses, `git diff --check` passes, and the temporary downloaded Actions log was deleted. The next gate is a direct `main` push followed by inspection of the new Core and iPadOS runs; only a fully green commit may produce the next TrollStore candidate.

@@ -159,3 +159,12 @@ When a pipeline returns one file, PowerShell may unwrap the collection to a scal
 ## P-040 Never round-trip UTF-8 Swift files through unsafe PowerShell encoding
 
 Console mojibake is not a reason to rewrite source. PowerShell defaults and lossy pipelines can replace valid Chinese literals. Use explicit UTF-8 APIs, inspect bytes and `git diff`, and avoid read-modify-write commands whose encoding behavior is uncertain.
+
+
+## P-041 A throwing RHS makes the short-circuit operator expression throwing
+
+In Swift, placing `try` only around a throwing function on the right side of `||` can still fail because the short-circuit operator uses a rethrowing autoclosure. Prefer an explicit immutable branch when the non-throwing left side can decide the result; this is clearer, preserves short-circuit behavior, and compiles consistently under the pinned Xcode toolchain.
+
+## P-042 Parameters can shadow static helper functions
+
+A parameter named `approval` made `approval(...)` resolve to the `ApprovalRequest` value rather than the intended static predicate. Qualify same-named type helpers with `Self.` or choose non-colliding parameter names. Parse-only Windows checks may miss target/type-checking failures, so the pinned iPadOS CI remains the authoritative compiler gate.

@@ -363,14 +363,18 @@ extension AppDatabase {
                     nowEpochMilliseconds: nowMilliseconds,
                     enforceExpiration: enforceExpiration
                 )
-                let hasRequiredReceipt = current.status != .approved
-                    || (try Self.hasCompletedApprovalReceipt(
+                let hasRequiredReceipt: Bool
+                if current.status != .approved {
+                    hasRequiredReceipt = true
+                } else {
+                    hasRequiredReceipt = try Self.hasCompletedApprovalReceipt(
                         approval: current,
                         artifact: artifact,
                         conversationID: conversationID,
                         policy: currentPolicy,
                         in: db
-                    ))
+                    )
+                }
                 if validation == .approved, hasRequiredReceipt {
                     return OpeningPlanApprovalState(artifact: artifact, approval: current)
                 }
@@ -528,7 +532,7 @@ extension AppDatabase {
         conversationID: UUID
     ) throws -> Bool {
         guard artifact.kind == "openingPlan",
-              approval(approval, matches: artifact, conversationID: conversationID),
+              Self.approval(approval, matches: artifact, conversationID: conversationID),
               artifact.contentHash == ApprovalFingerprint.artifactHash(
                 conversationID: artifact.conversationID,
                 projectID: artifact.projectID,
