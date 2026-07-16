@@ -15,7 +15,7 @@ CangJie is agent-first: persistent center conversation controls a governed novel
 
 ## Current milestone
 
-M1 First-Chapter Agent Vertical Slice. The current worktree slice is M1-B runtime recovery and typed persistence hardening on top of commit `51443c2`. It is an uncommitted development slice, not a validated M1-B exit.
+M1 First-Chapter Agent Vertical Slice. Commit `648c8da` contains the M1-B recoverable runtime slice. Core CI is green; iPadOS CI exposed one regression-test fixture ordering error. The current worktree fixes that test contract and is not yet a validated M1-B exit.
 
 ```text
 open -> restore conversation/session/run/messages -> center conversation
@@ -42,14 +42,14 @@ User confirmed TrollStore install, launch, immediate restart persistence, and no
 Latest committed software evidence:
 
 ```text
-commit 51443c25623bf508e6aa5f50c4de9918ee39e036
-Core CI 29524038473: success
-iPadOS CI 29524038602: failure
+commit 648c8da feat: add recoverable agent runtime
+Core CI 29526906495: success
+iPadOS CI 29526906476: failure
 ```
 
-The first causal failures in the iPadOS run were stale tests, not a new compiler failure: `AppViewModelTests` assumed the last message still contained `Project created` after the Agent began appending the first interview question, and `CangJieSmokeUITests` still queried the retired M0 identifiers `m0-title` and `draft-editor`. The current worktree changes the unit assertion to search the message history and changes the smoke test to the Agent-first identifiers.
+The iPadOS run compiled the App and executed 18 App tests; 17 passed. Its first and only real failure was `AppViewModelTests.testApprovedPlanReconcilesAnInterruptedApprovalRun` at line 236. The test inserted an approved artifact with epoch timestamp `701`, but the original waiting-approval plan had a current wall-clock `updatedAt`. Because production correctly selects `latestArtifact` by `updatedAt DESC`, the older approved fixture could not supersede the plan. The fix makes the approved fixture exactly one second newer than `plan.updatedAt`; production ordering semantics are unchanged.
 
-Current worktree verification is partial: Windows `swift test` passes all 35 core tests. App database, view-model, restart, and UI smoke tests require the next iPadOS CI run. M1 device acceptance, complete Keychain tests, real Provider SSE/cancel/reconcile, exact plan/budget approval, bible confirmation, generation, canon, import, and serial flow remain unproven.
+Current verification remains partial until the corrective commit passes iPadOS CI and the Agent-first UI smoke test. M1 device acceptance, complete Keychain tests, real Provider SSE/cancel/reconcile, exact plan/budget approval, bible confirmation, generation, canon, import, and serial flow remain unproven.
 
 ## Source boundaries
 
@@ -57,11 +57,11 @@ Novel package concepts are recorded in the plan. `cc.zip` is clean-room abstract
 
 ## Immediate queue
 
-1. Finish the current M1-B runtime slice without overwriting unrelated worktree changes.
-2. Run the App database/view-model/restart tests and Agent-first UI smoke test in iPadOS CI.
-3. Inspect the first causal failure, including SQLite WAL lifecycle warnings, before changing production code.
-4. Commit and push the runtime slice only after reviewing the scoped diff and encoding gate.
-5. Record the new commit, run IDs, included/excluded scope, and remaining M1-B gaps here.
+1. Commit and push the artifact-version test fixture correction after minimum deterministic checks.
+2. Run App database/view-model/restart tests and Agent-first UI smoke test in the new iPadOS CI run.
+3. If CI fails, inspect and fix only the first causal error; do not weaken production ordering or safety gates.
+4. When Core and iPadOS CI are green, trigger the TrollStore IPA workflow and verify its manifest and SHA-256.
+5. Pause only at the physical-device acceptance gate with a complete install and test script.
 6. Do not enter M1-C until exact revision/budget approval and approval invalidation are implemented and verified.
 
 ## Change log
@@ -81,7 +81,7 @@ Progress summaries are informational checkpoints, not pauses. After reporting co
 
 ## 2026-07-16 M1-B runtime recovery worktree checkpoint
 
-Version nature: uncommitted development slice on top of `51443c2`; partial M1-B implementation, not a release, candidate IPA, or validated milestone.
+Version nature: committed as `648c8da`; partial M1-B implementation under CI correction, not a release, candidate IPA, or validated milestone.
 
 Included:
 
@@ -105,6 +105,7 @@ Excluded or still incomplete:
 
 Verification:
 
-- Base commit evidence: Core CI `29524038473` succeeded; iPadOS CI `29524038602` failed on the two stale test contracts described above.
-- Current Windows core gate: `swift test` passed 35 tests. This does not compile or run the iPadOS App/XCTest targets.
-- Next required evidence: a green iPadOS CI run for the worktree slice, followed by an updated checkpoint with the resulting commit and run IDs.
+- Commit `648c8da`: Core CI `29526906495` succeeded; iPadOS CI `29526906476` compiled and ran the suite but failed one App test because its manually inserted approved artifact was timestamped earlier than the plan it was intended to supersede.
+- The corrective test uses `plan.updatedAt.addingTimeInterval(1)` and intentionally preserves production `updatedAt DESC` selection.
+- Windows `swift test` previously passed 35 core tests; this does not compile or run the iPadOS App/XCTest targets.
+- Next required evidence: a green Core and iPadOS CI run for the corrective commit, then a successful TrollStore IPA workflow and physical-device acceptance.

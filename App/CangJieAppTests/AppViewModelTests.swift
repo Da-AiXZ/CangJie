@@ -226,7 +226,7 @@ final class AppViewModelTests: XCTestCase {
                 body: plan.body,
                 status: "approved",
                 idempotencyKey: approvalKey,
-                now: Date(timeIntervalSince1970: 701)
+                now: plan.updatedAt.addingTimeInterval(1)
             )
 
             let restored = AppViewModel(database: database, keychain: StubSecretRepository())
