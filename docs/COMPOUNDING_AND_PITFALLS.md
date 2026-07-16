@@ -168,3 +168,8 @@ In Swift, placing `try` only around a throwing function on the right side of `||
 ## P-042 Parameters can shadow static helper functions
 
 A parameter named `approval` made `approval(...)` resolve to the `ApprovalRequest` value rather than the intended static predicate. Qualify same-named type helpers with `Self.` or choose non-colliding parameter names. Parse-only Windows checks may miss target/type-checking failures, so the pinned iPadOS CI remains the authoritative compiler gate.
+
+
+## P-043 A throwing closure call is not an implicit return in a multi-statement method
+
+A method with setup statements followed by `try queue.write { ... }` still needs an explicit `return` when its signature returns the closure result. Parse-only validation does not typecheck this contract; always follow the pinned Xcode compiler's first concrete diagnostic and keep the return type visible during review.

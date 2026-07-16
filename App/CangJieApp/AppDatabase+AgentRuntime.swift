@@ -237,7 +237,7 @@ extension AppDatabase {
             body: body
         )
         let expectedInputSummary = kind + ":" + status
-        try queue.write { db in
+        return try queue.write { db in
             if let receipt = try Self.receipt(idempotencyKey: idempotencyKey, in: db) {
                 guard receipt.toolID == toolID,
                       receipt.toolVersion == "1",
