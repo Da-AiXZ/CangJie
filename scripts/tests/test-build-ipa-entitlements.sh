@@ -247,8 +247,8 @@ case "${operation}" in
     elif [[ "$#" == "7" ]]; then
       [[ "$2" == "-Icom.juyang.CangJie" ]] || { echo "unexpected ldid identifier argument: $2" >&2; exit 64; }
       [[ "$3" == -Q* && -s "${3#-Q}" ]] || { echo "unexpected ldid requirement argument: $3" >&2; exit 64; }
-      [[ "$4" == "-E1${FAKE_LDID_APP:?}/Info.plist" ]] || { echo "unexpected ldid Info.plist slot: $4" >&2; exit 64; }
-      [[ "$5" == "-E3${FAKE_LDID_APP:?}/_CodeSignature/CodeResources" ]] || { echo "unexpected ldid CodeResources slot: $5" >&2; exit 64; }
+      [[ "$4" == "-E1:${FAKE_LDID_APP:?}/Info.plist" ]] || { echo "unexpected ldid Info.plist slot: $4" >&2; exit 64; }
+      [[ "$5" == "-E3:${FAKE_LDID_APP:?}/_CodeSignature/CodeResources" ]] || { echo "unexpected ldid CodeResources slot: $5" >&2; exit 64; }
       [[ "$6" == "-S${FAKE_LDID_CONTRACT:?}" ]] || { echo "unexpected ldid entitlement argument: $6" >&2; exit 64; }
       [[ "$7" == "${FAKE_LDID_EXECUTABLE:?}" ]] || { echo "unexpected ldid executable: $7" >&2; exit 64; }
       if [[ "${FAKE_LDID_MODE:?}" == "app-executable-sign-error" ]]; then

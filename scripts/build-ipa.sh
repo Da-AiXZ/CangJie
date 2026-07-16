@@ -299,7 +299,7 @@ sign_app_with_ldid() {
   rm -f "${shallow_signing_diagnostics}"
   verify_code_resources "${app_path}"
 
-  if ! "${ldid_path}" -Cadhoc "-I${EXPECTED_BUNDLE_ID}" "-Q${requirements_path}" "-E1${info_path}" "-E3${resources_path}" "-S${entitlements_path}" "${executable_path}" >/dev/null 2>"${executable_signing_diagnostics}"; then
+  if ! "${ldid_path}" -Cadhoc "-I${EXPECTED_BUNDLE_ID}" "-Q${requirements_path}" "-E1:${info_path}" "-E3:${resources_path}" "-S${entitlements_path}" "${executable_path}" >/dev/null 2>"${executable_signing_diagnostics}"; then
     cat "${executable_signing_diagnostics}" >&2
     rm -f "${executable_signing_diagnostics}"
     fail "ldid failed to ad-hoc sign the app executable"
