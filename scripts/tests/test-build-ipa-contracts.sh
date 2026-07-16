@@ -35,7 +35,7 @@ PY
 reset_valid_bundle() {
   rm -rf "${BUNDLE}"
   mkdir -p "${BUNDLE}"
-  cp "${PRIVACY_MANIFEST}" "${BUNDLE}/PrivacyInfo.xcprivacy"
+  cat "${PRIVACY_MANIFEST}" >"${BUNDLE}/PrivacyInfo.xcprivacy"
   write_info_plist "grdb.swift.GRDB.resources"
 }
 
