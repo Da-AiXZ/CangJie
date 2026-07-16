@@ -136,6 +136,7 @@ assert_success() {
   local stdout="${TEMP_ROOT}/${label}.stdout"
   local stderr="${TEMP_ROOT}/${label}.stderr"
   mkdir -p "${run_root}"
+  run_root="$(cd "${run_root}" && pwd -P)"
 
   if ! PATH="${BIN_DIR}:${PATH}" \
     RUNNER_TEMP="${run_root}" \
