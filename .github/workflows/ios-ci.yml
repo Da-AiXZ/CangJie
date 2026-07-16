@@ -26,7 +26,9 @@ jobs:
         with:
           persist-credentials: false
       - name: Static validation
-        run: bash -n scripts/build-ipa.sh scripts/find-ipad-simulator.sh
+        run: bash -n scripts/build-ipa.sh scripts/find-ipad-simulator.sh scripts/tests/test-find-ipad-simulator.sh
+      - name: Test simulator selector failure handling
+        run: bash scripts/tests/test-find-ipad-simulator.sh
       - name: Select pinned Xcode
         run: bash scripts/select-xcode.sh
       - name: Install pinned XcodeGen
@@ -49,7 +51,11 @@ jobs:
         id: simulator
         env:
           SWIFTPM_CLONED_SOURCE_PACKAGES_DIR: ${{ runner.temp }}/CangJie-SourcePackages
-        run: echo "udid=$(bash scripts/find-ipad-simulator.sh)" >> "$GITHUB_OUTPUT"
+        run: |
+          set -euo pipefail
+          udid="$(bash scripts/find-ipad-simulator.sh)"
+          [[ "${udid}" =~ ^[0-9A-Fa-f]{8}-([0-9A-Fa-f]{4}-){3}[0-9A-Fa-f]{12}$ ]] || { echo "Simulator selection returned an invalid UDID" >&2; exit 1; }
+          printf 'udid=%s\n' "${udid}" >> "$GITHUB_OUTPUT"
       - name: Unit, integration and UI smoke tests
         run: |
           set -euo pipefail

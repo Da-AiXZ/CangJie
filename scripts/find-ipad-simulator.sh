@@ -5,7 +5,7 @@ readonly ROOT="$(cd "$(dirname "$0")/.." && pwd -P)"
 readonly PROJECT="${XCODE_PROJECT:-${ROOT}/CangJie.xcodeproj}"
 readonly SCHEME="${XCODE_SCHEME:-CangJie}"
 
-for tool in xcodebuild xcrun python3 mktemp; do
+for tool in xcodebuild xcrun awk grep sed mktemp; do
   command -v "${tool}" >/dev/null || { echo "Required tool is missing: ${tool}" >&2; exit 1; }
 done
 [[ -d "${PROJECT}" && ! -L "${PROJECT}" ]] || { echo "Generated Xcode project is missing or unsafe: ${PROJECT}" >&2; exit 1; }
@@ -18,7 +18,10 @@ cleanup() {
 trap cleanup EXIT
 
 readonly DESTINATIONS_FILE="${TEMP_ROOT}/destinations.txt"
-readonly DEVICES_FILE="${TEMP_ROOT}/devices.json"
+readonly AVAILABLE_IPADS_FILE="${TEMP_ROOT}/available-ipads.txt"
+readonly ORDERED_IPADS_FILE="${TEMP_ROOT}/ordered-ipads.txt"
+readonly DEVICES_FILE="${TEMP_ROOT}/devices.txt"
+readonly RETRY_DEVICES_FILE="${TEMP_ROOT}/retry-devices.txt"
 
 show_destination_args=(
   -project "${PROJECT}"
@@ -31,86 +34,75 @@ if [[ -n "${SWIFTPM_CLONED_SOURCE_PACKAGES_DIR:-}" ]]; then
 fi
 
 xcodebuild "${show_destination_args[@]}" > "${DESTINATIONS_FILE}"
-xcrun simctl list devices available -j > "${DEVICES_FILE}"
-
-readonly SELECTION="$(python3 - "${DESTINATIONS_FILE}" "${DEVICES_FILE}" <<'PY'
-import json
-import re
-import sys
-
-showdestinations_path, devices_path = sys.argv[1:]
-udid_pattern = re.compile(r"^[0-9A-Fa-f]{8}(?:-[0-9A-Fa-f]{4}){3}-[0-9A-Fa-f]{12}$")
-
-eligible_udids = set()
-in_available_section = False
-with open(showdestinations_path, encoding="utf-8", errors="replace") as source:
-    for raw_line in source:
-        line = raw_line.strip()
-        if line.startswith("Available destinations for the"):
-            in_available_section = True
-            continue
-        if line.startswith("Ineligible destinations for the"):
-            in_available_section = False
-            continue
-        if not in_available_section or "platform:iOS Simulator" not in line:
-            continue
-        match = re.search(r"(?:^|,\s*)id:([^,}]+)", line.strip("{} \t"))
-        if not match:
-            continue
-        udid = match.group(1).strip()
-        if udid_pattern.fullmatch(udid) and re.search(r"(?:^|,\s*)name:iPad", line):
-            eligible_udids.add(udid.lower())
-
-if not eligible_udids:
-    raise SystemExit("xcodebuild reported no eligible iPad Simulator destinations")
-
-with open(devices_path, "rb") as source:
-    data = json.load(source)
-
-candidates = []
-for runtime, devices in data.get("devices", {}).items():
-    marker = ".SimRuntime.iOS-"
-    if marker not in runtime:
-        continue
-    version_text = runtime.rsplit(marker, 1)[-1]
-    version = tuple(int(part) for part in version_text.split("-") if part.isdigit())
-    for device in devices:
-        name = device.get("name", "")
-        udid = device.get("udid", "")
-        state = device.get("state", "")
-        if (
-            device.get("isAvailable")
-            and isinstance(name, str)
-            and name.startswith("iPad")
-            and isinstance(udid, str)
-            and udid_pattern.fullmatch(udid)
-            and udid.lower() in eligible_udids
-        ):
-            preferred = 1 if "iPad Pro (11-inch)" in name else 0
-            candidates.append((version, preferred, name, udid, state))
-
-if not candidates:
-    raise SystemExit("No iPad Simulator is both available in simctl and eligible in xcodebuild -showdestinations")
-
-candidates.sort(reverse=True)
-_, _, _, udid, state = candidates[0]
-print(f"{udid}\t{state}")
-PY
-)"
-
-readonly UDID="${SELECTION%%$'\t'*}"
-readonly STATE="${SELECTION#*$'\t'}"
-[[ "${SELECTION}" == *$'\t'* ]] || { echo "Simulator selection did not include a state" >&2; exit 1; }
-[[ "${UDID}" =~ ^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$ ]] || {
-  echo "Simulator selection returned an invalid iPad Simulator UDID" >&2
+awk '
+  /^[[:space:]]*Available destinations for the / { available = 1; next }
+  /^[[:space:]]*Ineligible destinations for the / { available = 0; next }
+  available && /platform:[[:space:]]*iOS Simulator/ && /name:[[:space:]]*iPad/ { print }
+' "${DESTINATIONS_FILE}" > "${AVAILABLE_IPADS_FILE}"
+[[ -s "${AVAILABLE_IPADS_FILE}" ]] || {
+  echo "xcodebuild reported no eligible iPad Simulator destinations" >&2
+  cat "${DESTINATIONS_FILE}" >&2
   exit 1
 }
 
-if [[ "${STATE}" != "Booted" ]]; then
-  if ! xcrun simctl boot "${UDID}" >&2; then
-    echo "Failed to boot selected iPad Simulator: ${UDID}" >&2
+# Preserve xcodebuild order while preferring an 11-inch iPad when one is eligible.
+awk '/11-inch/ { print }' "${AVAILABLE_IPADS_FILE}" > "${ORDERED_IPADS_FILE}"
+awk '!/11-inch/ { print }' "${AVAILABLE_IPADS_FILE}" >> "${ORDERED_IPADS_FILE}"
+
+# Capture simctl without masking command failures, then select from the true intersection.
+xcrun simctl list devices available > "${DEVICES_FILE}"
+selected_udid=''
+selected_device_line=''
+while IFS= read -r candidate_line; do
+  candidate_udid="$(printf '%s\n' "${candidate_line}" | grep -oE 'id:[[:space:]]*[0-9A-Fa-f-]{36}' | sed -E 's/^id:[[:space:]]*//')"
+  [[ "${candidate_udid}" =~ ^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$ ]] || {
+    echo "Eligible destination contained an invalid iPad Simulator UDID: ${candidate_line}" >&2
     exit 1
+  }
+
+  set +e
+  device_line="$(grep -F -m 1 "${candidate_udid}" "${DEVICES_FILE}")"
+  grep_status=$?
+  set -e
+  if [[ "${grep_status}" -eq 0 ]]; then
+    selected_udid="${candidate_udid}"
+    selected_device_line="${device_line}"
+    break
   fi
-fi
-xcrun simctl bootstatus "${UDID}" -b >&2
-printf '%s\n' "${UDID}"
+  [[ "${grep_status}" -eq 1 ]] || { echo "Unable to inspect simctl devices" >&2; exit "${grep_status}"; }
+done < "${ORDERED_IPADS_FILE}"
+
+[[ -n "${selected_udid}" && -n "${selected_device_line}" ]] || {
+  echo "No iPad Simulator is both eligible in xcodebuild and available in simctl" >&2
+  echo "Eligible xcodebuild destinations:" >&2
+  cat "${AVAILABLE_IPADS_FILE}" >&2
+  echo "Available simctl devices:" >&2
+  cat "${DEVICES_FILE}" >&2
+  exit 1
+}
+
+case "${selected_device_line}" in
+  *"(Booted)"*|*"(Booting)"*)
+    ;;
+  *"(Shutdown)"*)
+    if ! xcrun simctl boot "${selected_udid}" >&2; then
+      # A concurrent CoreSimulator operation may have started the device after our list call.
+      xcrun simctl list devices available > "${RETRY_DEVICES_FILE}"
+      set +e
+      retry_line="$(grep -F -m 1 "${selected_udid}" "${RETRY_DEVICES_FILE}")"
+      retry_status=$?
+      set -e
+      if [[ "${retry_status}" -ne 0 || ( "${retry_line}" != *"(Booted)"* && "${retry_line}" != *"(Booting)"* ) ]]; then
+        echo "Unable to boot selected iPad Simulator: ${selected_udid}" >&2
+        exit 1
+      fi
+    fi
+    ;;
+  *)
+    echo "Selected iPad Simulator is in an unsupported state: ${selected_device_line}" >&2
+    exit 1
+    ;;
+esac
+
+xcrun simctl bootstatus "${selected_udid}" -b >&2
+printf '%s\n' "${selected_udid}"

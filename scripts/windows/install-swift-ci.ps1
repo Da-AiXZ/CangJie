@@ -52,9 +52,22 @@ function Audit-Swift([string]$Executable, [string]$Version) {
 
 $swiftRoot = Join-Path $env:LOCALAPPDATA 'Programs\Swift'
 $runtimeBin = Join-Path $swiftRoot "Runtimes\$SwiftVersion\usr\bin"
+$sdkRoot = Join-Path $swiftRoot "Platforms\$SwiftVersion\Windows.platform\Developer\SDKs\Windows.sdk"
 $swiftExecutable = Find-SwiftExecutable -Root $swiftRoot -Version $SwiftVersion
+$requiresInstall = -not $swiftExecutable
+if ($swiftExecutable) {
+    $candidateToolchainBin = Split-Path -Parent $swiftExecutable
+    $candidateLlvmCov = Join-Path $candidateToolchainBin 'llvm-cov.exe'
+    $requiresInstall =
+        -not (Test-Path -LiteralPath $candidateLlvmCov -PathType Leaf) -or
+        -not (Test-Path -LiteralPath $runtimeBin -PathType Container) -or
+        -not (Test-Path -LiteralPath $sdkRoot -PathType Container)
+    if ($requiresInstall) {
+        Write-Warning 'Existing Swift installation is incomplete; rerunning the verified official installer.'
+    }
+}
 
-if (-not $swiftExecutable) {
+if ($requiresInstall) {
     $downloadUrl = "https://download.swift.org/swift-$SwiftVersion-release/windows10/swift-$SwiftVersion-RELEASE/swift-$SwiftVersion-RELEASE-windows10.exe"
     $expectedSha256 = '235626548F249CD516D3D4D90EEE980DCCAD46F3822DAC1F8E3119B0FEDE94B7'
     $downloadRoot = if ($env:RUNNER_TEMP) { $env:RUNNER_TEMP } else { $env:TEMP }
@@ -64,7 +77,7 @@ if (-not $swiftExecutable) {
     $installer = Join-Path $downloadRoot "swift-$SwiftVersion-windows-x64.exe"
 
     Write-Host "Downloading official Swift $SwiftVersion Windows installer"
-    & curl.exe --fail --location --retry 3 --retry-delay 2 --output $installer $downloadUrl
+    & curl.exe --fail --location --proto '=https' --proto-redir '=https' --tlsv1.2 --retry 3 --retry-delay 2 --output $installer $downloadUrl
     if ($LASTEXITCODE -ne 0) {
         Fail "Swift installer download failed with exit code $LASTEXITCODE."
     }
@@ -84,11 +97,27 @@ if (-not $swiftExecutable) {
 }
 
 $toolchainBin = Split-Path -Parent $swiftExecutable
+$llvmCovExecutable = Join-Path $toolchainBin 'llvm-cov.exe'
+if (-not (Test-Path -LiteralPath $llvmCovExecutable -PathType Leaf)) {
+    Fail "Swift llvm-cov is missing: $llvmCovExecutable"
+}
+if (-not (Test-Path -LiteralPath $runtimeBin -PathType Container)) {
+    Fail "Swift runtime is missing: $runtimeBin"
+}
+if (-not (Test-Path -LiteralPath $sdkRoot -PathType Container)) {
+    Fail "Swift Windows SDK is missing: $sdkRoot"
+}
+$env:SDKROOT = $sdkRoot
 $pathEntries = @($toolchainBin)
 if (Test-Path -LiteralPath $runtimeBin -PathType Container) {
     $pathEntries += $runtimeBin
 }
 $env:Path = (($pathEntries + @($env:Path)) -join [IO.Path]::PathSeparator)
+# Native Windows environments can preserve both PATH and Path. Swift Foundation rejects that duplicate.
+$normalizedPath = $env:Path
+[Environment]::SetEnvironmentVariable('PATH', $null, 'Process')
+[Environment]::SetEnvironmentVariable('Path', $null, 'Process')
+[Environment]::SetEnvironmentVariable('Path', $normalizedPath, 'Process')
 $versionOutput = Audit-Swift -Executable $swiftExecutable -Version $SwiftVersion
 
 foreach ($entry in $pathEntries) {
@@ -96,5 +125,9 @@ foreach ($entry in $pathEntries) {
         Add-Content -LiteralPath $env:GITHUB_PATH -Value $entry -Encoding utf8
     }
 }
+if ($env:GITHUB_ENV) {
+    Add-Content -LiteralPath $env:GITHUB_ENV -Value "SDKROOT=$sdkRoot" -Encoding utf8
+}
 
 Write-Host $versionOutput
+Write-Host "SDKROOT: $sdkRoot"
