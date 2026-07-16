@@ -10,6 +10,11 @@ readonly EXPECTED_GRDB_BUNDLE_NAME="GRDB_GRDB.bundle"
 readonly EXPECTED_GRDB_BUNDLE_IDENTIFIER="grdb.swift.GRDB.resources"
 readonly EXPECTED_GRDB_URL="https://github.com/groue/GRDB.swift.git"
 readonly EXPECTED_GRDB_PRIVACY_SHA256="17784da62e51f74c5859df32fe402e01e25cdf6f797a4add06e2a3ce15c911f4"
+readonly EXPECTED_LDID_TAG="v2.1.5-procursus7"
+readonly EXPECTED_LDID_ARM64_ASSET="ldid_macosx_arm64"
+readonly EXPECTED_LDID_ARM64_SHA256="5dff8e6b8d9dc3ff7226276c81e09930865f15381f54cb55b98b196a94c5ca50"
+readonly EXPECTED_LDID_X86_64_ASSET="ldid_macosx_x86_64"
+readonly EXPECTED_LDID_X86_64_SHA256="9d46e0feedf96e399edfca09872802ba21e729f79c01927ad25ea2b0a35bca23"
 readonly ROOT="$(cd "$(dirname "$0")/.." && pwd -P)"
 readonly OUT="${ROOT}/.build-ipa"
 readonly DERIVED="${OUT}/DerivedData"
@@ -132,6 +137,155 @@ extract_and_verify_signed_entitlements() {
   fi
   rm -f "${diagnostics_path}"
 }
+
+verify_executable_signature() {
+  require_tool codesign
+  local executable_path="$1"
+  local diagnostics_path="$2"
+  [[ -f "${executable_path}" && ! -L "${executable_path}" ]] || fail "Signed executable is missing or unsafe: ${executable_path}"
+  rm -f "${diagnostics_path}"
+  if ! codesign --verify --strict --verbose=2 "${executable_path}" >/dev/null 2>"${diagnostics_path}"; then
+    cat "${diagnostics_path}" >&2
+    rm -f "${diagnostics_path}"
+    fail "Signed executable failed strict codesign verification"
+  fi
+  rm -f "${diagnostics_path}"
+}
+
+extract_and_verify_codesign_executable_entitlements() {
+  require_tool codesign
+  local executable_path="$1"
+  local output_path="$2"
+  local diagnostics_path="$3"
+  [[ -f "${executable_path}" && ! -L "${executable_path}" ]] || fail "Signed executable is missing or unsafe: ${executable_path}"
+  [[ "${output_path}" != "${diagnostics_path}" ]] || fail "Entitlement output and diagnostics paths must differ"
+  rm -f "${output_path}" "${diagnostics_path}"
+
+  if ! codesign --display --entitlements - --xml "${executable_path}" >"${output_path}" 2>"${diagnostics_path}"; then
+    cat "${diagnostics_path}" >&2
+    rm -f "${output_path}" "${diagnostics_path}"
+    fail "Failed to extract executable entitlements with codesign"
+  fi
+  if [[ ! -s "${output_path}" ]]; then
+    rm -f "${output_path}" "${diagnostics_path}"
+    fail "codesign returned no executable entitlements"
+  fi
+  if ! verify_entitlements "${output_path}"; then
+    rm -f "${diagnostics_path}"
+    return 1
+  fi
+  rm -f "${diagnostics_path}"
+}
+
+extract_and_verify_ldid_entitlements() {
+  local ldid_path="$1"
+  local executable_path="$2"
+  local output_path="$3"
+  local diagnostics_path="$4"
+  [[ -x "${ldid_path}" && -f "${ldid_path}" && ! -L "${ldid_path}" ]] || fail "ldid executable is missing or unsafe: ${ldid_path}"
+  [[ -f "${executable_path}" && ! -L "${executable_path}" ]] || fail "Signed executable is missing or unsafe: ${executable_path}"
+  [[ "${output_path}" != "${diagnostics_path}" ]] || fail "Entitlement output and diagnostics paths must differ"
+  rm -f "${output_path}" "${diagnostics_path}"
+
+  if ! "${ldid_path}" -e "${executable_path}" >"${output_path}" 2>"${diagnostics_path}"; then
+    cat "${diagnostics_path}" >&2
+    rm -f "${output_path}" "${diagnostics_path}"
+    fail "Failed to extract ldid-signed entitlements"
+  fi
+  if [[ ! -s "${output_path}" ]]; then
+    rm -f "${output_path}" "${diagnostics_path}"
+    fail "ldid returned no signed entitlements"
+  fi
+  if ! verify_entitlements "${output_path}"; then
+    rm -f "${diagnostics_path}"
+    return 1
+  fi
+  rm -f "${diagnostics_path}"
+}
+
+sign_executable_with_ldid() {
+  local ldid_path="$1"
+  local entitlements_path="$2"
+  local executable_path="$3"
+  local diagnostics_root="$4"
+  [[ -x "${ldid_path}" && -f "${ldid_path}" && ! -L "${ldid_path}" ]] || fail "ldid executable is missing or unsafe: ${ldid_path}"
+  [[ -f "${entitlements_path}" && ! -L "${entitlements_path}" ]] || fail "Entitlements file is missing or unsafe: ${entitlements_path}"
+  [[ -f "${executable_path}" && ! -L "${executable_path}" ]] || fail "Main executable is missing or unsafe: ${executable_path}"
+  mkdir -p "${diagnostics_root}"
+  local signing_diagnostics="${diagnostics_root}/ldid-sign.stderr"
+  local extracted_entitlements="${diagnostics_root}/ldid-entitlements.plist"
+  local extraction_diagnostics="${diagnostics_root}/ldid-entitlements.stderr"
+  local codesign_diagnostics="${diagnostics_root}/codesign-executable-verify.stderr"
+  local codesign_entitlements="${diagnostics_root}/codesign-executable-entitlements.plist"
+  local codesign_entitlements_diagnostics="${diagnostics_root}/codesign-executable-entitlements.stderr"
+  rm -f "${signing_diagnostics}" "${extracted_entitlements}" "${extraction_diagnostics}" "${codesign_diagnostics}" "${codesign_entitlements}" "${codesign_entitlements_diagnostics}"
+
+  if ! "${ldid_path}" "-S${entitlements_path}" "${executable_path}" >/dev/null 2>"${signing_diagnostics}"; then
+    cat "${signing_diagnostics}" >&2
+    rm -f "${signing_diagnostics}"
+    fail "ldid failed to sign the main executable"
+  fi
+  rm -f "${signing_diagnostics}"
+  verify_executable_signature "${executable_path}" "${codesign_diagnostics}"
+  extract_and_verify_ldid_entitlements "${ldid_path}" "${executable_path}" "${extracted_entitlements}" "${extraction_diagnostics}"
+  extract_and_verify_codesign_executable_entitlements "${executable_path}" "${codesign_entitlements}" "${codesign_entitlements_diagnostics}"
+}
+
+verify_final_executable() {
+  require_tool shasum
+  require_tool codesign
+  local ldid_path="$1"
+  local executable_path="$2"
+  local expected_sha256="$3"
+  local diagnostics_root="$4"
+  [[ "${expected_sha256}" =~ ^[0-9a-f]{64}$ ]] || fail "Invalid expected executable SHA-256"
+  [[ -f "${executable_path}" && ! -L "${executable_path}" && -x "${executable_path}" ]] || fail "Final executable is missing, unsafe, or not executable: ${executable_path}"
+  local actual_sha256
+  actual_sha256="$(shasum -a 256 "${executable_path}" | awk '{print $1}')"
+  [[ "${actual_sha256}" == "${expected_sha256}" ]] || fail "Final executable SHA-256 mismatch: ${actual_sha256}"
+  mkdir -p "${diagnostics_root}"
+  verify_executable_signature "${executable_path}" "${diagnostics_root}/codesign-verify.stderr"
+  extract_and_verify_ldid_entitlements "${ldid_path}" "${executable_path}" "${diagnostics_root}/ldid-entitlements.plist" "${diagnostics_root}/ldid-entitlements.stderr"
+  extract_and_verify_codesign_executable_entitlements "${executable_path}" "${diagnostics_root}/codesign-entitlements.plist" "${diagnostics_root}/codesign-entitlements.stderr"
+  local codesign_details
+  codesign_details="$(codesign -dvv "${executable_path}" 2>&1)" || fail "Failed to inspect final executable signature"
+  grep -q '^Signature=adhoc$' <<< "${codesign_details}" || fail "The final executable is not ad-hoc signed"
+  if grep -q '^Authority=' <<< "${codesign_details}"; then
+    fail "Unexpected certificate authority in final executable signature"
+  fi
+}
+
+verify_pinned_ldid_tool() {
+  require_tool file
+  require_tool lipo
+  require_tool shasum
+  local ldid_path="$1"
+  [[ -x "${ldid_path}" && -f "${ldid_path}" && ! -L "${ldid_path}" ]] || fail "ldid executable is missing or unsafe: ${ldid_path}"
+  local host_arch expected_arch expected_asset expected_sha256
+  host_arch="$(uname -m)"
+  case "${host_arch}" in
+    arm64|aarch64)
+      expected_arch="arm64"
+      expected_asset="${EXPECTED_LDID_ARM64_ASSET}"
+      expected_sha256="${EXPECTED_LDID_ARM64_SHA256}"
+      ;;
+    x86_64|amd64)
+      expected_arch="x86_64"
+      expected_asset="${EXPECTED_LDID_X86_64_ASSET}"
+      expected_sha256="${EXPECTED_LDID_X86_64_SHA256}"
+      ;;
+    *)
+      fail "Unsupported macOS host architecture for ldid: ${host_arch}"
+      ;;
+  esac
+  local actual_sha256 actual_archs
+  actual_sha256="$(shasum -a 256 "${ldid_path}" | awk '{print $1}')"
+  [[ "${actual_sha256}" == "${expected_sha256}" ]] || fail "Pinned ldid SHA-256 mismatch: ${actual_sha256}"
+  actual_archs="$(lipo -archs "${ldid_path}" | xargs)"
+  [[ "${actual_archs}" == "${expected_arch}" ]] || fail "Pinned ldid architecture mismatch: ${actual_archs}"
+  file -b "${ldid_path}" | grep -q 'Mach-O' || fail "Pinned ldid is not a Mach-O executable"
+  printf '%s %s %s\n' "${expected_asset}" "${expected_sha256}" "${expected_arch}"
+}
 verify_grdb_privacy_manifest() {
   require_tool python3
   local privacy_path="$1"
@@ -229,6 +383,20 @@ case "${1:-}" in
     extract_and_verify_signed_entitlements "$2" "${verification_root}/signed-entitlements.plist" "${verification_root}/codesign-entitlements.stderr"
     exit 0
     ;;
+  --sign-with-ldid)
+    [[ "$#" == "4" && -n "${2:-}" && -n "${3:-}" && -n "${4:-}" ]] || fail "Usage: $0 --sign-with-ldid <ldid> <entitlements.plist> <executable>"
+    verification_root="$(mktemp -d)"
+    trap 'rm -rf "${verification_root}"' EXIT
+    sign_executable_with_ldid "$2" "$3" "$4" "${verification_root}"
+    exit 0
+    ;;
+  --verify-final-executable)
+    [[ "$#" == "4" && -n "${2:-}" && -n "${3:-}" && -n "${4:-}" ]] || fail "Usage: $0 --verify-final-executable <ldid> <executable> <expected-sha256>"
+    verification_root="$(mktemp -d)"
+    trap 'rm -rf "${verification_root}"' EXIT
+    verify_final_executable "$2" "$3" "$4" "${verification_root}"
+    exit 0
+    ;;
   "")
     [[ "$#" == "0" ]] || fail "Unexpected empty build argument"
     ;;
@@ -238,7 +406,7 @@ case "${1:-}" in
 esac
 
 [[ "${ROOT}" != "/" && "${OUT}" == "${ROOT}/.build-ipa" ]] || fail "Refusing to clean an unexpected output path: ${OUT}"
-for tool in xcodegen xcodebuild xcrun lipo codesign file git python3 zip unzip shasum; do
+for tool in xcodegen xcodebuild xcrun lipo codesign file git python3 zip unzip shasum cmp; do
   require_tool "${tool}"
 done
 verify_dependency_contract
@@ -383,27 +551,31 @@ while IFS= read -r -d '' candidate; do
   fi
 done < <(find "${APP}" -type f -print0)
 
-codesign \
-  --force \
-  --sign - \
-  --timestamp=none \
-  --entitlements "${ENTITLEMENTS_CONTRACT}" \
-  --generate-entitlement-der \
-  "${APP}"
-verify_code_signature "${APP}" "${OUT}/codesign-verify.stderr"
+readonly LDID_PATH="${LDID_PATH:-}"
+[[ -n "${LDID_PATH}" ]] || fail "LDID_PATH must point to the pinned Procursus ldid executable"
+if ! LDID_METADATA="$(verify_pinned_ldid_tool "${LDID_PATH}")"; then
+  fail "Pinned ldid verification failed"
+fi
+readonly LDID_METADATA
+read -r LDID_ASSET LDID_SHA256 LDID_ARCH LDID_EXTRA <<< "${LDID_METADATA}"
+[[ -n "${LDID_ASSET}" && -n "${LDID_SHA256}" && -n "${LDID_ARCH}" && -z "${LDID_EXTRA}" ]] || fail "Invalid pinned ldid metadata"
+readonly LDID_ASSET LDID_SHA256 LDID_ARCH
+readonly UNSIGNED_EXECUTABLE_SHA256="$(shasum -a 256 "${EXECUTABLE}" | awk '{print $1}')"
+sign_executable_with_ldid "${LDID_PATH}" "${ENTITLEMENTS_CONTRACT}" "${EXECUTABLE}" "${OUT}/signing"
+readonly SIGNED_EXECUTABLE_SHA256="$(shasum -a 256 "${EXECUTABLE}" | awk '{print $1}')"
+[[ "${SIGNED_EXECUTABLE_SHA256}" != "${UNSIGNED_EXECUTABLE_SHA256}" ]] || fail "ldid did not change the main executable signature"
 
-readonly CODESIGN_DETAILS="$(codesign -dvv "${APP}" 2>&1)"
-grep -q '^Signature=adhoc$' <<< "${CODESIGN_DETAILS}" || fail "The app is not ad-hoc signed"
+readonly CODESIGN_DETAILS="$(codesign -dvv "${EXECUTABLE}" 2>&1)"
+grep -q '^Signature=adhoc$' <<< "${CODESIGN_DETAILS}" || fail "The main executable is not ad-hoc signed"
 if grep -q '^Authority=' <<< "${CODESIGN_DETAILS}"; then
   fail "Unexpected certificate authority in ad-hoc signature"
 fi
 
-extract_and_verify_signed_entitlements \
-  "${APP}" \
-  "${SIGNED_ENTITLEMENTS}" \
-  "${OUT}/codesign-entitlements.stderr"
+cp "${OUT}/signing/ldid-entitlements.plist" "${SIGNED_ENTITLEMENTS}"
 
 cp -R "${APP}" "${PAYLOAD}/CangJie.app"
+readonly PAYLOAD_EXECUTABLE="${PAYLOAD}/CangJie.app/${EXECUTABLE_NAME}"
+verify_final_executable "${LDID_PATH}" "${PAYLOAD_EXECUTABLE}" "${SIGNED_EXECUTABLE_SHA256}" "${OUT}/payload-verification"
 cd "${OUT}"
 zip -qry "${IPA_NAME}" Payload
 unzip -tq "${IPA_NAME}"
@@ -439,6 +611,26 @@ with zipfile.ZipFile(archive) as package:
         raise SystemExit(f"IPA must contain exactly Payload/CangJie.app, found: {sorted(root_apps)!r}")
 PY
 
+readonly IPA_VERIFICATION_ROOT="${OUT}/ipa-verification"
+[[ "${IPA_VERIFICATION_ROOT}" == "${OUT}/ipa-verification" && "${IPA_VERIFICATION_ROOT}" != "/" ]] || fail "Unsafe IPA verification path"
+rm -rf "${IPA_VERIFICATION_ROOT}"
+mkdir -p "${IPA_VERIFICATION_ROOT}"
+unzip -q "${IPA_NAME}" -d "${IPA_VERIFICATION_ROOT}"
+readonly FINAL_APP="${IPA_VERIFICATION_ROOT}/Payload/CangJie.app"
+readonly FINAL_INFO_PLIST="${FINAL_APP}/Info.plist"
+readonly FINAL_EXECUTABLE="${FINAL_APP}/${EXECUTABLE_NAME}"
+[[ -d "${FINAL_APP}" && ! -L "${FINAL_APP}" ]] || fail "Final IPA app is missing or unsafe"
+if find "${FINAL_APP}" -type l -print -quit | grep -q .; then
+  fail "Final IPA app contains a symbolic link"
+fi
+cmp -s "${INFO_PLIST}" "${FINAL_INFO_PLIST}" || fail "Final IPA Info.plist differs from the validated build"
+verify_final_executable "${LDID_PATH}" "${FINAL_EXECUTABLE}" "${SIGNED_EXECUTABLE_SHA256}" "${OUT}/ipa-executable-verification"
+readonly FINAL_ARCHS="$(lipo -archs "${FINAL_EXECUTABLE}" | xargs)"
+[[ "${FINAL_ARCHS}" == "arm64" ]] || fail "Final IPA executable architecture mismatch: ${FINAL_ARCHS}"
+if find "${FINAL_APP}" -name 'embedded.mobileprovision' -print -quit | grep -q .; then
+  fail "Unexpected provisioning profile in final IPA"
+fi
+
 readonly SHA256="$(shasum -a 256 "${IPA_NAME}" | awk '{print $1}')"
 printf '%s  %s\n' "${SHA256}" "${IPA_NAME}" > CangJie-M0.sha256
 shasum -a 256 --check --strict CangJie-M0.sha256
@@ -463,6 +655,13 @@ python3 - \
   "${EXPECTED_GRDB_BUNDLE_NAME}" \
   "${EXPECTED_GRDB_BUNDLE_IDENTIFIER}" \
   "${EXPECTED_GRDB_PRIVACY_SHA256}" \
+  "${EXPECTED_LDID_TAG}" \
+  "${LDID_ASSET}" \
+  "${LDID_SHA256}" \
+  "${LDID_ARCH}" \
+  "${UNSIGNED_EXECUTABLE_SHA256}" \
+  "${SIGNED_EXECUTABLE_SHA256}" \
+  "$(shasum -a 256 "${ENTITLEMENTS_CONTRACT}" | awk '{print $1}')" \
   "${GITHUB_REPOSITORY:-unknown}" \
   "${GITHUB_REF:-unknown}" \
   "${GITHUB_RUN_ID:-unknown}" \
@@ -489,6 +688,13 @@ import sys
     grdb_bundle,
     grdb_bundle_identifier,
     grdb_privacy_sha256,
+    ldid_tag,
+    ldid_asset,
+    ldid_sha256,
+    ldid_architecture,
+    unsigned_executable_sha256,
+    signed_executable_sha256,
+    entitlement_contract_sha256,
     repository,
     git_ref,
     run_id,
@@ -502,7 +708,7 @@ entitlements = {
     "keychain-access-groups": [bundle_identifier],
 }
 manifest = {
-    "schemaVersion": 3,
+    "schemaVersion": 4,
     "artifact": artifact,
     "sha256": sha256,
     "bundleIdentifier": bundle_identifier,
@@ -532,7 +738,17 @@ manifest = {
         }
     ],
     "signing": {
-        "type": "ad-hoc",
+        "type": "trollstore-fakesign",
+        "signer": "ldid",
+        "ldid": {
+            "tag": ldid_tag,
+            "asset": ldid_asset,
+            "sha256": ldid_sha256,
+            "architecture": ldid_architecture,
+        },
+        "unsignedExecutableSHA256": unsigned_executable_sha256,
+        "signedExecutableSHA256": signed_executable_sha256,
+        "entitlementContractSHA256": entitlement_contract_sha256,
         "appleDeveloperCertificate": False,
         "provisioningProfile": False,
         "appleTeamIdentifier": None,

@@ -26,7 +26,9 @@ jobs:
         with:
           persist-credentials: false
       - name: Static validation
-        run: bash -n scripts/build-ipa.sh scripts/find-ipad-simulator.sh scripts/tests/test-find-ipad-simulator.sh scripts/tests/test-build-ipa-contracts.sh scripts/tests/test-build-ipa-entitlements.sh
+        run: bash -n scripts/build-ipa.sh scripts/install-ldid.sh scripts/find-ipad-simulator.sh scripts/tests/test-install-ldid.sh scripts/tests/test-find-ipad-simulator.sh scripts/tests/test-build-ipa-contracts.sh scripts/tests/test-build-ipa-entitlements.sh
+      - name: Test pinned ldid installer contract
+        run: bash scripts/tests/test-install-ldid.sh
       - name: Test simulator selector failure handling
         run: bash scripts/tests/test-find-ipad-simulator.sh
       - name: Select pinned Xcode

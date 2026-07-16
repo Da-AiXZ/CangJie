@@ -108,6 +108,9 @@ case "${actual[0]:-}" in
   --display)
     expected=(--display --entitlements - --xml "${FAKE_CODESIGN_APP:?}")
     ;;
+  -dvv)
+    expected=(-dvv "${FAKE_CODESIGN_APP:?}")
+    ;;
   *)
     echo "unexpected codesign operation: ${actual[0]:-missing}" >&2
     exit 64
@@ -129,6 +132,11 @@ if [[ "${actual[0]}" == "--verify" ]]; then
     exit 1
   fi
   echo 'fake app: valid on disk' >&2
+  exit 0
+fi
+if [[ "${actual[0]}" == "-dvv" ]]; then
+  echo 'Executable=fake' >&2
+  echo 'Signature=adhoc' >&2
   exit 0
 fi
 case "${FAKE_CODESIGN_MODE:?}" in
@@ -181,6 +189,94 @@ assert_failure fake-argument-error 'Failed to extract signed entitlements' run_f
 assert_failure fake-partial-error 'Failed to extract signed entitlements' run_fake partial-error bash "${BUILD_SCRIPT}" --verify-signed-entitlements "${APP_PATH}"
 assert_failure verify-signed-arity 'Usage:' bash "${BUILD_SCRIPT}" --verify-signed-entitlements
 
+readonly EXECUTABLE_PATH="${TEMP_ROOT}/Executable With Spaces.exe"
+printf 'fixture' >"${EXECUTABLE_PATH}"
+chmod +x "${EXECUTABLE_PATH}"
+
+cat >"${BIN_DIR}/ldid" <<'SH'
+#!/bin/bash
+set -euo pipefail
+operation="${1:-}"
+case "${operation}" in
+  -S*)
+    [[ "$#" == "2" ]] || { echo 'unexpected ldid sign argument count' >&2; exit 64; }
+    [[ "${operation}" == "-S${FAKE_LDID_CONTRACT:?}" ]] || { echo "unexpected ldid entitlement argument: ${operation}" >&2; exit 64; }
+    [[ "$2" == "${FAKE_LDID_EXECUTABLE:?}" ]] || { echo "unexpected ldid executable: $2" >&2; exit 64; }
+    if [[ "${FAKE_LDID_MODE:?}" == "sign-error" ]]; then
+      echo 'ldid: simulated signing failure' >&2
+      exit 2
+    fi
+    ;;
+  -e)
+    [[ "$#" == "2" ]] || { echo 'unexpected ldid extract argument count' >&2; exit 64; }
+    [[ "$2" == "${FAKE_LDID_EXECUTABLE:?}" ]] || { echo "unexpected ldid executable: $2" >&2; exit 64; }
+    case "${FAKE_LDID_MODE:?}" in
+      valid)
+        cat "${FAKE_LDID_VALID:?}"
+        ;;
+      empty-dictionary)
+        cat "${FAKE_LDID_EMPTY:?}"
+        ;;
+      empty-output)
+        ;;
+      extract-error)
+        echo 'ldid: simulated extraction failure' >&2
+        exit 3
+        ;;
+      sign-error)
+        echo 'ldid extraction must not run after signing failure' >&2
+        exit 65
+        ;;
+      *)
+        echo "unknown fake ldid mode" >&2
+        exit 65
+        ;;
+    esac
+    ;;
+  *)
+    echo "unexpected ldid operation: ${operation}" >&2
+    exit 64
+    ;;
+esac
+SH
+chmod +x "${BIN_DIR}/ldid"
+
+run_fake_ldid() {
+  local ldid_mode="$1"
+  local codesign_mode="$2"
+  shift 2
+  PATH="${BIN_DIR}:${PATH}" \
+    FAKE_CODESIGN_APP="${EXECUTABLE_PATH}" \
+    FAKE_CODESIGN_MODE="${codesign_mode}" \
+    FAKE_CODESIGN_VALID="${FIXTURES}/valid.xml" \
+    FAKE_CODESIGN_EMPTY="${FIXTURES}/empty.xml" \
+    FAKE_LDID_CONTRACT="${CONTRACT}" \
+    FAKE_LDID_EXECUTABLE="${EXECUTABLE_PATH}" \
+    FAKE_LDID_MODE="${ldid_mode}" \
+    FAKE_LDID_VALID="${FIXTURES}/valid.xml" \
+    FAKE_LDID_EMPTY="${FIXTURES}/empty.xml" \
+    "$@"
+}
+
+assert_success fake-ldid-valid run_fake_ldid valid valid bash "${BUILD_SCRIPT}" --sign-with-ldid "${BIN_DIR}/ldid" "${CONTRACT}" "${EXECUTABLE_PATH}"
+assert_failure fake-ldid-sign-error 'ldid failed to sign the main executable' run_fake_ldid sign-error valid bash "${BUILD_SCRIPT}" --sign-with-ldid "${BIN_DIR}/ldid" "${CONTRACT}" "${EXECUTABLE_PATH}"
+assert_failure fake-ldid-invalid-signature 'Signed executable failed strict codesign verification' run_fake_ldid valid invalid-signature bash "${BUILD_SCRIPT}" --sign-with-ldid "${BIN_DIR}/ldid" "${CONTRACT}" "${EXECUTABLE_PATH}"
+assert_failure fake-ldid-empty-dictionary 'Entitlement contract mismatch: {}' run_fake_ldid empty-dictionary valid bash "${BUILD_SCRIPT}" --sign-with-ldid "${BIN_DIR}/ldid" "${CONTRACT}" "${EXECUTABLE_PATH}"
+assert_failure fake-ldid-empty-output 'ldid returned no signed entitlements' run_fake_ldid empty-output valid bash "${BUILD_SCRIPT}" --sign-with-ldid "${BIN_DIR}/ldid" "${CONTRACT}" "${EXECUTABLE_PATH}"
+assert_failure fake-ldid-extract-error 'Failed to extract ldid-signed entitlements' run_fake_ldid extract-error valid bash "${BUILD_SCRIPT}" --sign-with-ldid "${BIN_DIR}/ldid" "${CONTRACT}" "${EXECUTABLE_PATH}"
+assert_failure sign-with-ldid-arity 'Usage:' bash "${BUILD_SCRIPT}" --sign-with-ldid
+
+readonly EXECUTABLE_SHA256="$(python3 - "${EXECUTABLE_PATH}" <<'PY'
+import hashlib
+import sys
+print(hashlib.sha256(open(sys.argv[1], "rb").read()).hexdigest())
+PY
+)"
+assert_success final-executable-valid run_fake_ldid valid valid bash "${BUILD_SCRIPT}" --verify-final-executable "${BIN_DIR}/ldid" "${EXECUTABLE_PATH}" "${EXECUTABLE_SHA256}"
+assert_failure final-executable-hash-mismatch 'Final executable SHA-256 mismatch' run_fake_ldid valid valid bash "${BUILD_SCRIPT}" --verify-final-executable "${BIN_DIR}/ldid" "${EXECUTABLE_PATH}" "0000000000000000000000000000000000000000000000000000000000000000"
+assert_failure final-executable-codesign-entitlements 'Entitlement contract mismatch: {}' run_fake_ldid valid empty-dictionary bash "${BUILD_SCRIPT}" --verify-final-executable "${BIN_DIR}/ldid" "${EXECUTABLE_PATH}" "${EXECUTABLE_SHA256}"
+assert_failure verify-final-executable-arity 'Usage:' bash "${BUILD_SCRIPT}" --verify-final-executable
+
 if [[ "$(uname -s)" == "Darwin" ]]; then
   readonly REAL_APP="${TEMP_ROOT}/RealFixture.app"
   mkdir -p "${REAL_APP}"
@@ -212,6 +308,12 @@ PY
   assert_failure real-codesign-tampered 'Signed app failed strict codesign verification' bash "${BUILD_SCRIPT}" --verify-signed-entitlements "${REAL_APP}"
   /usr/bin/codesign --force --sign - --timestamp=none "${REAL_EMPTY_APP}"
   assert_failure real-codesign-empty 'codesign returned no signed entitlements' bash "${BUILD_SCRIPT}" --verify-signed-entitlements "${REAL_EMPTY_APP}"
+
+  if [[ -n "${LDID_PATH:-}" ]]; then
+    readonly REAL_LDID_EXECUTABLE="${TEMP_ROOT}/RealLdidFixture"
+    xcrun --sdk iphoneos clang -arch arm64 -miphoneos-version-min=16.6 "${TEMP_ROOT}/main.c" -o "${REAL_LDID_EXECUTABLE}"
+    assert_success real-ldid bash "${BUILD_SCRIPT}" --sign-with-ldid "${LDID_PATH}" "${CONTRACT}" "${REAL_LDID_EXECUTABLE}"
+  fi
 fi
 
 printf 'build-ipa entitlement contract tests passed\n'
