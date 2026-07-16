@@ -89,7 +89,7 @@ with zipfile.ZipFile(archive) as package:
             os.chmod(target, mode & 0o777)
 PY
 
-readonly XCODEGEN_BIN="${EXTRACT_ROOT}/bin/xcodegen"
+readonly XCODEGEN_BIN="${EXTRACT_ROOT}/xcodegen/bin/xcodegen"
 [[ -f "${XCODEGEN_BIN}" && ! -L "${XCODEGEN_BIN}" ]] || {
   echo "Validated XcodeGen executable was not found: ${XCODEGEN_BIN}" >&2
   exit 1
@@ -103,7 +103,7 @@ ACTUAL_VERSION="$("${XCODEGEN_BIN}" --version | tr -d '\r')"
 }
 
 if [[ -n "${GITHUB_PATH:-}" ]]; then
-  printf '%s\n' "${EXTRACT_ROOT}/bin" >> "${GITHUB_PATH}"
+  printf '%s\n' "${EXTRACT_ROOT}/xcodegen/bin" >> "${GITHUB_PATH}"
 else
   echo "XcodeGen is available for this process at ${XCODEGEN_BIN}" >&2
 fi

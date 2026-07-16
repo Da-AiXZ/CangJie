@@ -23,7 +23,7 @@ jobs:
         with:
           persist-credentials: false
       - name: Install Swift
-        uses: swift-actions/setup-swift@6c6930de9f9c30e12bf9cd7042fd066ac16f6a0b # v2.4.0
+        uses: swift-actions/setup-swift@7ca6abe6b3b0e8b5421b88be48feee39cbf52c6a # v2.4.0
         with:
           swift-version: "6.3.3"
       - name: Audit toolchain
