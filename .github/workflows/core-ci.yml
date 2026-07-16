@@ -1,0 +1,36 @@
+name: Core CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: core-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  windows-core:
+    runs-on: windows-2025
+    timeout-minutes: 30
+    steps:
+      - name: Check out source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - name: Install Swift
+        uses: swift-actions/setup-swift@6c6930de9f9c30e12bf9cd7042fd066ac16f6a0b # v2.4.0
+        with:
+          swift-version: "6.3.3"
+      - name: Audit toolchain
+        shell: pwsh
+        run: swift --version
+      - name: Strict Core tests and 90 percent line coverage gate
+        shell: pwsh
+        env:
+          CANGJIE_SWIFTPM_SCRATCH: ${{ runner.temp }}\CangJieSwiftPM
+        run: ./scripts/windows/test-core.ps1

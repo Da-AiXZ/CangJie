@@ -1,0 +1,60 @@
+# Xcode / SwiftPM
+.DS_Store
+.build/
+.build-ci/
+.swiftpm/
+DerivedData/
+*.xcworkspace/xcuserdata/
+*.xcodeproj/xcuserdata/
+*.xcuserstate
+*.xcresult
+TestResults/
+.build-ipa/
+CangJie.xcodeproj/
+
+# Build and release artifacts
+*.ipa
+*.app
+*.xcarchive
+Payload/
+build-manifest.json
+*.sha256
+
+# Local/private data
+*.sqlite
+*.sqlite3
+*.sqlite3-*
+*.sqlite-shm
+*.sqlite-wal
+*.db
+*.db-shm
+*.db-wal
+checkpoints*.json
+.env
+.env.*
+!.env.example
+Secrets.xcconfig
+Local.xcconfig
+projects/
+backups/
+imports/
+exports/
+user-data/
+private/
+fixtures/private/
+
+# Credentials
+*.p8
+*.p12
+*.mobileprovision
+*.cer
+*.key
+*.pem
+.netrc
+
+# User-provided writing and source packages
+*.docx
+*.pdf
+*.zip
+AI写小说开发资料包.zip
+cc.zip

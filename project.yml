@@ -1,0 +1,85 @@
+name: CangJie
+options:
+  minimumXcodeGenVersion: 2.45.4
+  deploymentTarget:
+    iOS: "16.6"
+  createIntermediateGroups: true
+  generateEmptyDirectories: true
+settings:
+  base:
+    SWIFT_VERSION: 5.0
+    IPHONEOS_DEPLOYMENT_TARGET: 16.6
+    DEVELOPMENT_TEAM: ""
+    ENABLE_USER_SCRIPT_SANDBOXING: YES
+    CLANG_ANALYZER_LOCALIZABILITY_NONLOCALIZED: YES
+packages:
+  CangJieCore:
+    path: .
+  GRDB:
+    url: https://github.com/groue/GRDB.swift.git
+    revision: 2cf6c756e1e5ef6901ebae16576a7e4e4b834622
+
+targets:
+  CangJie:
+    type: application
+    platform: iOS
+    sources:
+      - path: App/CangJieApp
+    info:
+      path: App/Config/Info.plist
+    entitlements:
+      path: App/Config/CangJie.entitlements
+    dependencies:
+      - package: CangJieCore
+      - package: GRDB
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.juyang.CangJie
+        PRODUCT_NAME: CangJie
+        TARGETED_DEVICE_FAMILY: 2
+        SUPPORTS_MACCATALYST: NO
+        GENERATE_INFOPLIST_FILE: NO
+        CODE_SIGN_STYLE: Manual
+        CODE_SIGN_INJECT_BASE_ENTITLEMENTS: NO
+        CURRENT_PROJECT_VERSION: 1
+        MARKETING_VERSION: 0.0.1
+  CangJieAppTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - path: App/CangJieAppTests
+    dependencies:
+      - target: CangJie
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.juyang.CangJie.tests
+        GENERATE_INFOPLIST_FILE: YES
+  CangJieUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources:
+      - path: App/CangJieUITests
+    dependencies:
+      - target: CangJie
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.juyang.CangJie.uitests
+        GENERATE_INFOPLIST_FILE: YES
+schemes:
+  CangJie:
+    build:
+      targets:
+        CangJie: all
+        CangJieAppTests: [test]
+        CangJieUITests: [test]
+    test:
+      gatherCoverageData: true
+      targets:
+        - name: CangJieAppTests
+          parallelizable: false
+        - name: CangJieUITests
+          parallelizable: false
+    run:
+      config: Debug
+    archive:
+      config: Release

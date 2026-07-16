@@ -1,0 +1,73 @@
+name: iPadOS CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ios-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  XCODE_VERSION: "16.4"
+
+jobs:
+  simulator-tests:
+    runs-on: macos-15
+    timeout-minutes: 60
+    steps:
+      - name: Check out source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - name: Static validation
+        run: bash -n scripts/build-ipa.sh scripts/find-ipad-simulator.sh
+      - name: Select pinned Xcode
+        run: bash scripts/select-xcode.sh
+      - name: Install pinned XcodeGen
+        run: bash scripts/install-xcodegen.sh
+      - name: Verify dependency contract and generate project
+        run: |
+          set -euo pipefail
+          bash scripts/build-ipa.sh --verify-dependency-contract
+          xcodegen generate --spec project.yml
+      - name: Resolve and verify revision-pinned packages
+        run: |
+          set -euo pipefail
+          xcodebuild -resolvePackageDependencies \
+            -project CangJie.xcodeproj \
+            -scheme CangJie \
+            -clonedSourcePackagesDirPath "$RUNNER_TEMP/CangJie-SourcePackages"
+          bash scripts/build-ipa.sh --verify-resolved-packages \
+            CangJie.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved
+      - name: Select and boot an eligible iPad Simulator
+        id: simulator
+        env:
+          SWIFTPM_CLONED_SOURCE_PACKAGES_DIR: ${{ runner.temp }}/CangJie-SourcePackages
+        run: echo "udid=$(bash scripts/find-ipad-simulator.sh)" >> "$GITHUB_OUTPUT"
+      - name: Unit, integration and UI smoke tests
+        run: |
+          set -euo pipefail
+          set -o pipefail
+          mkdir -p TestResults
+          xcodebuild test \
+            -project CangJie.xcodeproj \
+            -scheme CangJie \
+            -destination "platform=iOS Simulator,id=${{ steps.simulator.outputs.udid }}" \
+            -resultBundlePath TestResults/CangJie.xcresult \
+            -clonedSourcePackagesDirPath "$RUNNER_TEMP/CangJie-SourcePackages" \
+            -disableAutomaticPackageResolution \
+            CODE_SIGNING_ALLOWED=NO
+      - name: Upload test result
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: CangJie-iOS-TestResults
+          path: TestResults/CangJie.xcresult
+          if-no-files-found: warn
+          retention-days: 7

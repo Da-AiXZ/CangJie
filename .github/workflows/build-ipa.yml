@@ -1,0 +1,62 @@
+name: Build TrollStore IPA
+
+on:
+  workflow_dispatch:
+    inputs:
+      reason:
+        description: "Build purpose or device-validation note"
+        required: false
+        default: "M0 device verification"
+
+permissions:
+  contents: read
+
+env:
+  XCODE_VERSION: "16.4"
+
+jobs:
+  build-ipa:
+    runs-on: macos-15
+    timeout-minutes: 60
+    steps:
+      - name: Check out source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - name: Static validation
+        run: bash -n scripts/build-ipa.sh scripts/find-ipad-simulator.sh
+      - name: Select pinned Xcode
+        run: bash scripts/select-xcode.sh
+      - name: Install pinned XcodeGen
+        run: bash scripts/install-xcodegen.sh
+      - name: Build, validate, ad-hoc sign and package candidate IPA
+        env:
+          BUILD_REASON: ${{ inputs.reason }}
+        run: bash scripts/build-ipa.sh
+      - name: Enforce fail-closed device acceptance gate
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+
+          manifest = json.loads(Path(".build-ipa/build-manifest.json").read_text(encoding="utf-8"))
+          expected = "blocked-pending-trollstore-device-keychain-validation"
+          actual = manifest.get("acceptance", {}).get("status")
+          if actual != expected or manifest.get("acceptance", {}).get("failClosed") is not True:
+              raise SystemExit(f"Artifact acceptance gate is not fail-closed: {actual!r}")
+          PY
+          {
+            echo "### TrollStore device acceptance required"
+            echo "This candidate is not accepted until the manifest's real-device keychain checks pass on the target device."
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload candidate IPA, checksum and manifest
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: CangJie-M0-device-validation-required-${{ github.run_number }}
+          path: |
+            .build-ipa/CangJie-M0.ipa
+            .build-ipa/CangJie-M0.sha256
+            .build-ipa/build-manifest.json
+          if-no-files-found: error
+          retention-days: 14
