@@ -11,6 +11,11 @@ final class AppViewModel: ObservableObject {
     @Published var streamURL = ""
     @Published var streamOutput = ""
     @Published var isStreaming = false
+    @Published private(set) var projects: [NovelProject] = []
+    @Published var isLeftPagePresented = false
+    @Published var isArtifactDrawerPresented = false
+    @Published var conversationMessages: [String] = []
+    @Published var isAgentWorking = false
 
     private static let maximumStreamOutputBytes = 256 * 1_024
     private let database: AppDatabase?
@@ -56,11 +61,37 @@ final class AppViewModel: ObservableObject {
         self.database = databaseState.database
         draft = databaseState.draft
         status = databaseState.status
+        reloadProjects()
 
         do {
             hasStoredKey = try keychain.contains(account: "m0-probe")
         } catch {
             status = "\(status)；Keychain 状态不可用（KEY-READ）"
+        }
+    }
+
+    func reloadProjects() {
+        guard let database else { projects = []; return }
+        do { projects = try database.listProjects() }
+        catch { status = "Project list failed (DB-PROJECT-LIST)" }
+    }
+
+    func sendAgentMessage() {
+        let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return }
+        conversationMessages.append("You: " + text)
+        draft = ""
+        if text.localizedCaseInsensitiveContains("create") || text.localizedCaseInsensitiveContains("novel") || text.unicodeScalars.contains(where: { $0.value >= 0x4E00 && $0.value <= 0x9FFF }) {
+            isAgentWorking = true
+            do {
+                let project = try database?.createProject(title: "Untitled Novel", premise: text)
+                reloadProjects()
+                conversationMessages.append(project.map { "Agent: Project created: \($0.title)" } ?? "Agent: Database unavailable; proposal not executed")
+                status = project == nil ? "Project tool unavailable" : "Verified: project.create"
+            } catch { conversationMessages.append("Agent: Project creation failed") ; status = "Project tool failed" }
+            isAgentWorking = false
+        } else {
+            conversationMessages.append("Agent: I will ask the next highest-value question about this idea.")
         }
     }
 

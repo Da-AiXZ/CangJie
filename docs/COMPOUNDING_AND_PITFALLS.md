@@ -52,3 +52,8 @@ Close completed agents after integrating results. If a new reviewer cannot be sp
 4. Review diff by file.
 5. Update this log and control center.
 6. Commit conventional message, push, inspect Actions, report evidence.
+
+
+## P-015 M1-A must not use iOS 17-only UI APIs
+
+The target is iPadOS 16.6. New UI must be checked against the deployment target before remote build. Avoid convenience APIs introduced after 16.6, such as `ContentUnavailableView`; use compatible composition or gate availability explicitly.

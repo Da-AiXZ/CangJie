@@ -1,6 +1,14 @@
 import Foundation
 import GRDB
 
+struct NovelProject: Identifiable, Equatable {
+    let id: UUID
+    let title: String
+    let premise: String
+    let createdAt: Date
+    let updatedAt: Date
+}
+
 struct DraftSnapshot: Equatable {
     let content: String
     let updatedAt: Date
@@ -117,6 +125,23 @@ final class AppDatabase {
         }
     }
 
+    func createProject(title: String, premise: String, now: Date = Date()) throws -> NovelProject {
+        let project = NovelProject(id: UUID(), title: title, premise: premise, createdAt: now, updatedAt: now)
+        try queue.write { db in
+            try db.execute(sql: "INSERT INTO novelProject (id, title, premise, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?)", arguments: [project.id.uuidString, project.title, project.premise, project.createdAt.timeIntervalSince1970, project.updatedAt.timeIntervalSince1970])
+        }
+        return project
+    }
+
+    func listProjects() throws -> [NovelProject] {
+        try queue.read { db in
+            try Row.fetchAll(db, sql: "SELECT * FROM novelProject ORDER BY updatedAt DESC").compactMap { row in
+                guard let id = UUID(uuidString: row["id"]) else { return nil }
+                return NovelProject(id: id, title: row["title"], premise: row["premise"], createdAt: Date(timeIntervalSince1970: row["createdAt"]), updatedAt: Date(timeIntervalSince1970: row["updatedAt"]))
+            }
+        }
+    }
+
     func journalMode() throws -> String {
         try queue.read { db in
             try String.fetchOne(db, sql: "PRAGMA journal_mode") ?? "unknown"
@@ -216,6 +241,15 @@ final class AppDatabase {
                 table.column("createdAt", .double).notNull()
                 table.uniqueKey(["taskID", "sequence"])
                 table.uniqueKey(["taskID", "idempotencyKey"])
+            }
+        }
+        migrator.registerMigration("m1-projects") { db in
+            try db.create(table: "novelProject") { table in
+                table.column("id", .text).primaryKey()
+                table.column("title", .text).notNull()
+                table.column("premise", .text).notNull()
+                table.column("createdAt", .double).notNull()
+                table.column("updatedAt", .double).notNull()
             }
         }
         return migrator

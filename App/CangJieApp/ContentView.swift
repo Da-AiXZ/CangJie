@@ -4,107 +4,90 @@ struct ContentView: View {
     @ObservedObject var model: AppViewModel
 
     var body: some View {
-        NavigationSplitView {
-            List {
-                Section("M0 验证") {
-                    Label("SQLite 草稿", systemImage: "doc.text")
-                    Label("Checkpoint", systemImage: "arrow.clockwise.circle")
-                    Label("Keychain", systemImage: "key")
-                    Label("SSE 流", systemImage: "wave.3.right")
-                }
-                Section("边界") {
-                    Text("这里只验证本地存储、凭证、流式网络和恢复链路；完整写作 Agent 将按 M1–M5 逐步实现。")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                }
-            }
-            .navigationTitle("仓颉")
-        } detail: {
-            VStack(alignment: .leading, spacing: 14) {
-                HStack {
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text("M0 可行性工作台")
-                            .font(.title2.bold())
-                            .accessibilityIdentifier("m0-title")
-                        Text(model.status)
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
-                            .accessibilityIdentifier("status-label")
-                    }
-                    Spacer()
-                    Button("保存", action: model.saveDraft)
-                        .buttonStyle(.bordered)
-                    Button("检查点") { model.createCheckpoint(reason: "manual") }
-                        .buttonStyle(.borderedProminent)
-                }
-
-                TextEditor(text: $model.draft)
-                    .font(.system(.body, design: .serif))
-                    .padding(8)
-                    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 10))
-                    .accessibilityLabel("M0 草稿编辑器")
-                    .accessibilityIdentifier("draft-editor")
-
+        HStack(spacing: 0) {
+            leftRail
+                .frame(width: 250)
+            Divider()
+            conversation
+                .frame(maxWidth: .infinity)
+            if model.isArtifactDrawerPresented {
                 Divider()
+                artifacts
+                    .frame(width: 320)
+            }
+        }
+        .background(Color(uiColor: .systemGroupedBackground))
+    }
 
-                ViewThatFits(in: .horizontal) {
-                    HStack(alignment: .top, spacing: 16) {
-                        keychainProbe
-                        streamingProbe
-                    }
-                    VStack(alignment: .leading, spacing: 12) {
-                        keychainProbe
-                        streamingProbe
+    private var leftRail: some View {
+        NavigationStack {
+            List {
+                Section("Navigate") {
+                    NavigationLink("Conversations", destination: Text("Conversation history"))
+                    NavigationLink("Novel Projects", destination: projectPage)
+                    NavigationLink("Workbenches", destination: Text("Novel workbenches"))
+                    NavigationLink("Research", destination: Text("Research center"))
+                }
+                Section {
+                    Button { model.isArtifactDrawerPresented.toggle() } label: {
+                        Label(model.isArtifactDrawerPresented ? "Hide artifacts" : "Show artifacts", systemImage: "square.stack.3d.up")
                     }
                 }
-                .frame(maxHeight: 230)
             }
-            .padding(20)
-            .navigationTitle("仓颉")
-            .navigationBarTitleDisplayMode(.inline)
+            .navigationTitle("CangJie")
         }
     }
 
-    private var keychainProbe: some View {
-        GroupBox("Keychain 最小实验") {
-            VStack(alignment: .leading, spacing: 10) {
-                SecureField("输入临时测试值（不会写入数据库）", text: $model.apiKeyInput)
-                    .textFieldStyle(.roundedBorder)
-                HStack {
-                    Button("保存到 Keychain", action: model.saveProbeKey)
-                    Button("删除", action: model.deleteProbeKey)
-                        .disabled(!model.hasStoredKey)
-                    Label(
-                        model.hasStoredKey ? "已保存" : "未保存",
-                        systemImage: model.hasStoredKey ? "checkmark.shield" : "shield"
-                    )
-                    .foregroundStyle(model.hasStoredKey ? .green : .secondary)
+    private var projectPage: some View {
+        List {
+            ForEach(model.projects) { project in
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(project.title).font(.headline)
+                    Text(project.premise).font(.caption).foregroundStyle(.secondary).lineLimit(2)
                 }
+                .padding(.vertical, 4)
             }
-            .padding(.top, 4)
+            Button { model.reloadProjects() } label: { Label("Refresh", systemImage: "arrow.clockwise") }
+        }
+        .navigationTitle("Novel Projects")
+    }
+
+    private var conversation: some View {
+        VStack(spacing: 0) {
+            HStack {
+                VStack(alignment: .leading) {
+                    Text("Agent Control Plane").font(.title2.bold())
+                    Text(model.status).font(.caption).foregroundStyle(.secondary)
+                }
+                Spacer()
+                Button { model.isArtifactDrawerPresented.toggle() } label: { Image(systemName: "sidebar.right") }
+            }
+            .padding()
+            Divider()
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 14) {
+                    if model.conversationMessages.isEmpty {
+                        VStack(spacing: 10) { Image(systemName: "sparkles").font(.largeTitle); Text("Start with an idea").font(.headline); Text("Ask CangJie to create or develop a novel. The Agent will operate the project tools for you.").font(.footnote).foregroundStyle(.secondary) }.frame(maxWidth: .infinity).padding(.vertical, 80)
+                    }
+                    ForEach(Array(model.conversationMessages.enumerated()), id: \.offset) { _, message in
+                        Text(message).frame(maxWidth: .infinity, alignment: .leading).padding(12).background(.background, in: RoundedRectangle(cornerRadius: 12))
+                    }
+                }.padding()
+            }
+            HStack(alignment: .bottom) {
+                TextEditor(text: $model.draft).frame(minHeight: 70, maxHeight: 130).padding(6).background(.background, in: RoundedRectangle(cornerRadius: 12))
+                Button { model.sendAgentMessage() } label: { Image(systemName: "arrow.up.circle.fill").font(.system(size: 32)) }.disabled(model.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }.padding()
         }
     }
 
-    private var streamingProbe: some View {
-        GroupBox("HTTPS SSE 最小实验") {
-            VStack(alignment: .leading, spacing: 10) {
-                TextField("https://你的测试端点", text: $model.streamURL)
-                    .textInputAutocapitalization(.never)
-                    .keyboardType(.URL)
-                    .textFieldStyle(.roundedBorder)
-                HStack {
-                    Button(model.isStreaming ? "重新开始" : "开始", action: model.startStreamingProbe)
-                    Button("取消", action: model.cancelStreamingProbe)
-                        .disabled(!model.isStreaming)
-                }
-                ScrollView {
-                    Text(model.streamOutput.isEmpty ? "等待流式数据…" : model.streamOutput)
-                        .font(.caption.monospaced())
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                }
-                .frame(height: 80)
-            }
-            .padding(.top, 4)
-        }
+    private var artifacts: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Conversation artifacts").font(.headline)
+            Text("Projects: \(model.projects.count)")
+            Divider()
+            Text("Tool receipts, plans, diffs, approvals, and chapter versions will appear here.").font(.footnote).foregroundStyle(.secondary)
+            Spacer()
+        }.padding()
     }
 }

@@ -80,6 +80,23 @@ final class AppViewModelTests: XCTestCase {
         XCTAssertTrue(viewModel.status.contains("DB-INIT"))
     }
 
+
+    @MainActor
+    func testAgentCreationMessageExecutesProjectToolAndClearsComposer() throws {
+        let (database, directory) = try makeDatabase()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let viewModel = AppViewModel(database: database, keychain: StubSecretRepository())
+
+        viewModel.draft = "create a cultivation novel"
+        viewModel.sendAgentMessage()
+
+        XCTAssertEqual(viewModel.draft, "")
+        XCTAssertEqual(viewModel.projects.count, 1)
+        XCTAssertEqual(viewModel.projects.first?.premise, "create a cultivation novel")
+        XCTAssertEqual(viewModel.status, "Verified: project.create")
+        XCTAssertTrue(viewModel.conversationMessages.last?.contains("Project created") == true)
+    }
+
     private func makeDatabase() throws -> (AppDatabase, URL) {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)

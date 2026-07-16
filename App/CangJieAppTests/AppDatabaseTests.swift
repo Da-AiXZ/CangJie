@@ -53,4 +53,17 @@ final class AppDatabaseTests: XCTestCase {
         XCTAssertEqual(second, first)
         XCTAssertEqual(try database.latestCheckpoint(taskID: taskID)?.sequence, 1)
     }
+
+    func testCreateAndListNovelProjectsPersistsNewestFirst() throws {
+        let (database, directory) = try makeDatabase()
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let first = try database.createProject(title: "First", premise: "A", now: Date(timeIntervalSince1970: 100))
+        let second = try database.createProject(title: "Second", premise: "B", now: Date(timeIntervalSince1970: 200))
+        let projects = try database.listProjects()
+
+        XCTAssertEqual(projects.map(\.id), [second.id, first.id])
+        XCTAssertEqual(projects.map(\.title), ["Second", "First"])
+    }
+
 }

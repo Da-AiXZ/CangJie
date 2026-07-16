@@ -15,7 +15,7 @@ CangJie is agent-first: persistent center conversation controls a governed novel
 
 ## Current milestone
 
-M1 First-Chapter Agent Vertical Slice; current slice M1-A Agent-first shell and real project tools.
+M1 First-Chapter Agent Vertical Slice; current slice M1-A Agent-first shell and real project tools; implementation is in progress.
 
 ```text
 open -> center conversation -> ask to create cultivation novel
@@ -53,3 +53,7 @@ Novel package concepts are recorded in the plan. `cc.zip` is clean-room abstract
 ### 2026-07-16 Agent-first reset
 
 Retired old roadmap; corrected left navigation; established runtime/tool/canon/clean-room baseline. The first write was corrupted into question marks and repeated blocks, so the documents were rewritten in ASCII-dominant UTF-8 and an encoding gate was added. Documentation baseline commit: `bdf0056`. Post-push Actions are checked separately after this entry.
+
+## 2026-07-16 M1-A implementation checkpoint
+
+Implemented the first real vertical slice in `App/CangJieApp/ContentView.swift`, `AppViewModel.swift`, and `AppDatabase.swift`: persistent center conversation shell, independent left navigation to Novel Projects, collapsed artifact drawer, `novelProject` migration, and project create/list persistence. Added AppDatabase/AppViewModel tests. Windows `swift test` passed all 35 core tests. iOS App compilation and UI tests remain pending GitHub Actions.
