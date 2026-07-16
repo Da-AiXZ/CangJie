@@ -1,60 +1,33 @@
-# M0 Windows 与 iPad 验证手册
+# M0 Feasibility and Device Validation
 
-## 已安装的 Windows 工具
+> Version nature: engineering feasibility baseline, not the product UI and not a completed Agent.
+> Baseline date: 2026-07-16.
 
-- Git：`F:\Git`
-- Visual Studio Build Tools 2022：`F:\DevTools\VisualStudio\2022\BuildTools`
-- Swift 6.3.3：`F:\DevTools\Swift`
-- Swift 平台 SDK：`F:\DevTools\Swift\Platforms\6.3.3\Windows.platform\Developer\SDKs\Windows.sdk`
-- SwiftPM/Clang 缓存：`F:\DevTools\CangJie`
+## Validated
 
-Swift 安装器原本写入用户 LocalAppData；为节省 C 盘空间，完整 Swift 目录已移动到 F 盘，并在原路径保留目录联接，避免破坏安装器升级/卸载记录。
+- Windows builds/tests the platform-neutral Swift package.
+- GitHub Actions compiles the iPad app and packages a device IPA.
+- TrollStore installed the IPA on the user's M1 11-inch iPad Pro running iPadOS 16.6.1.
+- The app opened without immediate crash.
+- Basic typed content persisted across an immediate restart in the tested scenario.
 
-## 本地测试
+## Evidence
 
-在资源管理器或终端运行：
-
-```cmd
-scripts\windows\test-core.cmd
+```text
+Baseline commit: 7b2658caf78fa21d4cbf28e0b8851eb3bcfec23b
+Build TrollStore IPA: 29500269591
+iPadOS CI:            29500271632
+Core CI:              29500273381
+IPA: F:\project\CangJie\artifacts\CangJie-M0-run-20\CangJie-M0.ipa
+SHA-256: 2092cfb5fe94b463c453ca25e6107a12de1d77e8be8309c85ee027f8863d62ef
 ```
 
-当前 M0 Core 要求：
+## Not validated by M0
 
-- 19 个测试全部通过；
-- Core 行覆盖率至少 90%；
-- App/GRDB/Keychain/UI 测试留给 macOS GitHub Actions。
+Agent-first UI, real project tools and receipts, full Keychain reinstall/isolation, real Provider SSE/cancellation/reconciliation, research/import, strategic interview, production bible, chapter generation, canon governance, and rolling serial generation.
 
-## M0 文件型 checkpoint 的边界
+## Background limitation
 
-`FileCheckpointStore` 只用于 Windows 平台无关 Core 的 M0 持久化与幂等恢复测试。同一个文件路径在同一进程中必须只有一个 store 实例；它不承担跨进程或多实例并发写入。iPad App 的正式 checkpoint 存储使用 GRDB/SQLite 事务、WAL 和唯一约束，M1 以后不以 JSON 文件 store 作为生产仓储。
-## GitHub Actions 前置条件
+iPadOS 16.6 may suspend the app in background. CangJie checkpoints at safe boundaries and resumes after return; it does not promise indefinite background generation.
 
-远程仓库创建前需要确认：
-
-1. GitHub 用户名或目标组织；
-2. 仓库 `CangJie` 是否仍为公开；
-3. 本机 GitHub CLI 登录方式，或由用户在网页创建空仓库后提供 remote URL。
-
-远程 workflow 不会在未明确批准前触发。
-
-## iPad 真机 M0 清单
-
-1. 从 Actions artifact 下载 IPA、SHA-256 和 build manifest；
-2. 校验 SHA-256；
-3. 用 TrollStore 安装；
-4. 启动 App，输入一段草稿并保存；
-5. 手动创建 checkpoint；
-6. 切后台、锁屏、返回；
-7. 强退重开，确认草稿和 checkpoint 序号恢复；
-8. 写入一个临时 Keychain 测试值，确认 App 重启后仍显示“已保存”；
-9. 使用自有 HTTPS SSE 端点验证分段输出和取消；
-10. 记录 iPad 型号、iPadOS 16.6.1、IPA SHA、commit 和 workflow run ID。
-
-## TrollStore ???????
-
-- GitHub Actions ??????? ProcursusTeam `ldid v2.1.5-procursus7` ? `CFBundleExecutable` ???? Mach-O ?? entitlement?
-- ???? runner ?????? macOS ???????????????SHA-256?Mach-O ??????????
-- `ldid` ? Apple `codesign` ??????????`codesign` ?????????????? ad-hoc ??????
-- entitlement ??? `App/Config/CangJie.entitlements` ?????????????????????????????????
-- `build-manifest.json` ?? signer?ldid tag/??/SHA-256?entitlement contract SHA-256????????????? SHA-256?
-- CI ??????? TrollStore ??????????????? `blocked-pending-trollstore-device-keychain-validation`????? iPad ?? Keychain ??????
+Outstanding checks move into the relevant M1 slices and must not be reported complete early.

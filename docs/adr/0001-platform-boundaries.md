@@ -1,18 +1,14 @@
-# ADR-0001：平台边界与依赖方向
+# ADR-0001: Platform boundaries and dependency direction
 
-- 状态：接受
-- 日期：2026-07-16
+- Status: Accepted
+- Date: 2026-07-16
 
-## 决策
+`CangJieCore` does not depend on SwiftUI, Security, GRDB, PDFKit, Vision, or other Apple-only APIs. It owns state machines, tool contracts, context, budget, provider-neutral streaming, canon, and checkpoint decisions and is tested via Windows SwiftPM.
 
-`CangJieCore` 不依赖 SwiftUI、Security、GRDB、PDFKit、Vision 或其他 Apple-only API。它保存领域状态机、预算、SSE 语义和 checkpoint 恢复决策，并在 Windows SwiftPM 测试。
-
-iPad App 层实现 Keychain、SQLite、生命周期和网络字节流适配器。所有对核心的依赖为单向依赖：
+The iPad layer implements Keychain, SQLite, lifecycle, files, OCR, and URLSession adapters:
 
 ```text
-SwiftUI App -> iOS Adapters -> CangJieCore
+SwiftUI App -> iPad adapters -> CangJieCore
 ```
 
-## 原因
-
-用户没有 Mac。平台边界必须允许大多数业务规则在 Windows 快速验证，同时保留 SwiftUI/iPad 原生体验。
+The user has no Mac, so core behavior must be testable on Windows while native SwiftUI remains the device experience.
