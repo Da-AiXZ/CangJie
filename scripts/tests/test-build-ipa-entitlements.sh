@@ -312,7 +312,20 @@ PY
   if [[ -n "${LDID_PATH:-}" ]]; then
     readonly REAL_LDID_EXECUTABLE="${TEMP_ROOT}/RealLdidFixture"
     xcrun --sdk iphoneos clang -arch arm64 -miphoneos-version-min=16.6 "${TEMP_ROOT}/main.c" -o "${REAL_LDID_EXECUTABLE}"
-    assert_success real-ldid bash "${BUILD_SCRIPT}" --sign-with-ldid "${LDID_PATH}" "${CONTRACT}" "${REAL_LDID_EXECUTABLE}"
+    readonly REAL_LDID_BEFORE_SHA256="$(shasum -a 256 "${REAL_LDID_EXECUTABLE}" | awk '{print $1}')"
+    if ! bash "${BUILD_SCRIPT}" --sign-with-ldid "${LDID_PATH}" "${CONTRACT}" "${REAL_LDID_EXECUTABLE}"; then
+      readonly REAL_LDID_AFTER_SHA256="$(shasum -a 256 "${REAL_LDID_EXECUTABLE}" | awk '{print $1}')"
+      printf 'real ldid diagnostic: sha256 before=%s after=%s\n' "${REAL_LDID_BEFORE_SHA256}" "${REAL_LDID_AFTER_SHA256}" >&2
+      printf '%s\n' 'real ldid diagnostic: LC_CODE_SIGNATURE load command' >&2
+      otool -l "${REAL_LDID_EXECUTABLE}" | awk '/cmd LC_CODE_SIGNATURE/{show=1; count=0} show{print; count++} count==5{show=0}' >&2 || true
+      printf '%s\n' 'real ldid diagnostic: codesign details' >&2
+      /usr/bin/codesign -dvv "${REAL_LDID_EXECUTABLE}" >&2 || true
+      printf '%s\n' 'real ldid diagnostic: codesign entitlements' >&2
+      /usr/bin/codesign --display --entitlements - --xml "${REAL_LDID_EXECUTABLE}" >&2 || true
+      printf '%s\n' 'real ldid diagnostic: ldid entitlements' >&2
+      "${LDID_PATH}" -e "${REAL_LDID_EXECUTABLE}" >&2 || true
+      exit 1
+    fi
   fi
 fi
 
