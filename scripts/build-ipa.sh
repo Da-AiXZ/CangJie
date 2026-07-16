@@ -24,6 +24,7 @@ readonly IPA_NAME="CangJie-M0.ipa"
 readonly ENTITLEMENTS_CONTRACT="${ROOT}/App/Config/CangJie.entitlements"
 readonly PACKAGE_RESOLVED="${ROOT}/CangJie.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved"
 readonly SIGNED_ENTITLEMENTS="${OUT}/signed-entitlements.plist"
+readonly SIGNING_ENTITLEMENTS="${OUT}/entitlements-contract.plist"
 
 fail() { echo "$*" >&2; exit 1; }
 require_tool() { command -v "$1" >/dev/null || fail "Required tool is missing: $1"; }
@@ -97,6 +98,14 @@ expected = {
 if entitlements != expected:
     raise SystemExit(f"Entitlement contract mismatch: {entitlements!r}")
 PY
+}
+
+verify_entitlements_contract_unchanged() {
+  local expected_sha256="$1"
+  local actual_sha256
+  actual_sha256="$(shasum -a 256 "${ENTITLEMENTS_CONTRACT}" | awk '{print $1}')"
+  [[ "${actual_sha256}" == "${expected_sha256}" ]] || fail "Entitlements contract was modified during project generation or build: ${actual_sha256}"
+  verify_entitlements "${ENTITLEMENTS_CONTRACT}"
 }
 
 verify_code_signature() {
@@ -575,12 +584,16 @@ for tool in xcodegen xcodebuild xcrun lipo codesign file git python3 zip unzip s
 done
 verify_dependency_contract
 verify_entitlements "${ENTITLEMENTS_CONTRACT}"
+readonly ENTITLEMENTS_CONTRACT_SHA256="$(shasum -a 256 "${ENTITLEMENTS_CONTRACT}" | awk '{print $1}')"
 
 rm -rf "${OUT}"
 mkdir -p "${PAYLOAD}"
+cp -p "${ENTITLEMENTS_CONTRACT}" "${SIGNING_ENTITLEMENTS}"
+verify_entitlements "${SIGNING_ENTITLEMENTS}"
 cd "${ROOT}"
 
 xcodegen generate --spec project.yml
+verify_entitlements_contract_unchanged "${ENTITLEMENTS_CONTRACT_SHA256}"
 xcodebuild -resolvePackageDependencies \
   -project CangJie.xcodeproj \
   -scheme CangJie \
@@ -650,6 +663,8 @@ xcodebuild build \
   CODE_SIGNING_ALLOWED=NO \
   CODE_SIGNING_REQUIRED=NO \
   CODE_SIGN_IDENTITY=""
+
+verify_entitlements_contract_unchanged "${ENTITLEMENTS_CONTRACT_SHA256}"
 
 readonly APP="${DERIVED}/Build/Products/Release-iphoneos/CangJie.app"
 readonly INFO_PLIST="${APP}/Info.plist"
@@ -725,7 +740,7 @@ read -r LDID_ASSET LDID_SHA256 LDID_ARCH LDID_EXTRA <<< "${LDID_METADATA}"
 [[ -n "${LDID_ASSET}" && -n "${LDID_SHA256}" && -n "${LDID_ARCH}" && -z "${LDID_EXTRA}" ]] || fail "Invalid pinned ldid metadata"
 readonly LDID_ASSET LDID_SHA256 LDID_ARCH
 readonly UNSIGNED_EXECUTABLE_SHA256="$(shasum -a 256 "${EXECUTABLE}" | awk '{print $1}')"
-sign_app_with_ldid "${LDID_PATH}" "${ENTITLEMENTS_CONTRACT}" "${APP}" "${EXECUTABLE}" "${OUT}/signing"
+sign_app_with_ldid "${LDID_PATH}" "${SIGNING_ENTITLEMENTS}" "${APP}" "${EXECUTABLE}" "${OUT}/signing"
 readonly SIGNED_EXECUTABLE_SHA256="$(shasum -a 256 "${EXECUTABLE}" | awk '{print $1}')"
 [[ "${SIGNED_EXECUTABLE_SHA256}" != "${UNSIGNED_EXECUTABLE_SHA256}" ]] || fail "ldid did not change the main executable signature"
 
@@ -832,7 +847,7 @@ python3 - \
   "${LDID_ARCH}" \
   "${UNSIGNED_EXECUTABLE_SHA256}" \
   "${SIGNED_EXECUTABLE_SHA256}" \
-  "$(shasum -a 256 "${ENTITLEMENTS_CONTRACT}" | awk '{print $1}')" \
+  "${ENTITLEMENTS_CONTRACT_SHA256}" \
   "${GITHUB_REPOSITORY:-unknown}" \
   "${GITHUB_REF:-unknown}" \
   "${GITHUB_RUN_ID:-unknown}" \

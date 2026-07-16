@@ -4,6 +4,25 @@ set -euo pipefail
 readonly ROOT="$(cd "$(dirname "$0")/../.." && pwd -P)"
 readonly BUILD_SCRIPT="${ROOT}/scripts/build-ipa.sh"
 readonly CONTRACT="${ROOT}/App/Config/CangJie.entitlements"
+
+readonly PROJECT_SPEC="${ROOT}/project.yml"
+python3 - "${PROJECT_SPEC}" <<'PY'
+import re
+import sys
+from pathlib import Path
+
+path = Path(sys.argv[1])
+text = path.read_text(encoding="utf-8")
+match = re.search(r"(?ms)^  CangJie:\n(.*?)(?=^  [A-Za-z0-9_]+:\n|\Z)", text)
+if not match:
+    raise SystemExit("CangJie target is missing from project.yml")
+target = match.group(1)
+if "    entitlements:" in target:
+    raise SystemExit("project.yml must not let XcodeGen regenerate the entitlement contract")
+if "        CODE_SIGN_ENTITLEMENTS: App/Config/CangJie.entitlements" not in target:
+    raise SystemExit("project.yml must bind CODE_SIGN_ENTITLEMENTS to the checked-in contract")
+PY
+
 readonly TEMP_ROOT="$(mktemp -d)"
 trap 'rm -rf "${TEMP_ROOT}"' EXIT
 

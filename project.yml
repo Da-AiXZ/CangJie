@@ -27,8 +27,6 @@ targets:
       - path: App/CangJieApp
     info:
       path: App/Config/Info.plist
-    entitlements:
-      path: App/Config/CangJie.entitlements
     dependencies:
       - package: CangJieCore
       - package: GRDB
@@ -40,6 +38,7 @@ targets:
         SUPPORTS_MACCATALYST: NO
         GENERATE_INFOPLIST_FILE: NO
         CODE_SIGN_STYLE: Manual
+        CODE_SIGN_ENTITLEMENTS: App/Config/CangJie.entitlements
         CODE_SIGN_INJECT_BASE_ENTITLEMENTS: NO
         CURRENT_PROJECT_VERSION: 1
         MARKETING_VERSION: 0.0.1
