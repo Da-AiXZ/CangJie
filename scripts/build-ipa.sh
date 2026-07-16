@@ -8,7 +8,7 @@ readonly EXPECTED_GRDB_VERSION="6.29.3"
 readonly EXPECTED_GRDB_REVISION="2cf6c756e1e5ef6901ebae16576a7e4e4b834622"
 readonly EXPECTED_GRDB_BUNDLE_NAME="GRDB_GRDB.bundle"
 readonly EXPECTED_GRDB_URL="https://github.com/groue/GRDB.swift.git"
-readonly EXPECTED_GRDB_PRIVACY_SHA256="2c3dab01e9048d4604dc617ec040b931d66094aabaab8887ec8192fecac19ba3"
+readonly EXPECTED_GRDB_PRIVACY_SHA256="17784da62e51f74c5859df32fe402e01e25cdf6f797a4add06e2a3ce15c911f4"
 readonly ROOT="$(cd "$(dirname "$0")/.." && pwd -P)"
 readonly OUT="${ROOT}/.build-ipa"
 readonly DERIVED="${OUT}/DerivedData"
@@ -31,7 +31,7 @@ contract_path, project_path = sys.argv[1:]
 revision = "2cf6c756e1e5ef6901ebae16576a7e4e4b834622"
 url = "https://github.com/groue/GRDB.swift.git"
 contract = json.loads(open(contract_path, encoding="utf-8").read())
-expected = {"schemaVersion": 1, "packages": [{"identity": "grdb.swift", "repositoryURL": url, "tag": "v6.29.3", "version": "6.29.3", "revision": revision, "resourceBundle": {"name": "GRDB_GRDB.bundle", "privacyManifestSHA256": "2c3dab01e9048d4604dc617ec040b931d66094aabaab8887ec8192fecac19ba3"}}]}
+expected = {"schemaVersion": 1, "packages": [{"identity": "grdb.swift", "repositoryURL": url, "tag": "v6.29.3", "version": "6.29.3", "revision": revision, "resourceBundle": {"name": "GRDB_GRDB.bundle", "privacyManifestSHA256": "17784da62e51f74c5859df32fe402e01e25cdf6f797a4add06e2a3ce15c911f4"}}]}
 if contract != expected:
     raise SystemExit("SwiftPM contract mismatch")
 project = open(project_path, encoding="utf-8").read()
@@ -79,19 +79,40 @@ if entitlements != expected:
     raise SystemExit(f"Entitlement contract mismatch: {entitlements!r}")
 PY
 }
+verify_grdb_privacy_manifest() {
+  require_tool python3
+  local privacy_path="$1"
+  [[ -f "${privacy_path}" && ! -L "${privacy_path}" ]] || fail "GRDB privacy manifest is missing or unsafe: ${privacy_path}"
+  python3 - "${privacy_path}" "${EXPECTED_GRDB_PRIVACY_SHA256}" <<'PY'
+import hashlib
+import plistlib
+import sys
+from pathlib import Path
+
+privacy_path = Path(sys.argv[1])
+expected_hash = sys.argv[2]
+actual_hash = hashlib.sha256(privacy_path.read_bytes()).hexdigest()
+if actual_hash != expected_hash:
+    raise SystemExit(f"GRDB privacy manifest hash mismatch: expected {expected_hash}, found {actual_hash}")
+with privacy_path.open("rb") as source:
+    privacy = plistlib.load(source)
+expected_privacy = {"NSPrivacyTracking": False, "NSPrivacyCollectedDataTypes": [], "NSPrivacyTrackingDomains": [], "NSPrivacyAccessedAPITypes": []}
+if privacy != expected_privacy:
+    raise SystemExit(f"Unexpected GRDB privacy manifest semantics: {privacy!r}")
+PY
+}
 verify_grdb_resource_bundle() {
   require_tool python3
   local bundle_path="$1"
   [[ -d "${bundle_path}" && ! -L "${bundle_path}" ]] || fail "Required GRDB resource bundle is missing or unsafe: ${bundle_path}"
-  python3 - "${bundle_path}" "${EXPECTED_GRDB_PRIVACY_SHA256}" <<'PY'
-import hashlib
+  verify_grdb_privacy_manifest "${bundle_path}/PrivacyInfo.xcprivacy"
+  python3 - "${bundle_path}" <<'PY'
 import os
 import plistlib
 import re
 import sys
 from pathlib import Path
 bundle = Path(sys.argv[1])
-expected_hash = sys.argv[2]
 required = {"Info.plist", "PrivacyInfo.xcprivacy"}
 allowed = required | {"PkgInfo"}
 seen = set()
@@ -109,14 +130,6 @@ for root, directories, files in os.walk(bundle, followlinks=False):
         seen.add(path.relative_to(bundle).as_posix())
 if not required.issubset(seen) or not seen.issubset(allowed):
     raise SystemExit(f"Unexpected GRDB resource bundle contents: {sorted(seen)!r}")
-privacy_path = bundle / "PrivacyInfo.xcprivacy"
-if hashlib.sha256(privacy_path.read_bytes()).hexdigest() != expected_hash:
-    raise SystemExit("GRDB privacy manifest hash mismatch")
-with privacy_path.open("rb") as source:
-    privacy = plistlib.load(source)
-expected_privacy = {"NSPrivacyTracking": False, "NSPrivacyCollectedDataTypes": [], "NSPrivacyTrackingDomains": [], "NSPrivacyAccessedAPITypes": []}
-if privacy != expected_privacy:
-    raise SystemExit(f"Unexpected GRDB privacy manifest semantics: {privacy!r}")
 with (bundle / "Info.plist").open("rb") as source:
     info = plistlib.load(source)
 identifier = info.get("CFBundleIdentifier")
@@ -138,6 +151,11 @@ case "${1:-}" in
   --verify-resolved-packages)
     [[ "$#" == "2" && -n "${2:-}" ]] || fail "Usage: $0 --verify-resolved-packages <Package.resolved>"
     verify_resolved_packages "$2"
+    exit 0
+    ;;
+  --verify-grdb-privacy-manifest)
+    [[ "$#" == "2" && -n "${2:-}" ]] || fail "Usage: $0 --verify-grdb-privacy-manifest <PrivacyInfo.xcprivacy>"
+    verify_grdb_privacy_manifest "$2"
     exit 0
     ;;
   "")
@@ -213,6 +231,7 @@ fi
 readonly AUDITED_GRDB_REVISION="$(git --git-dir="${GRDB_GIT_DIRECTORY}" rev-parse "${EXPECTED_GRDB_REVISION}^{commit}")"
 [[ "${AUDITED_GRDB_REVISION}" == "${EXPECTED_GRDB_REVISION}" ]] || fail "GRDB repository cache is missing the pinned revision: ${AUDITED_GRDB_REVISION}"
 [[ -z "$(git -C "${GRDB_CHECKOUT}" status --porcelain --untracked-files=all)" ]] || fail "GRDB checkout is not clean"
+verify_grdb_privacy_manifest "${GRDB_CHECKOUT}/GRDB/PrivacyInfo.xcprivacy"
 
 xcodebuild build \
   -project CangJie.xcodeproj \

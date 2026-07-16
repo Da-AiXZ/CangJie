@@ -47,6 +47,9 @@ jobs:
             -clonedSourcePackagesDirPath "$RUNNER_TEMP/CangJie-SourcePackages"
           bash scripts/build-ipa.sh --verify-resolved-packages \
             CangJie.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved
+          bash scripts/build-ipa.sh --verify-grdb-privacy-manifest \
+            "$RUNNER_TEMP/CangJie-SourcePackages/checkouts/GRDB.swift/GRDB/PrivacyInfo.xcprivacy"
+
       - name: Select and boot an eligible iPad Simulator
         id: simulator
         env:
