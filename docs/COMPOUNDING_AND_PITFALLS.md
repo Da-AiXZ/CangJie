@@ -57,3 +57,8 @@ Close completed agents after integrating results. If a new reviewer cannot be sp
 ## P-015 M1-A must not use iOS 17-only UI APIs
 
 The target is iPadOS 16.6. New UI must be checked against the deployment target before remote build. Avoid convenience APIs introduced after 16.6, such as `ContentUnavailableView`; use compatible composition or gate availability explicitly.
+
+
+## P-016 Progress reporting must not become an artificial stop
+
+A mid-slice summary is only a visibility checkpoint. Continue work after reporting. Pause only for a major candidate-IPA physical-device acceptance gate or genuinely blocking user input.

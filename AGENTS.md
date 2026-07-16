@@ -18,4 +18,5 @@ All side effects pass through typed tools. Model text is never authorization, tr
 - When remote verification is requested, run minimum deterministic local checks, commit, push, and inspect Actions without prolonged speculation.
 - Before commit, review diff, secrets, generated artifacts, private imports, databases, and signing material.
 - After every implementation slice or milestone, update both the control center and pitfalls log with evidence.
+- Progress summaries are status broadcasts, not stop points. Continue executing after each summary. Pause only at a major acceptance gate that requires the user to install and test an IPA, or when truly blocked by required user input.
 - `cc.zip` is private/unlicensed reference material. Use clean-room concepts only; never copy source, prompts, proprietary names, exact schemas, strings, tests, or structure.

@@ -66,4 +66,10 @@ final class AppDatabaseTests: XCTestCase {
         XCTAssertEqual(projects.map(\.title), ["Second", "First"])
     }
 
+    private func makeDatabase() throws -> (AppDatabase, URL) {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        return (try AppDatabase(path: directory.appendingPathComponent("test.sqlite").path), directory)
+    }
+
 }
