@@ -155,3 +155,8 @@ Local evidence after the repair: all 47 `CangJieCore` tests pass, every App/AppT
 ## 2026-07-16 Exact-approval CI second compile correction
 
 The first repair commit `73b9d49` made Core CI run `29537449945` pass. iPadOS CI run `29537449881` then progressed to the next first real compiler error: `executeArtifactTool` declared `ArtifactToolResult` but did not return the `queue.write` result. The method now uses `return try queue.write`; no runtime behavior or authorization rule changed.
+
+
+## 2026-07-16 Exact-approval CI test correction
+
+iPadOS CI run `29537777876` compiled the App and exposed three test-contract issues. The exact replay fixture created a 500-unit approval but executed under the zero-unit default policy; it now supplies the exact matching current policy for both execution and replay. The focused-project fixture used an approval expiration in 1970 while restore correctly evaluates the current wall clock; it now isolates project pairing with a future expiration. The approval-card identifier was attached to the container and masked descendant identifiers in the SwiftUI accessibility hierarchy; it now identifies the visible card title so request, revision, hash, policy, status, and action remain individually inspectable.

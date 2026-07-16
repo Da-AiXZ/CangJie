@@ -173,3 +173,12 @@ A parameter named `approval` made `approval(...)` resolve to the `ApprovalReques
 ## P-043 A throwing closure call is not an implicit return in a multi-statement method
 
 A method with setup statements followed by `try queue.write { ... }` still needs an explicit `return` when its signature returns the closure result. Parse-only validation does not typecheck this contract; always follow the pinned Xcode compiler's first concrete diagnostic and keep the return type visible during review.
+
+
+## P-044 Time-sensitive fixtures must isolate the behavior under test
+
+A restore test that uses a fixed expiration near the Unix epoch will eventually exercise expiration renewal instead of the intended project-pairing behavior. Use an injected clock where available, or choose a clearly future deadline when expiration is not the subject of the test. Never weaken production expiration checks to preserve a stale fixture.
+
+## P-045 Accessibility identifiers on SwiftUI containers can hide child contracts
+
+Attaching a UI-test identifier to a compound container can collapse or overwrite descendant accessibility identifiers. Put the card-level identifier on a visible semantic heading, and keep each governed approval field and action independently addressable. Passing visual rendering is not enough; inspect the accessibility hierarchy through UI tests.

@@ -465,6 +465,7 @@ final class AppViewModelTests: XCTestCase {
                 premise: "Second premise",
                 now: Date(timeIntervalSince1970: 1_002)
             )
+            let approvalExpiration = Date().addingTimeInterval(60 * 60)
             let firstPlan = try database.executeOpeningPlanSaveTool(
                 conversationID: conversation.id,
                 projectID: firstProject.id,
@@ -472,7 +473,7 @@ final class AppViewModelTests: XCTestCase {
                 body: "FIRST PROJECT PLAN",
                 idempotencyKey: "multi-project.first",
                 now: Date(timeIntervalSince1970: 1_003),
-                expiresAt: Date(timeIntervalSince1970: 5_000)
+                expiresAt: approvalExpiration
             )
             _ = try database.executeOpeningPlanSaveTool(
                 conversationID: conversation.id,
@@ -481,7 +482,7 @@ final class AppViewModelTests: XCTestCase {
                 body: "SECOND PROJECT PLAN",
                 idempotencyKey: "multi-project.second",
                 now: Date(timeIntervalSince1970: 1_004),
-                expiresAt: Date(timeIntervalSince1970: 5_000)
+                expiresAt: approvalExpiration
             )
             try database.saveAgentSession(
                 AgentSessionState(

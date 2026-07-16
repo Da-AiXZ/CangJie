@@ -219,20 +219,29 @@ final class AppDatabaseTests: XCTestCase {
                 budgetCeilingMinorUnits: 2_000
             )
             let key = "opening.approve.exact"
+            let approvalPolicy = OpeningPlanApprovalExecutionPolicy(
+                toolID: "artifact.openingPlan.approve",
+                toolVersion: "1",
+                parametersHash: ApprovalFingerprint.parametersHash("{}"),
+                estimatedCostMinorUnits: 500,
+                budgetCeilingMinorUnits: 2_000
+            )
 
             let first = try database.executeOpeningPlanApprovalTool(
                 conversationID: conversation.id,
                 approvalRequestID: saved.approval.id,
                 displayedBindingHash: saved.approval.bindingHash,
                 idempotencyKey: key,
-                now: Date(timeIntervalSince1970: 1_100)
+                now: Date(timeIntervalSince1970: 1_100),
+                currentPolicy: approvalPolicy
             )
             let replay = try database.executeOpeningPlanApprovalTool(
                 conversationID: conversation.id,
                 approvalRequestID: saved.approval.id,
                 displayedBindingHash: saved.approval.bindingHash,
                 idempotencyKey: key,
-                now: Date(timeIntervalSince1970: 1_200)
+                now: Date(timeIntervalSince1970: 1_200),
+                currentPolicy: approvalPolicy
             )
 
             XCTAssertEqual(first.artifact, replay.artifact)

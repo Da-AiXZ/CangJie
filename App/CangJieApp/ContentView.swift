@@ -105,7 +105,9 @@ struct ContentView: View {
                 VStack(alignment: .leading, spacing: 8) {
                     HStack {
                         VStack(alignment: .leading, spacing: 2) {
-                            Text("Opening plan approval").font(.headline)
+                            Text("Opening plan approval")
+                                .font(.headline)
+                                .accessibilityIdentifier("opening-plan-approval-card")
                             Text("Status: \(approval.status.rawValue)")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
@@ -130,7 +132,6 @@ struct ContentView: View {
                 .padding()
                 .background(.background, in: RoundedRectangle(cornerRadius: 12))
                 .padding(.horizontal)
-                .accessibilityIdentifier("opening-plan-approval-card")
             }
             HStack(alignment: .bottom) {
                 TextEditor(text: $model.draft)
