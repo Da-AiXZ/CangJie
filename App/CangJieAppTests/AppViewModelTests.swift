@@ -97,6 +97,31 @@ final class AppViewModelTests: XCTestCase {
         XCTAssertTrue(viewModel.conversationMessages.last?.contains("Project created") == true)
     }
 
+
+    @MainActor
+    func testStrategicInterviewProducesAndApprovesPersistentPlan() throws {
+        let (database, directory) = try makeDatabase()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let viewModel = AppViewModel(database: database, keychain: StubSecretRepository())
+
+        viewModel.draft = "create a cultivation novel"
+        viewModel.sendAgentMessage()
+        viewModel.draft = "A disgraced courier discovers a forbidden inheritance"
+        viewModel.sendAgentMessage()
+        viewModel.draft = "He wants to save his sister before the sect trial"
+        viewModel.sendAgentMessage()
+        viewModel.draft = "Every use of the inheritance erases one memory"
+        viewModel.sendAgentMessage()
+
+        XCTAssertTrue(viewModel.planAwaitingApproval)
+        XCTAssertFalse(viewModel.planBody.isEmpty)
+        XCTAssertEqual(try database.latestArtifact(kind: "openingPlan")?.status, "waitingApproval")
+
+        viewModel.approveOpeningPlan()
+        XCTAssertFalse(viewModel.planAwaitingApproval)
+        XCTAssertEqual(try database.latestArtifact(kind: "openingPlan")?.status, "approved")
+    }
+
     private func makeDatabase() throws -> (AppDatabase, URL) {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)

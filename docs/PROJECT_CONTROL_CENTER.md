@@ -61,3 +61,8 @@ Implemented the first real vertical slice in `App/CangJieApp/ContentView.swift`,
 ## Continuous execution rule
 
 Progress summaries are informational checkpoints, not pauses. After reporting completed work and the next action, continue automatically. Stop only when a major milestone has produced a candidate IPA requiring physical-device installation/acceptance, or when required user input is genuinely unavailable. At a device gate, provide artifact source, hash, install steps, test script, expected results, and rollback notes.
+
+
+## 2026-07-16 M1-B implementation checkpoint
+
+Added durable `AgentArtifact` storage for the opening plan, deterministic strategic interview state, restart restoration, an approval gate, and the first plan card in the artifact area. Added database and view-model tests. The previous iPadOS failure was diagnosed from the first compiler error (`makeDatabase` missing in `AppDatabaseTests`) and fixed before this slice.

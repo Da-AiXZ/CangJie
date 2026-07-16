@@ -62,3 +62,8 @@ The target is iPadOS 16.6. New UI must be checked against the deployment target 
 ## P-016 Progress reporting must not become an artificial stop
 
 A mid-slice summary is only a visibility checkpoint. Continue work after reporting. Pause only for a major candidate-IPA physical-device acceptance gate or genuinely blocking user input.
+
+
+## P-017 Read the first compiler error, not downstream cascades
+
+The iPadOS run reported missing `makeDatabase` first; subsequent key-path errors were cascading type inference failures. Fix the earliest causal error, then rerun before changing unrelated production code.

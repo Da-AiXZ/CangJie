@@ -16,6 +16,10 @@ final class AppViewModel: ObservableObject {
     @Published var isArtifactDrawerPresented = false
     @Published var conversationMessages: [String] = []
     @Published var isAgentWorking = false
+    @Published private(set) var interviewQuestion = "What is the one-sentence hook that makes this novel impossible to confuse with another?"
+    @Published private(set) var planBody = ""
+    @Published private(set) var planAwaitingApproval = false
+    @Published private(set) var interviewStep = 0
 
     private static let maximumStreamOutputBytes = 256 * 1_024
     private let database: AppDatabase?
@@ -62,6 +66,7 @@ final class AppViewModel: ObservableObject {
         draft = databaseState.draft
         status = databaseState.status
         reloadProjects()
+        restorePlanningArtifact()
 
         do {
             hasStoredKey = try keychain.contains(account: "m0-probe")
@@ -76,22 +81,69 @@ final class AppViewModel: ObservableObject {
         catch { status = "Project list failed (DB-PROJECT-LIST)" }
     }
 
+    private func restorePlanningArtifact() {
+        guard let database else { return }
+        do {
+            if let artifact = try database.latestArtifact(kind: "openingPlan") {
+                planBody = artifact.body
+                planAwaitingApproval = artifact.status == "waitingApproval"
+                interviewStep = artifact.status == "approved" ? 3 : 2
+            }
+        } catch { status = "Planning restore failed (DB-ARTIFACT-READ)" }
+    }
+
+    func approveOpeningPlan() {
+        guard let database, !planBody.isEmpty else { return }
+        do {
+            _ = try database.saveArtifact(kind: "openingPlan", title: "Opening plan", body: planBody, status: "approved")
+            planAwaitingApproval = false
+            conversationMessages.append("Agent: Opening plan approved and persisted. Chapter planning is now unlocked.")
+            status = "Verified: opening plan approved"
+        } catch { status = "Plan approval failed (DB-ARTIFACT-WRITE)" }
+    }
+
     func sendAgentMessage() {
         let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
         conversationMessages.append("You: " + text)
         draft = ""
-        if text.localizedCaseInsensitiveContains("create") || text.localizedCaseInsensitiveContains("novel") || text.contains("\u{521B}\u{5EFA}") || text.contains("\u{5C0F}\u{8BF4}") {
+        let creationIntent = text.localizedCaseInsensitiveContains("create") || text.localizedCaseInsensitiveContains("novel") || text.contains("\u{521B}\u{5EFA}") || text.contains("\u{5C0F}\u{8BF4}")
+        if projects.isEmpty && creationIntent {
             isAgentWorking = true
             do {
                 let project = try database?.createProject(title: "Untitled Novel", premise: text)
                 reloadProjects()
                 conversationMessages.append(project.map { "Agent: Project created: \($0.title)" } ?? "Agent: Database unavailable; proposal not executed")
                 status = project == nil ? "Project tool unavailable" : "Verified: project.create"
-            } catch { conversationMessages.append("Agent: Project creation failed") ; status = "Project tool failed" }
+                if project != nil { conversationMessages.append("Agent: " + interviewQuestion) }
+            } catch { conversationMessages.append("Agent: Project creation failed"); status = "Project tool failed" }
             isAgentWorking = false
+            return
+        }
+        guard !projects.isEmpty else {
+            conversationMessages.append("Agent: Tell me the idea or ask me to create a novel, and I will lead the next step.")
+            return
+        }
+        guard !planAwaitingApproval else {
+            conversationMessages.append("Agent: The opening plan is waiting for your approval. Review the plan card before we continue.")
+            return
+        }
+        interviewStep += 1
+        if interviewStep < 3 {
+            let questions = [
+                "Who is the protagonist before the first major change, and what do they want right now?",
+                "What concrete cost or danger makes the first victory matter?"
+            ]
+            interviewQuestion = questions[min(interviewStep - 1, questions.count - 1)]
+            conversationMessages.append("Agent: " + interviewQuestion)
         } else {
-            conversationMessages.append("Agent: I will ask the next highest-value question about this idea.")
+            planBody = "Opening plan\n\nHook: " + text + "\n\nChapter 1 promise: reveal the protagonist's immediate desire, establish the first pressure, and end on an irreversible question.\n\nGuardrails: preserve the user's confirmed premise; do not add unapproved genre contamination or character knowledge."
+            do {
+                _ = try database?.saveArtifact(kind: "openingPlan", title: "Opening plan", body: planBody, status: "waitingApproval")
+                planAwaitingApproval = true
+                conversationMessages.append("Agent: I have compiled the opening plan. Review it in the artifact drawer and approve it before chapter planning.")
+                status = "Waiting for opening plan approval"
+            } catch { status = "Plan save failed (DB-ARTIFACT-WRITE)" }
         }
     }
 

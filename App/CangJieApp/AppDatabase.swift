@@ -1,6 +1,15 @@
 import Foundation
 import GRDB
 
+struct AgentArtifact: Identifiable, Equatable {
+    let id: UUID
+    let kind: String
+    let title: String
+    let body: String
+    let status: String
+    let updatedAt: Date
+}
+
 struct NovelProject: Identifiable, Equatable {
     let id: UUID
     let title: String
@@ -142,6 +151,21 @@ final class AppDatabase {
         }
     }
 
+    func saveArtifact(kind: String, title: String, body: String, status: String, now: Date = Date()) throws -> AgentArtifact {
+        let artifact = AgentArtifact(id: UUID(), kind: kind, title: title, body: body, status: status, updatedAt: now)
+        try queue.write { db in
+            try db.execute(sql: "INSERT INTO agentArtifact (id, kind, title, body, status, updatedAt) VALUES (?, ?, ?, ?, ?, ?)", arguments: [artifact.id.uuidString, artifact.kind, artifact.title, artifact.body, artifact.status, artifact.updatedAt.timeIntervalSince1970])
+        }
+        return artifact
+    }
+
+    func latestArtifact(kind: String) throws -> AgentArtifact? {
+        try queue.read { db in
+            guard let row = try Row.fetchOne(db, sql: "SELECT * FROM agentArtifact WHERE kind = ? ORDER BY updatedAt DESC LIMIT 1", arguments: [kind]), let id = UUID(uuidString: row["id"]) else { return nil }
+            return AgentArtifact(id: id, kind: row["kind"], title: row["title"], body: row["body"], status: row["status"], updatedAt: Date(timeIntervalSince1970: row["updatedAt"]))
+        }
+    }
+
     func journalMode() throws -> String {
         try queue.read { db in
             try String.fetchOne(db, sql: "PRAGMA journal_mode") ?? "unknown"
@@ -249,6 +273,16 @@ final class AppDatabase {
                 table.column("title", .text).notNull()
                 table.column("premise", .text).notNull()
                 table.column("createdAt", .double).notNull()
+                table.column("updatedAt", .double).notNull()
+            }
+        }
+        migrator.registerMigration("m1-agent-artifacts") { db in
+            try db.create(table: "agentArtifact") { table in
+                table.column("id", .text).primaryKey()
+                table.column("kind", .text).notNull().indexed()
+                table.column("title", .text).notNull()
+                table.column("body", .text).notNull()
+                table.column("status", .text).notNull()
                 table.column("updatedAt", .double).notNull()
             }
         }

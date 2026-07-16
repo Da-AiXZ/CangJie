@@ -66,6 +66,17 @@ final class AppDatabaseTests: XCTestCase {
         XCTAssertEqual(projects.map(\.title), ["Second", "First"])
     }
 
+
+    func testPlanningArtifactRoundTripKeepsApprovalStatus() throws {
+        let (database, directory) = try makeDatabase()
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let saved = try database.saveArtifact(kind: "openingPlan", title: "Plan", body: "Body", status: "waitingApproval", now: Date(timeIntervalSince1970: 300))
+        let restored = try database.latestArtifact(kind: "openingPlan")
+
+        XCTAssertEqual(restored, saved)
+    }
+
     private func makeDatabase() throws -> (AppDatabase, URL) {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)

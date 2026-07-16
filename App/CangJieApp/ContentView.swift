@@ -74,6 +74,12 @@ struct ContentView: View {
                     }
                 }.padding()
             }
+            if model.planAwaitingApproval {
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack { Text("Opening plan awaiting approval").font(.headline); Spacer(); Button("Approve") { model.approveOpeningPlan() }.buttonStyle(.borderedProminent) }
+                    Text(model.planBody).font(.footnote).lineLimit(6)
+                }.padding().background(.background, in: RoundedRectangle(cornerRadius: 12)).padding(.horizontal)
+            }
             HStack(alignment: .bottom) {
                 TextEditor(text: $model.draft).frame(minHeight: 70, maxHeight: 130).padding(6).background(.background, in: RoundedRectangle(cornerRadius: 12))
                 Button { model.sendAgentMessage() } label: { Image(systemName: "arrow.up.circle.fill").font(.system(size: 32)) }.disabled(model.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
