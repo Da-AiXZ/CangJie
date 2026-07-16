@@ -70,15 +70,53 @@ if state.get("revision") != "2cf6c756e1e5ef6901ebae16576a7e4e4b834622" or state.
     raise SystemExit(f"Unexpected SwiftPM state: {state!r}")
 PY
 }
-verify_entitlements() { require_tool python3; local path="$1"; [[ -f "${path}" && ! -L "${path}" ]] || fail "Entitlements file is missing or unsafe: ${path}"; python3 - "${path}" "${EXPECTED_BUNDLE_ID}" <<'PY'
+verify_entitlements() {
+  require_tool python3
+  local path="$1"
+  [[ -f "${path}" && ! -L "${path}" ]] || fail "Entitlements file is missing or unsafe: ${path}"
+  python3 - "${path}" "${EXPECTED_BUNDLE_ID}" <<'PY'
 import plistlib
 import sys
+
 path, bundle_identifier = sys.argv[1:]
-entitlements = plistlib.loads(open(path, "rb").read())
-expected = {"application-identifier": bundle_identifier, "keychain-access-groups": [bundle_identifier]}
+try:
+    with open(path, "rb") as source:
+        entitlements = plistlib.load(source)
+except (OSError, ValueError, TypeError, plistlib.InvalidFileException):
+    raise SystemExit("Entitlements file is not a valid plist") from None
+
+expected = {
+    "application-identifier": bundle_identifier,
+    "keychain-access-groups": [bundle_identifier],
+}
 if entitlements != expected:
     raise SystemExit(f"Entitlement contract mismatch: {entitlements!r}")
 PY
+}
+
+extract_and_verify_signed_entitlements() {
+  require_tool codesign
+  local app_path="$1"
+  local output_path="$2"
+  local diagnostics_path="$3"
+  [[ -d "${app_path}" && ! -L "${app_path}" ]] || fail "Signed app bundle is missing or unsafe: ${app_path}"
+  [[ "${output_path}" != "${diagnostics_path}" ]] || fail "Entitlement output and diagnostics paths must differ"
+  rm -f "${output_path}" "${diagnostics_path}"
+
+  if ! codesign --display --entitlements - --xml "${app_path}" >"${output_path}" 2>"${diagnostics_path}"; then
+    cat "${diagnostics_path}" >&2
+    rm -f "${output_path}" "${diagnostics_path}"
+    fail "Failed to extract signed entitlements"
+  fi
+  if [[ ! -s "${output_path}" ]]; then
+    rm -f "${output_path}" "${diagnostics_path}"
+    fail "codesign returned no signed entitlements"
+  fi
+  if ! verify_entitlements "${output_path}"; then
+    rm -f "${diagnostics_path}"
+    return 1
+  fi
+  rm -f "${diagnostics_path}"
 }
 verify_grdb_privacy_manifest() {
   require_tool python3
@@ -162,6 +200,18 @@ case "${1:-}" in
   --verify-grdb-resource-bundle)
     [[ "$#" == "2" && -n "${2:-}" ]] || fail "Usage: $0 --verify-grdb-resource-bundle <GRDB_GRDB.bundle>"
     verify_grdb_resource_bundle "$2"
+    exit 0
+    ;;
+  --verify-entitlements)
+    [[ "$#" == "2" && -n "${2:-}" ]] || fail "Usage: $0 --verify-entitlements <entitlements.plist>"
+    verify_entitlements "$2"
+    exit 0
+    ;;
+  --verify-signed-entitlements)
+    [[ "$#" == "2" && -n "${2:-}" ]] || fail "Usage: $0 --verify-signed-entitlements <App.app>"
+    verification_root="$(mktemp -d)"
+    trap 'rm -rf "${verification_root}"' EXIT
+    extract_and_verify_signed_entitlements "$2" "${verification_root}/signed-entitlements.plist" "${verification_root}/codesign.stderr"
     exit 0
     ;;
   "")
@@ -333,8 +383,10 @@ if grep -q '^Authority=' <<< "${CODESIGN_DETAILS}"; then
   fail "Unexpected certificate authority in ad-hoc signature"
 fi
 
-codesign -d --entitlements :- "${APP}" > "${SIGNED_ENTITLEMENTS}" 2>/dev/null
-verify_entitlements "${SIGNED_ENTITLEMENTS}"
+extract_and_verify_signed_entitlements \
+  "${APP}" \
+  "${SIGNED_ENTITLEMENTS}" \
+  "${OUT}/codesign-entitlements.stderr"
 
 cp -R "${APP}" "${PAYLOAD}/CangJie.app"
 cd "${OUT}"

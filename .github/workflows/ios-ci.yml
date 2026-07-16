@@ -26,11 +26,13 @@ jobs:
         with:
           persist-credentials: false
       - name: Static validation
-        run: bash -n scripts/build-ipa.sh scripts/find-ipad-simulator.sh scripts/tests/test-find-ipad-simulator.sh scripts/tests/test-build-ipa-contracts.sh
+        run: bash -n scripts/build-ipa.sh scripts/find-ipad-simulator.sh scripts/tests/test-find-ipad-simulator.sh scripts/tests/test-build-ipa-contracts.sh scripts/tests/test-build-ipa-entitlements.sh
       - name: Test simulator selector failure handling
         run: bash scripts/tests/test-find-ipad-simulator.sh
       - name: Select pinned Xcode
         run: bash scripts/select-xcode.sh
+      - name: Test signed entitlement extraction contract
+        run: bash scripts/tests/test-build-ipa-entitlements.sh
       - name: Install pinned XcodeGen
         run: bash scripts/install-xcodegen.sh
       - name: Verify dependency contract and generate project
