@@ -234,12 +234,17 @@ final class AgentRuntime {
         guard !displayedBindingHash.isEmpty else { throw AppDatabaseError.invalidApprovalRequest }
         let approvalKey = Self.approvalIdempotencyKey(requestID: approvalRequestID, bindingHash: displayedBindingHash)
         let existingRun = try database.agentRun(idempotencyKey: approvalKey)
-        let run = existingRun ?? AgentRunSnapshot(
-            id: UUID(),
-            projectID: try database.loadAgentSession(conversationID: conversation.id)?.focusedProjectID,
-            kind: "approval", status: .running, idempotencyKey: approvalKey,
-            currentStage: "openingPlan.approve", startedAt: now, updatedAt: now
-        )
+        let run: AgentRunSnapshot
+        if let existingRun {
+            run = existingRun
+        } else {
+            let projectID = try database.loadAgentSession(conversationID: conversation.id)?.focusedProjectID
+            run = AgentRunSnapshot(
+                id: UUID(), projectID: projectID,
+                kind: "approval", status: .running, idempotencyKey: approvalKey,
+                currentStage: "openingPlan.approve", startedAt: now, updatedAt: now
+            )
+        }
         try database.saveAgentRun(
             AgentRunSnapshot(
                 id: run.id, projectID: run.projectID,
