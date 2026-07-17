@@ -15,13 +15,15 @@ assert info.get("CangJieGitCommit") == "$(CANGJIE_GIT_COMMIT)"
 
 project = (ROOT / "project.yml").read_text(encoding="utf-8")
 assert "CANGJIE_GIT_COMMIT: local" in project
+assert "CURRENT_PROJECT_VERSION: 1" in project
 
 build = (ROOT / "scripts/build-ipa.sh").read_text(encoding="utf-8")
 required = [
     'APP_GIT_COMMIT="$(git -C "${ROOT}" rev-parse --short=12 HEAD',
     'CANGJIE_GIT_COMMIT="${APP_GIT_COMMIT}"',
     'CURRENT_PROJECT_VERSION="${APP_BUILD_NUMBER}"',
-    'python3 "${ROOT}/scripts/stamp-build-identity.py" "${INFO_PLIST}" "${APP_GIT_COMMIT}" "${APP_BUILD_NUMBER}"',
+    'python3 "${ROOT}/scripts/stamp-build-identity.py"',
+    '"${EXPECTED_UNSTAMPED_BUILD_NUMBER}"',
     'if ! EXECUTABLE_NAME="$(python3 -',
     'readonly EXECUTABLE_NAME',
     '"CangJieGitCommit": expected_commit',
@@ -47,9 +49,9 @@ def write_fixture(path: Path, commit_marker=None, build="23") -> bytes:
 
 with tempfile.TemporaryDirectory() as directory:
     plist_path = Path(directory) / "Info.plist"
-    write_fixture(plist_path)
+    write_fixture(plist_path, build="1")
     subprocess.run(
-        [sys.executable, str(STAMPER), str(plist_path), "f979807f7b9f", "23"],
+        [sys.executable, str(STAMPER), str(plist_path), "f979807f7b9f", "23", "1"],
         check=True,
     )
     stamped = plistlib.loads(plist_path.read_bytes())
@@ -61,7 +63,7 @@ with tempfile.TemporaryDirectory() as directory:
     plist_path = Path(directory) / "Info.plist"
     original = write_fixture(plist_path, commit_marker="unexpected")
     rejected = subprocess.run(
-        [sys.executable, str(STAMPER), str(plist_path), "f979807f7b9f", "23"],
+        [sys.executable, str(STAMPER), str(plist_path), "f979807f7b9f", "23", "1"],
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
@@ -74,13 +76,13 @@ with tempfile.TemporaryDirectory() as directory:
     plist_path = Path(directory) / "Info.plist"
     original = write_fixture(plist_path, build="22")
     rejected = subprocess.run(
-        [sys.executable, str(STAMPER), str(plist_path), "f979807f7b9f", "23"],
+        [sys.executable, str(STAMPER), str(plist_path), "f979807f7b9f", "23", "1"],
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
     )
     assert rejected.returncode != 0
-    assert "Unexpected CFBundleVersion" in rejected.stderr
+    assert "Refusing to replace unexpected CFBundleVersion" in rejected.stderr
     assert plist_path.read_bytes() == original
 
 print("build identity contract: ok")

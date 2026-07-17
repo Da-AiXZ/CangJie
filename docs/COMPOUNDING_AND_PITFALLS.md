@@ -302,7 +302,7 @@ A security regression test can fail even when the protected mutation was rejecte
 
 ## P-075 Source Info.plist placeholders are not final artifact evidence
 
-Xcode processes and merges the source plist during the build. A custom placeholder and a visible command-line build setting do not prove that the final app bundle retained the custom key. For user-visible build identity, stamp the built plist after compilation but before signing, permit only known unstamped values, write atomically, reopen and verify, then let the packaging verifier inspect it again. Never patch identity after signing.
+Xcode processes and merges the source plist during the build. A custom placeholder and a visible command-line build setting do not prove that the final app bundle retained the custom key. For user-visible build identity, stamp both commit and CI build number into the built plist after compilation but before signing, permit only declared baseline values, unresolved placeholders, or already-correct values, write atomically, reopen and verify, then let the packaging verifier inspect it again. Never patch identity after signing.
 
 ## P-076 Declaration builtins can mask command-substitution failure
 

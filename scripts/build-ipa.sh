@@ -4,6 +4,7 @@ set -euo pipefail
 readonly EXPECTED_BUNDLE_ID="com.juyang.CangJie"
 readonly EXPECTED_DEPLOYMENT_TARGET="16.6"
 readonly EXPECTED_DEVICE_FAMILY="2"
+readonly EXPECTED_UNSTAMPED_BUILD_NUMBER="1"
 readonly EXPECTED_GRDB_VERSION="6.29.3"
 readonly EXPECTED_GRDB_REVISION="2cf6c756e1e5ef6901ebae16576a7e4e4b834622"
 readonly EXPECTED_GRDB_BUNDLE_NAME="GRDB_GRDB.bundle"
@@ -677,7 +678,11 @@ readonly APP="${DERIVED}/Build/Products/Release-iphoneos/CangJie.app"
 readonly INFO_PLIST="${APP}/Info.plist"
 [[ -d "${APP}" && ! -L "${APP}" ]] || fail "Built app not found: ${APP}"
 [[ -f "${INFO_PLIST}" && ! -L "${INFO_PLIST}" ]] || fail "Info.plist is missing or unsafe"
-python3 "${ROOT}/scripts/stamp-build-identity.py" "${INFO_PLIST}" "${APP_GIT_COMMIT}" "${APP_BUILD_NUMBER}"
+python3 "${ROOT}/scripts/stamp-build-identity.py" \
+  "${INFO_PLIST}" \
+  "${APP_GIT_COMMIT}" \
+  "${APP_BUILD_NUMBER}" \
+  "${EXPECTED_UNSTAMPED_BUILD_NUMBER}"
 
 if find "${APP}" -type l -print -quit | grep -q .; then
   fail "The app bundle contains a symbolic link"

@@ -13,17 +13,23 @@ def fail(message: str) -> None:
 
 
 def main() -> None:
-    if len(sys.argv) != 4:
-        fail("Usage: stamp-build-identity.py <Info.plist> <12-char-commit> <numeric-build>")
+    if len(sys.argv) != 5:
+        fail(
+            "Usage: stamp-build-identity.py "
+            "<Info.plist> <12-char-commit> <numeric-build> <unstamped-build>"
+        )
 
     plist_path = Path(sys.argv[1])
     expected_commit = sys.argv[2]
     expected_build = sys.argv[3]
+    unstamped_build = sys.argv[4]
 
     if re.fullmatch(r"[0-9a-f]{12}", expected_commit) is None:
         fail(f"Invalid build commit identity: {expected_commit!r}")
     if re.fullmatch(r"[0-9]+", expected_build) is None:
         fail(f"Invalid numeric build identity: {expected_build!r}")
+    if re.fullmatch(r"[0-9]+", unstamped_build) is None:
+        fail(f"Invalid unstamped build identity: {unstamped_build!r}")
     if plist_path.is_symlink() or not plist_path.is_file():
         fail(f"Info.plist is missing or unsafe: {plist_path}")
 
@@ -36,8 +42,16 @@ def main() -> None:
         fail("Info.plist root must be a dictionary")
 
     actual_build = decoded.get("CFBundleVersion")
-    if actual_build != expected_build:
-        fail(f"Unexpected CFBundleVersion before stamping: {actual_build!r}; expected {expected_build!r}")
+    permitted_unstamped_builds = {
+        expected_build,
+        unstamped_build,
+        "$(CURRENT_PROJECT_VERSION)",
+    }
+    if actual_build not in permitted_unstamped_builds:
+        fail(
+            f"Refusing to replace unexpected CFBundleVersion: {actual_build!r}; "
+            f"expected {expected_build!r} or baseline {unstamped_build!r}"
+        )
 
     existing_commit = decoded.get("CangJieGitCommit")
     permitted_unstamped_values = {None, "local", "$(CANGJIE_GIT_COMMIT)", expected_commit}
@@ -46,6 +60,7 @@ def main() -> None:
 
     stamped = dict(decoded)
     stamped["CangJieGitCommit"] = expected_commit
+    stamped["CFBundleVersion"] = expected_build
     mode = stat.S_IMODE(plist_path.stat().st_mode)
     temporary_name = None
     try:
