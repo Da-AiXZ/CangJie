@@ -106,10 +106,11 @@ final class CangJieSmokeUITests: XCTestCase {
         delete.tap()
         reveal(status, in: diagnosticsList, swiping: .down)
         assertEventually(status, hasLabel: "Absent")
-        XCTAssertFalse(delete.isEnabled)
         XCTAssertTrue(guidance.label.contains("tap Create and verify"))
         assertEventuallyDisappears(app.staticTexts["keychain-probe-digest"])
-        reveal(save, in: diagnosticsList, swiping: .up)
+        reveal(delete, in: diagnosticsList, swiping: .up)
+        XCTAssertFalse(delete.isEnabled)
+        reveal(save, in: diagnosticsList, swiping: .down)
         assertEventually(save, hasLabel: "Create and verify")
     }
 
