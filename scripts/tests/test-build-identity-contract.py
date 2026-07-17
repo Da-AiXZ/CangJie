@@ -72,6 +72,6 @@ main_stamp = 'python3 scripts/stamp-build-identity.py --identity-json "$RUNNER_T
 probe_stamp = 'python3 scripts/stamp-build-identity.py --identity-json "$RUNNER_TEMP/CangJie-probe-identity.json" --unstamped-build 1 App/Config/IsolationProbeInfo.plist'
 assert main_stamp in workflow, "iPadOS CI must stamp the main app source plist from the generated executable identity"
 assert probe_stamp in workflow, "iPadOS CI must stamp the Probe source plist from the generated executable identity"
-assert workflow.index(main_stamp) < workflow.index("xcodegen generate")
-assert workflow.index(probe_stamp) < workflow.index("xcodegen generate")
+assert workflow.index("xcodegen generate") < workflow.index(main_stamp) < workflow.index("xcodebuild")
+assert workflow.index("xcodegen generate") < workflow.index(probe_stamp) < workflow.index("xcodebuild")
 print("build identity contract: ok")

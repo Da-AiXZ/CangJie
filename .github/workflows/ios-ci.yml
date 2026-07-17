@@ -78,11 +78,6 @@ jobs:
             --swift-output App/CangJieIsolationProbe/GeneratedBuildIdentity.swift \
             --c-output App/CangJieIsolationProbe/GeneratedBuildIdentity.c \
             --metadata-output "$RUNNER_TEMP/CangJie-probe-identity.json"
-          # Stamp the exact same identities into the source plists before XcodeGen.
-          # The Simulator test action must compare executable constants against
-          # the installed bundle instead of silently falling back to project.yml defaults.
-          python3 scripts/stamp-build-identity.py --identity-json "$RUNNER_TEMP/CangJie-main-identity.json" --unstamped-build 1 App/Config/Info.plist
-          python3 scripts/stamp-build-identity.py --identity-json "$RUNNER_TEMP/CangJie-probe-identity.json" --unstamped-build 1 App/Config/IsolationProbeInfo.plist
           main_fingerprint="$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["fingerprint"])' "$RUNNER_TEMP/CangJie-main-identity.json")"
           probe_fingerprint="$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["fingerprint"])' "$RUNNER_TEMP/CangJie-probe-identity.json")"
           echo "marketing_version=${marketing_version}" >> "$GITHUB_OUTPUT"
@@ -91,11 +86,15 @@ jobs:
           echo "candidate_set_id=${candidate_set_id}" >> "$GITHUB_OUTPUT"
           echo "main_fingerprint=${main_fingerprint}" >> "$GITHUB_OUTPUT"
           echo "probe_fingerprint=${probe_fingerprint}" >> "$GITHUB_OUTPUT"
-      - name: Verify dependency contract and generate project
+      - name: Generate project and stamp installed bundle identities
         run: |
           set -euo pipefail
           bash scripts/build-ipa.sh --verify-dependency-contract
           xcodegen generate --spec project.yml
+          # XcodeGen owns these source plists and rewrites them during project generation.
+          # Stamp only afterwards so Simulator-installed bundles match their executables.
+          python3 scripts/stamp-build-identity.py --identity-json "$RUNNER_TEMP/CangJie-main-identity.json" --unstamped-build 1 App/Config/Info.plist
+          python3 scripts/stamp-build-identity.py --identity-json "$RUNNER_TEMP/CangJie-probe-identity.json" --unstamped-build 1 App/Config/IsolationProbeInfo.plist
       - name: Resolve and verify revision-pinned packages
         run: |
           set -euo pipefail
