@@ -79,7 +79,9 @@ jobs:
             -resultBundlePath TestResults/CangJie.xcresult \
             -clonedSourcePackagesDirPath "$RUNNER_TEMP/CangJie-SourcePackages" \
             -disableAutomaticPackageResolution \
-            CODE_SIGNING_ALLOWED=NO
+            CODE_SIGNING_ALLOWED=YES \
+            CODE_SIGNING_REQUIRED=YES \
+            CODE_SIGN_IDENTITY="-"
       - name: Upload test result
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
