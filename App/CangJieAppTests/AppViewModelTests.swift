@@ -193,7 +193,7 @@ final class AppViewModelTests: XCTestCase {
 
             viewModel.draft = "must not persist after suspension"
             viewModel.saveDraft()
-            XCTAssertNil(try database.loadDraft())
+            XCTAssertEqual(try database.loadDraft()?.content, "checkpoint this draft")
         }
     }
 
