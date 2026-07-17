@@ -8,8 +8,29 @@ final class AppViewModelTests: XCTestCase {
 
     private struct StubSecretRepository: SecretRepository {
         func save(_ secret: String, account: String) throws {}
+        func read(account: String) throws -> String? { nil }
         func contains(account: String) throws -> Bool { false }
         func delete(account: String) throws {}
+    }
+
+    private final class InMemorySecretRepository: SecretRepository {
+        private var values: [String: String] = [:]
+
+        func save(_ secret: String, account: String) throws {
+            values[account] = secret
+        }
+
+        func read(account: String) throws -> String? {
+            values[account]
+        }
+
+        func contains(account: String) throws -> Bool {
+            values[account] != nil
+        }
+
+        func delete(account: String) throws {
+            values = values.filter { $0.key != account }
+        }
     }
 
     @MainActor
@@ -41,6 +62,43 @@ final class AppViewModelTests: XCTestCase {
             XCTAssertTrue(saveMessage.hasPrefix("Draft saved | "))
             XCTAssertEqual(saveMessage.filter { $0 == "|" }.count, 1)
             XCTAssertFalse(saveMessage.contains("?"))
+        }
+    }
+
+    @MainActor
+    func testKeychainProbeVerifiesCreateReadUpdateAndDeleteWithoutPublishingSecret() throws {
+        try withDatabase { database in
+            let keychain = InMemorySecretRepository()
+            let viewModel = AppViewModel(database: database, keychain: keychain)
+
+            XCTAssertFalse(viewModel.hasStoredKey)
+            XCTAssertNil(viewModel.keychainProbeDigest)
+
+            viewModel.apiKeyInput = "first-sensitive-probe"
+            viewModel.saveProbeKey()
+
+            XCTAssertTrue(viewModel.hasStoredKey)
+            let firstDigest = try XCTUnwrap(viewModel.keychainProbeDigest)
+            XCTAssertEqual(firstDigest.count, 12)
+            XCTAssertFalse(viewModel.transientNotice?.message.contains("first-sensitive-probe") == true)
+            XCTAssertEqual(try keychain.read(account: "m0-probe"), "first-sensitive-probe")
+
+            viewModel.apiKeyInput = "updated-sensitive-probe"
+            viewModel.saveProbeKey()
+
+            let updatedDigest = try XCTUnwrap(viewModel.keychainProbeDigest)
+            XCTAssertNotEqual(updatedDigest, firstDigest)
+            XCTAssertEqual(try keychain.read(account: "m0-probe"), "updated-sensitive-probe")
+
+            viewModel.readProbeKey()
+            XCTAssertEqual(viewModel.keychainProbeDigest, updatedDigest)
+            XCTAssertFalse(viewModel.transientNotice?.message.contains("updated-sensitive-probe") == true)
+
+            viewModel.deleteProbeKey()
+
+            XCTAssertFalse(viewModel.hasStoredKey)
+            XCTAssertNil(viewModel.keychainProbeDigest)
+            XCTAssertNil(try keychain.read(account: "m0-probe"))
         }
     }
 

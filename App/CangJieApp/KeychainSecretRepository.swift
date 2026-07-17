@@ -3,10 +3,12 @@ import Security
 
 enum KeychainError: Error {
     case unexpectedStatus(OSStatus)
+    case invalidStoredValue
 }
 
 protocol SecretRepository {
     func save(_ secret: String, account: String) throws
+    func read(account: String) throws -> String?
     func contains(account: String) throws -> Bool
     func delete(account: String) throws
 }
@@ -34,16 +36,25 @@ struct KeychainSecretRepository: SecretRepository {
         }
     }
 
-    func contains(account: String) throws -> Bool {
+    func read(account: String) throws -> String? {
         var query = baseQuery(account: account)
         query[kSecMatchLimit as String] = kSecMatchLimitOne
-        query[kSecReturnData as String] = false
-        let status = SecItemCopyMatching(query as CFDictionary, nil)
-        if status == errSecItemNotFound { return false }
+        query[kSecReturnData as String] = true
+        var result: CFTypeRef?
+        let status = SecItemCopyMatching(query as CFDictionary, &result)
+        if status == errSecItemNotFound { return nil }
         guard status == errSecSuccess else {
             throw KeychainError.unexpectedStatus(status)
         }
-        return true
+        guard let data = result as? Data,
+              let value = String(data: data, encoding: .utf8) else {
+            throw KeychainError.invalidStoredValue
+        }
+        return value
+    }
+
+    func contains(account: String) throws -> Bool {
+        try read(account: account) != nil
     }
 
     func delete(account: String) throws {

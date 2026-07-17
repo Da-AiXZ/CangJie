@@ -60,6 +60,12 @@ struct ContentView: View {
                         .accessibilityIdentifier("novel-projects-link")
                     NavigationLink("Workbenches", destination: Text("Novel workbenches"))
                     NavigationLink("Research", destination: Text("Research center"))
+                    NavigationLink {
+                        DeviceDiagnosticsView(model: model)
+                    } label: {
+                        Text("Device Diagnostics")
+                    }
+                    .accessibilityIdentifier("device-diagnostics-link")
                 }
                 Section {
                     Button { model.isArtifactDrawerPresented.toggle() } label: {

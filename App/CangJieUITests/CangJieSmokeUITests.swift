@@ -13,6 +13,65 @@ final class CangJieSmokeUITests: XCTestCase {
         )
     }
 
+    func testDeviceDiagnosticsVerifiesKeychainCreateReadUpdateAndDelete() {
+        let app = XCUIApplication()
+        app.launch()
+
+        let diagnosticsLink = app.buttons["device-diagnostics-link"]
+        if diagnosticsLink.waitForExistence(timeout: 3) {
+            diagnosticsLink.tap()
+        } else {
+            let diagnosticsLabel = app.staticTexts["Device Diagnostics"]
+            XCTAssertTrue(diagnosticsLabel.waitForExistence(timeout: 10))
+            diagnosticsLabel.tap()
+        }
+
+        XCTAssertTrue(app.staticTexts["device-diagnostics-heading"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.staticTexts["diagnostics-build-identity"].exists)
+
+        let input = app.secureTextFields["keychain-probe-input"]
+        let save = app.buttons["keychain-probe-save"]
+        let read = app.buttons["keychain-probe-read"]
+        let delete = app.buttons["keychain-probe-delete"]
+        let status = app.staticTexts["keychain-probe-status"]
+        XCTAssertTrue(input.exists)
+        XCTAssertTrue(save.exists)
+        XCTAssertTrue(read.exists)
+        XCTAssertTrue(delete.exists)
+        XCTAssertTrue(status.exists)
+
+        if delete.isEnabled {
+            delete.tap()
+        }
+
+        let firstValue = "ui-keychain-probe-one"
+        input.tap()
+        input.typeText(firstValue)
+        save.tap()
+        XCTAssertTrue(status.label.contains("Stored"))
+        let firstDigest = app.staticTexts["keychain-probe-digest"]
+        XCTAssertTrue(firstDigest.waitForExistence(timeout: 5))
+        let firstDigestLabel = firstDigest.label
+        XCTAssertEqual(firstDigestLabel.count, 12)
+        XCTAssertFalse(app.staticTexts[firstValue].exists)
+
+        read.tap()
+        XCTAssertTrue(firstDigest.exists)
+
+        let updatedValue = "ui-keychain-probe-two"
+        input.tap()
+        input.typeText(updatedValue)
+        save.tap()
+        let updatedDigest = app.staticTexts["keychain-probe-digest"]
+        XCTAssertTrue(updatedDigest.waitForExistence(timeout: 5))
+        XCTAssertNotEqual(updatedDigest.label, firstDigestLabel)
+        XCTAssertFalse(app.staticTexts[updatedValue].exists)
+
+        delete.tap()
+        XCTAssertTrue(status.label.contains("Absent"))
+        XCTAssertFalse(app.staticTexts["keychain-probe-digest"].exists)
+    }
+
     func testProjectRefreshShowsVisibleAcknowledgement() {
         let app = XCUIApplication()
         app.launch()

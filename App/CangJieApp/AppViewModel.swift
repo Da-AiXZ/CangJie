@@ -81,7 +81,8 @@ final class AppViewModel: ObservableObject {
     @Published private(set) var transientNotice: TransientNotice?
     @Published private(set) var errorMessage: String?
     @Published var apiKeyInput = ""
-    @Published var hasStoredKey = false
+    @Published private(set) var hasStoredKey = false
+    @Published private(set) var keychainProbeDigest: String?
     @Published var streamURL = ""
     @Published var streamOutput = ""
     @Published var isStreaming = false
@@ -112,6 +113,8 @@ final class AppViewModel: ObservableObject {
     let buildIdentity: BuildIdentity
 
     private static let maximumStreamOutputBytes = 256 * 1_024
+    private static let maximumProbeSecretBytes = 4_096
+    private static let probeAccount = "m0-probe"
     private let database: AppDatabase?
     private let runtime: AgentRuntime?
     private let keychain: any SecretRepository
@@ -182,11 +185,7 @@ final class AppViewModel: ObservableObject {
             publishTransientNotice(kind: .storage, message: notice)
         }
 
-        do {
-            hasStoredKey = try keychain.contains(account: "m0-probe")
-        } catch {
-            publishError("Keychain unavailable (KEY-READ)")
-        }
+        refreshProbeState(publishSuccess: false)
     }
 
     func reloadProjects() {
@@ -511,28 +510,68 @@ final class AppViewModel: ObservableObject {
     }
 
     func saveProbeKey() {
-        guard !apiKeyInput.isEmpty else {
+        let candidate = apiKeyInput
+        guard !candidate.isEmpty else {
             publishError("Keychain test value cannot be empty")
             return
         }
+        guard candidate.utf8.count <= Self.maximumProbeSecretBytes else {
+            publishError("Keychain test value exceeds 4096 UTF-8 bytes")
+            return
+        }
         do {
-            try keychain.save(apiKeyInput, account: "m0-probe")
+            try keychain.save(candidate, account: Self.probeAccount)
+            guard try keychain.read(account: Self.probeAccount) == candidate else {
+                publishError("Keychain read-after-write verification failed (KEY-VERIFY)")
+                return
+            }
             apiKeyInput = ""
             hasStoredKey = true
-            publishTransientNotice(kind: .storage, message: "Saved test value in ThisDeviceOnly Keychain")
+            keychainProbeDigest = Self.probeDigest(for: candidate)
+            publishTransientNotice(
+                kind: .storage,
+                message: "Keychain create/update and read-back verified"
+            )
         } catch {
             publishError("Keychain write failed (KEY-WRITE)")
         }
     }
 
+    func readProbeKey() {
+        refreshProbeState(publishSuccess: true)
+    }
+
     func deleteProbeKey() {
         do {
-            try keychain.delete(account: "m0-probe")
+            try keychain.delete(account: Self.probeAccount)
+            guard try keychain.read(account: Self.probeAccount) == nil else {
+                publishError("Keychain delete verification failed (KEY-VERIFY)")
+                return
+            }
             apiKeyInput = ""
             hasStoredKey = false
-            publishTransientNotice(kind: .storage, message: "Keychain test value deleted")
+            keychainProbeDigest = nil
+            publishTransientNotice(kind: .storage, message: "Keychain delete verified")
         } catch {
             publishError("Keychain delete failed (KEY-DELETE)")
+        }
+    }
+
+    private func refreshProbeState(publishSuccess: Bool) {
+        do {
+            let value = try keychain.read(account: Self.probeAccount)
+            hasStoredKey = value != nil
+            keychainProbeDigest = value.map { Self.probeDigest(for: $0) }
+            if publishSuccess {
+                publishTransientNotice(
+                    kind: .storage,
+                    message: value == nil ? "Keychain absence verified" : "Keychain read verified"
+                )
+            }
+        } catch {
+            hasStoredKey = false
+            keychainProbeDigest = nil
+            publishError("Keychain unavailable (KEY-READ)")
         }
     }
 
@@ -732,6 +771,10 @@ final class AppViewModel: ObservableObject {
             return "Strategic interview in progress"
         }
         return "Waiting for a novel idea"
+    }
+
+    private static func probeDigest(for text: String) -> String {
+        String(payloadHash(for: text).prefix(12))
     }
 
     private static func payloadHash(for text: String) -> String {
