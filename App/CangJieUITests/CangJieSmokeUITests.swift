@@ -78,7 +78,7 @@ final class CangJieSmokeUITests: XCTestCase {
         XCTAssertTrue(guidance.label.contains("same secure field below"))
         XCTAssertTrue(guidance.label.contains("tap Update and verify"))
         let firstDigest = app.staticTexts["keychain-probe-digest"]
-        reveal(firstDigest, in: diagnosticsList, swiping: .down)
+        reveal(firstDigest, in: diagnosticsList, swiping: .up)
         let firstDigestLabel = firstDigest.label
         XCTAssertEqual(firstDigestLabel.count, 12)
         assertNoAccessiblePlaintext(firstValue, in: app)

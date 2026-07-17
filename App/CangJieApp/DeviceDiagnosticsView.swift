@@ -182,7 +182,7 @@ struct DeviceDiagnosticsView: View {
 
     private var keychainGuidance: String {
         if model.hasStoredKey {
-            return "A test value already exists. Enter a different value in the secure field below, then tap Update and verify."
+            return "A test value already exists. Enter a different value in the same secure field below, then tap Update and verify."
         }
         return "No test value exists. Enter a disposable value in the secure field below, then tap Create and verify."
     }
