@@ -1,6 +1,6 @@
 # CangJie Compounding and Pitfalls Log
 
-Updated: 2026-07-16. Update after every slice or milestone with evidence.
+Updated: 2026-07-17. Update after every slice or milestone with evidence.
 
 ## P-001 M0 shell was mistaken for product UX
 Feasibility screen is not the Agent product. Label every IPA as feasibility, development slice, candidate, or accepted milestone; report included/excluded/verification/next.
@@ -271,3 +271,27 @@ Matching tool input, scope, and idempotency key is still insufficient when the d
 ## P-067 Durable run scope must be proven at the database boundary
 
 An `originRunID` string is not evidence by itself. Persist the run's project scope, keep its idempotency identity immutable, and reject any receipt whose origin run is missing or belongs to another conversation or project. Migration must also fail closed when historical origin bindings cannot be reconciled exactly; do not silently bless ambiguous recovery evidence.
+
+## P-068 Same idempotency key requires one canonical payload builder
+
+An idempotency key does not make two nearly identical side effects equivalent. The final diagnosis message used curly quotation marks in the normal path and straight quotation marks in receipt reconciliation, so the durable message store correctly rejected the second payload. Any execution/recovery pair that reuses an idempotency key must call the same serializer or message builder; punctuation, whitespace, localization, and ordering are part of payload identity.
+
+## P-069 SQLite Double and JSON Date can differ by one ULP
+
+The same Swift `Date` can travel through SQLite Double storage and JSON coding and recover one adjacent floating-point representation apart. Do not weaken whole-object receipt checks or use a broad time tolerance. Define an explicit audit equivalence that permits only identical or `nextUp`/`nextDown` adjacency for the timestamp field while all business state, hashes, versions, locks, diagnosis data, scope, and acceptance bindings remain exact. Add negative tests for two ULPs and business-state changes.
+
+## P-070 Stage-only milestones miss durable same-stage progress
+
+Diagnosis answer one and answer two both remain in `diagnosing`, yet their answer count and diagnosis hash are durable progress. If a lifecycle or projection gate ever decides whether to refresh content rather than only status text, its milestone must include same-stage state such as diagnosis count/hash, rewrite-scope hash, lock set, and accepted version. In the current design `apply(runtimeSnapshot:)` always replaces the chapter projection; the milestone gate is allowed to control only recomputation of transient business status.
+
+## P-071 Historical receipt snapshots and live projections have different jobs
+
+A receipt snapshot proves exactly what one tool committed. The live projection represents the latest aggregate after later tools. Replay must validate and return historical evidence, while restore may then reload the live aggregate after reconciliation. Never compare an old receipt snapshot to a newer live state as if they must be equal, and never use the live aggregate as the historical replay result.
+
+## P-072 Persist the Agent run before high-risk decoding or dispatch
+
+If session decoding, provider data, or command interpretation throws before the run exists, there is no durable failure record to inspect or reconcile. Create and persist the scoped Agent run first, then enter high-risk decoding and dispatch. On failure, settle that exact run as failed without overwriting already terminal failed or cancelled runs during later restore.
+
+## P-073 CI diagnosis starts from the first real error and preserves raw encoding
+
+Always download the newest run log and isolate the first causal compiler/test/runtime error before editing. GitHub logs captured through PowerShell tools may be UTF-16 even when the source is UTF-8; inspect with an encoding-aware reader and do not rewrite product files based on terminal mojibake. Record run IDs and remove temporary logs before commit.

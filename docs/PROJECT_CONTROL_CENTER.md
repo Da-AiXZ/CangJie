@@ -19,7 +19,7 @@ M1 First-Chapter Agent Vertical Slice. M1-B exact opening-plan approval remains 
 
 The same worktree implements the first governed Chapter 1 calibration loop: approved opening-plan validation through the canonical approval validator, immutable V1 generation, paragraph locks, accept-and-freeze or reject-and-diagnose, exactly three ordered one-question diagnosis turns, exact rewrite-scope confirmation, immutable V2 with parent lineage, byte-exact locked-paragraph and separator validation, V1/V2 diff review, exact-version acceptance, scope-bound receipts, receipt-bound historical snapshot replay, and restart recovery. The opening-plan approval review closes only after the exact operation succeeds and the reapplied projection confirms the same request ID and binding hash as `approved`; chapter actions separately remain bound to the exact displayed version ID and content hash.
 
-This is implementation status, not acceptance. The checkpoint still requires authoritative Xcode/iPadOS CI compilation and tests, a green identity-verified IPA build, and physical-device acceptance on the target iPad.
+This is implementation status, not device acceptance. Commit `2a5d8de` has passed authoritative Core and Xcode/iPadOS CI, including the governed Chapter 1 rejection, three-answer diagnosis, exact rewrite-scope, immutable V2, freeze, restart, and Agent-first UI smoke paths. The remaining gate is a green identity-verified IPA build followed by physical-device acceptance on the target iPad.
 
 ```text
 open -> restore conversation/session/run/messages -> center conversation
@@ -51,10 +51,10 @@ User confirmed TrollStore install, launch, immediate restart persistence, and no
 Latest committed software evidence:
 
 ```text
-commit 874f73d1aa1336e6f7fbae9ed503d5096e1e2759
-Core CI 29538641046: success (47 tests, coverage gate passed)
-iPadOS CI 29538641041: success (App, integration, Agent-first UI, exact-approval metadata, Refresh feedback)
-Build TrollStore IPA 29539149285: success
+commit 2a5d8de51ab1f4b8727f6412efba6e98904c3f33
+Core CI 29555500013: success (strict tests and 90 percent line coverage gate)
+iPadOS CI 29555500055: success (87 App/integration tests plus Agent-first UI smoke tests)
+Build TrollStore IPA: pending final documentation commit and identity-verified packaging run
 ```
 
 The preceding device-accepted recoverable-runtime candidate remains:
@@ -237,3 +237,24 @@ secret/private-binary scan: no tracked IPA, ZIP, SQLite, database, key, profile,
 ```
 
 This checkpoint is not a device candidate. Next: complete focused review, commit and push `main`, inspect the first causal error of each GitHub run if any, make Core and iPadOS CI green, then build and verify a new TrollStore IPA before requesting physical-device acceptance.
+
+## 2026-07-17 M1-C diagnosis replay repair and green CI checkpoint
+
+Status: Core and iPadOS CI are green for implementation commit `2a5d8de`; the final TrollStore IPA build and real-device acceptance remain pending.
+
+The final three failing Chapter 1 tests had one shared failure boundary. The third diagnosis answer committed its calibration and rewrite scope, then normal execution appended the completion message with curly quotation marks. Immediate restore reconciled the same receipt and attempted to append a textually different completion message with straight quotation marks under the same idempotency key. The message store correctly raised `idempotencyConflict`, so the ViewModel retained the prior two-answer projection even though the third answer was durable. Both execution and recovery now call one canonical `appendDiagnosisCompleteMessage` function, making payload identity and idempotency identity inseparable.
+
+The preceding receipt-validation repair remains intentionally narrow. SQLite Double storage and JSON `Date` coding can recover the same audit timestamp one adjacent floating-point representation apart. `ChapterCalibration.isAuditEquivalent` therefore permits only identical or one-ULP-adjacent `updatedAt` values while every business field, stage, hash, version, diagnosis entry, lock, scope, acceptance binding, and receipt remains strict. A two-ULP timestamp difference and any business-state difference still fail closed.
+
+Durable recovery boundaries now verified by CI include: Agent runs are written before high-risk session decoding; committed chapter tools reconcile only to their exact `originRunID`; receipt replay returns its historical snapshot rather than the live aggregate; direct lock receipts cannot settle Agent runs; normal execution and reconciliation share canonical assistant payloads; and failed/cancelled terminal runs are not overwritten by restore.
+
+Authoritative evidence:
+
+```text
+Core CI 29555500013: success
+iPadOS CI 29555500055: success
+App test suite: 87 tests, 0 failures
+UI smoke: Agent-first launch and scrollable opening-plan approval review passed
+```
+
+Next gate: commit this operational documentation, verify the final HEAD remains green, dispatch `build-ipa.yml`, verify Bundle ID `com.juyang.CangJie`, iPadOS 16.6 deployment target, exact commit identity, ad-hoc/fakesign entitlements, SHA-256 and manifest, then request target-iPad acceptance.
