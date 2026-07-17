@@ -413,3 +413,11 @@ When a previously active executable becomes mismatched at runtime, immediately r
 ## P-100 PowerShell default text encoding can corrupt UTF-8 Swift fixtures
 
 Do not round-trip Swift, Markdown, JSON, or fixture files containing Chinese text through `Get-Content` plus `Set-Content` without an explicit verified encoding. Windows PowerShell can decode or re-encode the file under a legacy code page and silently corrupt string literals. Prefer a UTF-8-aware script, assert the exact replacement count, run `swiftc -frontend -parse` immediately, and restore from Git before retrying if any encoding damage appears.
+
+## P-101 XcodeGen can overwrite source plist identity after pre-generation stamping
+
+When XcodeGen manages an `Info.plist`, stamping identity before `xcodegen generate` is not sufficient: project generation can recreate the plist and silently restore stale values. Generate the Candidate Set identity first, run XcodeGen, then stamp the exact source plists that `xcodebuild` will process. Verify the processed plist and packaged plist against the compiled executable identity before accepting the artifact.
+
+## P-102 plistlib acceptance does not guarantee ldid plist compatibility
+
+A plist can be accepted by Python `plistlib` and Apple `plutil` but still be rejected by the pinned `ldid`. Build 28's Probe entitlement carried a UTF-8 BOM; preprocessing passed, while `ldid` failed with `Failed to parse plist`. Every entitlement passed to `ldid` must be a BOM-free UTF-8 XML plist or a separately proven compatible binary plist. Detect forbidden BOM bytes before parsing, fail with a stable user-readable error, and keep a fixture plus checked-in-file regression test.

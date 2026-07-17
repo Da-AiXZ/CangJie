@@ -21,11 +21,11 @@ The same worktree implements the first governed Chapter 1 calibration loop: appr
 
 Build 26 established the physical-device baseline: build identity, Refresh separators, the clean-install opening-plan review/detail surface, the observed Chapter 1 path, Keychain read, force-quit persistence, overwrite-install persistence, delete, and post-delete `Absent` all passed. Overwrite installation correctly retained the already-approved opening-plan state and therefore did not recreate a pending approval card; deleting the App cleared the database, and rerunning the flow correctly produced the card again.
 
-Build 27 is the current independently audited M1-C candidate. Commit `2c61bc2` clarifies that the page has one secure input reused by both create and update, separates numbered input/action/read-delete sections, exposes `Stored` or `Absent` plus next-step guidance, and gives the state-dependent primary action an unmistakable button style. Core CI `29592373178`, iPadOS CI `29592385850`, and TrollStore build `29593245829` are green. The first physical-device pass is a focused discoverability check, but it does not clear the artifact manifest's fail-closed contract. Formal acceptance of this exact SHA-256 still requires its complete create/read/update/delete, reinstall-persistence, and isolation evidence. Previously accepted novel approval and Chapter 1 behavior are not invalidated because those surfaces were untouched. The governed novel workflow is not weakened or removed.
+Build 27 is retained as prior physical-device regression evidence for the clarified Keychain diagnostic surface. Its first-overwrite/second-overwrite discrepancy is not accepted as an installation procedure; Build 28 supersedes it with executable-versus-installed-bundle runtime identity checks and a fail-closed governance boundary. Previously accepted novel approval and Chapter 1 behavior remain regression evidence because those surfaces were not weakened or removed.
 
-Build 28 is now the active implementation worktree and is not yet a device candidate. The Build 27 device report exposed an update-activation risk: after a TrollStore overwrite, the App may show metadata from the newly installed disk bundle while an older executable process remains alive. TrollStore source inspection shows that its update path attempts process termination before replacing the bundle, but the termination result is not verified; this is a risk model consistent with the observed first-overwrite/second-overwrite behavior, not a claim that every TrollStore update has this defect. Build 28 therefore stops treating `Info.plist` alone as proof of running code. It embeds an executable identity at compile time, independently loads the installed bundle identity from disk, compares version/build/commit/fingerprint strictly, and fails closed on mismatch or unavailable identity. While blocked, Agent turns, opening-plan approval, chapter operations, canon mutation, and paid generation must not execute.
+Build 28 is now the current independently audited paired device candidate. The Build 27 device report exposed an update-activation risk: after a TrollStore overwrite, the App may show metadata from the newly installed disk bundle while an older executable process remains alive. Build 28 therefore stops treating `Info.plist` alone as proof of running code. It embeds an executable identity at compile time, independently loads the installed bundle identity from disk, compares version/build/commit/fingerprint strictly, and fails closed on mismatch or unavailable identity. While blocked, Agent turns, opening-plan approval, chapter operations, canon mutation, Keychain diagnostics, and paid generation must not execute.
 
-The same Build 28 worktree adds a separately bundled Keychain Isolation Probe with its own Bundle ID and access group. That companion can prove only that the exact audited Probe binary in the exact candidate set, with the recorded SHA-256 and entitlements, cannot access the main App's Keychain group. It cannot prove that arbitrary TrollStore-installed software is isolated, because TrollStore's ability to install applications carrying arbitrary entitlements remains part of the platform trust boundary. The paired main-App and Probe IPAs, CI results, independent artifact audit, and physical-device acceptance are still pending.
+The same Build 28 candidate adds a separately bundled Keychain Isolation Probe with its own Bundle ID and access group. That companion can prove only that the exact audited Probe binary in the exact candidate set, with the recorded SHA-256 and entitlements, cannot access the main App's Keychain group. It cannot prove that arbitrary TrollStore-installed software is isolated, because TrollStore's ability to install applications carrying arbitrary entitlements remains part of the platform trust boundary. Core CI, iPadOS CI, paired IPA construction, and independent offline metadata/archive verification are complete; exact real-device one-overwrite activation and Keychain isolation acceptance remain pending.
 
 ```text
 open -> restore conversation/session/run/messages -> center conversation
@@ -54,25 +54,27 @@ SHA-256 2092cfb5fe94b463c453ca25e6107a12de1d77e8be8309c85ee027f8863d62ef
 
 User confirmed TrollStore install, launch, immediate restart persistence, and no immediate crash for that M0 artifact.
 
-Current independently audited device candidate (focused UX check and complete Keychain acceptance pending):
+Current independently audited paired device candidate (real-device acceptance pending):
 
 ```text
-commit 2c61bc2d1c38e6844fe9c9d36a32b7ed4a0ec7ca
-Core CI 29592373178: success
-iPadOS CI 29592385850: success, including real Simulator Keychain create/read/update/delete and discoverability assertions
-Build TrollStore IPA 29593245829: success | run number 27
-Artifact CangJie-M0-device-validation-required-27-2c61bc2d1c38e6844fe9c9d36a32b7ed4a0ec7ca
-SHA-256 260478b5cf0b8ab06ea75ce6b231041c9dedf82a6c10d05ba06afb8114e1b8ec
-Bundle ID com.juyang.CangJie | arm64 | deployment target 16.6 | build 27 | commit 2c61bc2d1c38
-No embedded.mobileprovision | no CMS slot | ad-hoc CodeDirectory flags 0x00000002
-XML application-identifier com.juyang.CangJie | keychain-access-groups [com.juyang.CangJie] | DER entitlement slot present
-Acceptance blocked-pending-trollstore-device-keychain-validation (expected fail-closed state)
-Local audit F:\project\CangJie\artifacts\CangJie-M1C-clarified-run-29593245829-verified\independent-audit.json
+commit b059a1e33a7a3d578cf15cd66ae11521400159bd
+Core CI 29620872829: success
+iPadOS CI 29620872813: success, including main App and Keychain Isolation Probe Simulator tests
+Build TrollStore Candidate Set 29621391195: success | run number 29 | run attempt 1
+Artifact CangJie-paired-device-validation-required-29-1-b059a1e33a7a3d578cf15cd66ae11521400159bd
+Candidate Set ID b48f3c38c590034277d702970bced3086a826afc0cc74c3dcba2076b41e91d48
+Version 1.0 | build 29001 | deployment target 16.6 | commit b059a1e33a7a
+Main SHA-256 3b8bb83f068b821a6e1e0949ff6f4b3d09f7fad6f629e53a945b26cd0c98b91d
+Probe SHA-256 c3443b242f28b0d913c98fda60eaf0972b782797425fa7f11cdc1aa6e6614435
+Main Bundle ID and Keychain group com.juyang.CangJie
+Probe Bundle ID and Keychain group com.juyang.CangJie.KeychainIsolationProbe
+No embedded.mobileprovision | no unreviewed framework, dylib, plugin, Watch, or XPC payload
+Signed executable hashes differ from unsigned executable hashes for both roles
+Acceptance blocked-pending-trollstore-device-keychain-isolation-validation (expected fail-closed state)
+Local artifact directory F:\project\CangJieBuilds\run-29621391195
 ```
 
-Build 26 remains useful physical-device regression evidence, but it cannot satisfy Build 27's artifact-bound Keychain contract. Build 27 must first show visible build `27` and commit `2c61bc2d1c38`. The immediate check focuses on the clarified create/update path; the candidate remains fail-closed until complete CRUD, reinstall persistence, and a user-operable isolation check are also recorded for this exact IPA.
-
-Build 27 physical-device CRUD and overwrite persistence are now regression evidence, including the report that the first overwrite could expose stale presentation while a later overwrite or relaunch exposed the expected UI. Build 28 supersedes Build 27 as the next candidate under development, but no Build 28 SHA-256, run ID, candidate-set ID, or device acceptance exists yet. Until the paired artifacts are built and audited, Build 28 remains `blocked-pending-trollstore-device-keychain-isolation-validation` with fail-closed acceptance.
+Build 26 and Build 27 remain useful physical-device regression evidence, but neither can satisfy Build 28's exact Candidate Set contract. Build 28 requires one overwrite of the Main IPA after terminating the old App, runtime-to-installed-bundle identity equality, governed-operation blocking on mismatch, and the exact paired Probe's Keychain isolation evidence. Until those device observations are recorded, Build 28 correctly remains `blocked-pending-trollstore-device-keychain-isolation-validation`.
 
 The preceding device-accepted recoverable-runtime candidate remains:
 
@@ -450,3 +452,31 @@ Current authoritative gate:
 - Commit `4bf6dd1` moved error capture inside the async closure and passed Core CI run `29614715038`. iPadOS CI run `29614715082` then advanced to the next real compiler error: an AppViewModel test referenced `PersistedCheckpoint.reason`, while the persisted model intentionally names the field `stage`.
 - The next repair changes only that test access from `.reason` to `.stage`. A failed local PowerShell edit briefly corrupted Chinese test literals because of implicit encoding; Swift parse caught it before staging. The file was restored from HEAD and patched with explicit UTF-8 handling.
 - Companion Probe UI assertions also appear later in the failed logs, but they are not being guessed at in parallel. The strict sequence remains: fix the earliest causal compiler/test error, push, and rerun until the App test step reaches a trustworthy result; then diagnose the first remaining Probe failure from its own screenshots and logs.
+
+## 2026-07-17 Build 28 audited paired candidate and device gate
+
+Commit `b059a1e33a7a3d578cf15cd66ae11521400159bd` fixes the final paired-build blocker: `CangJieIsolationProbe.entitlements` contained a UTF-8 BOM that Apple `plutil` and Python `plistlib` accepted but pinned Procursus `ldid` rejected. The build contract now rejects a BOM before signing with the exact error `Entitlements file must be UTF-8 without BOM for ldid compatibility`; the checked-in Probe entitlement is BOM-free, and both entitlement files are contract-tested for exact self-only Keychain groups.
+
+Authoritative automation evidence:
+
+```text
+Core CI 29620872829: success
+iPadOS CI 29620872813: success
+Build TrollStore Candidate Set 29621391195: success
+Hermetic build-contract tests: success
+Real codesign and ldid entitlement contracts: success
+Paired build, independent signing, complete candidate-set re-verification, and artifact upload: success
+```
+
+Independent Windows-side audit of the downloaded artifact directory also passed `scripts/verify-build-artifacts.py --metadata-only` and a separate archive/manifest verifier. It confirmed one Candidate Set ID, one version/build/commit, exact manifest SHA-256 values, exact Bundle IDs and self-only Keychain groups, matching packaged `Info.plist` identities, changed signed executable hashes, no provisioning profile, and no unreviewed nested code.
+
+Remaining gate is intentionally device-only:
+
+1. Terminate the old CangJie process before installing.
+2. Overwrite-install the exact Main IPA once, never twice.
+3. Confirm Device Diagnostics reports the running executable and installed bundle as matching and runtime authorization as active.
+4. If mismatch remains after relaunch, respring and collect diagnostics; do not perform another overwrite.
+5. Install the exact Probe from the same Candidate Set and complete the own-group positive control plus explicit forbidden main-group query.
+6. Preserve the main canary digest and require the Probe's main-group query to return `errSecMissingEntitlement`.
+
+Only this real-device evidence can clear the manifest's fail-closed acceptance state.
