@@ -51,8 +51,6 @@ final class CangJieSmokeUITests: XCTestCase {
         XCTAssertTrue(guidance.exists)
 
         if status.label == "Stored" {
-            scrollUpToHittable(delete, in: app)
-            XCTAssertTrue(delete.isEnabled)
             delete.tap()
         }
         assertEventually(status, hasLabel: "Absent")
@@ -61,10 +59,8 @@ final class CangJieSmokeUITests: XCTestCase {
         XCTAssertTrue(guidance.label.contains("tap Create and verify"))
 
         let firstValue = "ui-keychain-probe-one"
-        scrollDownToHittable(input, in: app)
         input.tap()
         input.typeText(firstValue)
-        scrollUpToHittable(save, in: app)
         XCTAssertTrue(save.isEnabled)
         save.tap()
         assertEventually(status, hasLabel: "Stored")
@@ -78,15 +74,12 @@ final class CangJieSmokeUITests: XCTestCase {
         XCTAssertEqual(firstDigestLabel.count, 12)
         assertNoAccessiblePlaintext(firstValue, in: app)
 
-        scrollUpToHittable(read, in: app)
         read.tap()
         XCTAssertTrue(firstDigest.exists)
 
         let updatedValue = "ui-keychain-probe-two"
-        scrollDownToHittable(input, in: app)
         input.tap()
         input.typeText(updatedValue)
-        scrollUpToHittable(save, in: app)
         XCTAssertTrue(save.isEnabled)
         save.tap()
         assertEventually(save, hasLabel: "Update and verify")
@@ -95,7 +88,6 @@ final class CangJieSmokeUITests: XCTestCase {
         XCTAssertEqual(updatedDigest.label.count, 12)
         assertNoAccessiblePlaintext(updatedValue, in: app)
 
-        scrollUpToHittable(delete, in: app)
         delete.tap()
         assertEventually(status, hasLabel: "Absent")
         assertEventually(save, hasLabel: "Create and verify")
@@ -285,30 +277,6 @@ final class CangJieSmokeUITests: XCTestCase {
             file: file,
             line: line
         )
-    }
-
-    private func scrollUpToHittable(
-        _ element: XCUIElement,
-        in app: XCUIApplication,
-        file: StaticString = #filePath,
-        line: UInt = #line
-    ) {
-        for _ in 0..<6 where !element.isHittable {
-            app.swipeUp()
-        }
-        XCTAssertTrue(element.isHittable, "Expected element to become hittable", file: file, line: line)
-    }
-
-    private func scrollDownToHittable(
-        _ element: XCUIElement,
-        in app: XCUIApplication,
-        file: StaticString = #filePath,
-        line: UInt = #line
-    ) {
-        for _ in 0..<6 where !element.isHittable {
-            app.swipeDown()
-        }
-        XCTAssertTrue(element.isHittable, "Expected element to become hittable", file: file, line: line)
     }
 
     private func assertNoAccessiblePlaintext(

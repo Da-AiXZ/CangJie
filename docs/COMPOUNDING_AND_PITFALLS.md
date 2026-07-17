@@ -331,3 +331,9 @@ A passing UI automation path proves that XCTest can locate and operate a control
 State-dependent actions must expose the current state and the next required action in visible language. Give the input a heading and input-like styling, give the primary action button-like styling, explain that update reuses the same field, and test the visible label plus enabled/disabled transition rather than only a stable accessibility identifier. Never write a device script that merely says "tap Create" when Create exists only in the `Absent` state; explain how to reach that state.
 
 Every device acceptance step must specify the entry path, exact control position, control type, operation, expected-result location, failure signal, and reset/recovery path. This is part of the product acceptance contract, not optional prose. Requiring the user to ask where a control is or what success looks like wastes time, context, and evidence quality.
+
+## P-082 Do not add a stricter precondition than the native UI action requires
+
+An XCTest helper can create a false failure when it asserts `isHittable` after manual whole-App swipes even though `XCUIElement.tap()` can identify the same control, scroll it into view, compute a hit point, and activate it successfully. In iPadOS CI run `29589924300`, the custom helper failed after six swipes, then the immediately following native Save-button tap auto-scrolled and completed the Keychain write.
+
+Use stable identifiers and let native XCTest actions perform their built-in scroll-to-visible behavior unless evidence shows they cannot. Add predicate waits for the resulting state rather than inventing a stronger pre-action gate. When CI fails, read the chronological action trace: a helper assertion followed by a successful native action proves the helper is wrong, not the product control.
