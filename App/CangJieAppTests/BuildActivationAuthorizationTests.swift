@@ -1,4 +1,4 @@
-﻿import GRDB
+import GRDB
 import XCTest
 @testable import CangJie
 
@@ -127,15 +127,22 @@ final class BuildActivationAuthorizationTests: XCTestCase {
         let revocationFinished = expectation(description: "revocation finishes")
         let resultLock = NSLock()
         var mutationRan = false
+        var capturedMutationError: Error?
 
         DispatchQueue.global(qos: .userInitiated).async {
-            XCTAssertNoThrow(try authorizer.performAuthorized(.durableMutation) {
-                bodyStarted.signal()
-                bodyMayFinish.wait()
+            do {
+                try authorizer.performAuthorized(.durableMutation) {
+                    bodyStarted.signal()
+                    bodyMayFinish.wait()
+                    resultLock.lock()
+                    mutationRan = true
+                    resultLock.unlock()
+                }
+            } catch {
                 resultLock.lock()
-                mutationRan = true
+                capturedMutationError = error
                 resultLock.unlock()
-            })
+            }
             mutationFinished.fulfill()
         }
 
@@ -150,8 +157,10 @@ final class BuildActivationAuthorizationTests: XCTestCase {
 
         resultLock.lock()
         let didRun = mutationRan
+        let mutationError = capturedMutationError
         resultLock.unlock()
         XCTAssertTrue(didRun)
+        XCTAssertNil(mutationError)
         XCTAssertThrowsError(try authorizer.authorize(.durableMutation))
     }
 
