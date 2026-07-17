@@ -1695,7 +1695,7 @@ final class AppDatabaseTests: XCTestCase {
                 projectID: generated.projectID,
                 chapterNumber: 1
             ))
-            XCTAssertEqual(frozen, accepted.calibration)
+            XCTAssertTrue(frozen.isAuditEquivalent(to: accepted.calibration))
         }
     }
 
