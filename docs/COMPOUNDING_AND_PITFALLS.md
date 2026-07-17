@@ -409,3 +409,7 @@ Runtime activation failure is a security state, not a successful chat turn. Do n
 ## P-099 Dynamic revocation must clear cached security evidence
 
 When a previously active executable becomes mismatched at runtime, immediately revoke the runtime, cancel governed work, and clear UI-cached security evidence. Clearing the display must not itself trigger Keychain or canary repository access, because even a read would cross the newly closed authorization boundary.
+
+## P-100 PowerShell default text encoding can corrupt UTF-8 Swift fixtures
+
+Do not round-trip Swift, Markdown, JSON, or fixture files containing Chinese text through `Get-Content` plus `Set-Content` without an explicit verified encoding. Windows PowerShell can decode or re-encode the file under a legacy code page and silently corrupt string literals. Prefer a UTF-8-aware script, assert the exact replacement count, run `swiftc -frontend -parse` immediately, and restore from Git before retrying if any encoding damage appears.

@@ -189,7 +189,7 @@ final class AppViewModelTests: XCTestCase {
             XCTAssertFalse(viewModel.isStreaming)
             let storedTaskID = try XCTUnwrap(UserDefaults.standard.string(forKey: "m0TaskID"))
             let taskID = try XCTUnwrap(UUID(uuidString: storedTaskID))
-            XCTAssertEqual(try database.latestCheckpoint(taskID: taskID)?.reason, "sceneInactive")
+            XCTAssertEqual(try database.latestCheckpoint(taskID: taskID)?.stage, "sceneInactive")
 
             viewModel.draft = "must not persist after suspension"
             viewModel.saveDraft()

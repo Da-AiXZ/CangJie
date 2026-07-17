@@ -443,3 +443,10 @@ Current authoritative gate:
 5. Download the main and Probe IPA from the same artifact directory and run the strict offline verifier.
 6. Ask for one-overwrite real-device acceptance only after the paired Candidate Set audit passes.
 7. If the first overwrite does not activate the new executable, terminate/relaunch or respring and collect diagnostics; never instruct a second overwrite as the fix.
+
+## 2026-07-17 Build 28 CI repair log
+
+- Commit `02d9e4e` passed Core CI run `29614001984`. iPadOS CI run `29614001983` reached Xcode tests and exposed the first real compiler error: a throwing authorization call was placed directly inside a non-throwing `DispatchQueue.async` closure.
+- Commit `4bf6dd1` moved error capture inside the async closure and passed Core CI run `29614715038`. iPadOS CI run `29614715082` then advanced to the next real compiler error: an AppViewModel test referenced `PersistedCheckpoint.reason`, while the persisted model intentionally names the field `stage`.
+- The next repair changes only that test access from `.reason` to `.stage`. A failed local PowerShell edit briefly corrupted Chinese test literals because of implicit encoding; Swift parse caught it before staging. The file was restored from HEAD and patched with explicit UTF-8 handling.
+- Companion Probe UI assertions also appear later in the failed logs, but they are not being guessed at in parallel. The strict sequence remains: fix the earliest causal compiler/test error, push, and rerun until the App test step reaches a trustworthy result; then diagnose the first remaining Probe failure from its own screenshots and logs.
