@@ -651,6 +651,7 @@ verify_grdb_privacy_manifest "${GRDB_CHECKOUT}/GRDB/PrivacyInfo.xcprivacy"
 
 readonly APP_GIT_COMMIT="$(git -C "${ROOT}" rev-parse --short=12 HEAD 2>/dev/null || printf 'unknown')"
 readonly APP_BUILD_NUMBER="${GITHUB_RUN_NUMBER:-1}"
+[[ "${APP_GIT_COMMIT}" =~ ^[0-9a-f]{12}$ ]] || fail "Build commit must be a 12-character lowercase Git SHA: ${APP_GIT_COMMIT}"
 [[ "${APP_BUILD_NUMBER}" =~ ^[0-9]+$ ]] || fail "Build number must be numeric: ${APP_BUILD_NUMBER}"
 
 xcodebuild build \
@@ -676,6 +677,7 @@ readonly APP="${DERIVED}/Build/Products/Release-iphoneos/CangJie.app"
 readonly INFO_PLIST="${APP}/Info.plist"
 [[ -d "${APP}" && ! -L "${APP}" ]] || fail "Built app not found: ${APP}"
 [[ -f "${INFO_PLIST}" && ! -L "${INFO_PLIST}" ]] || fail "Info.plist is missing or unsafe"
+python3 "${ROOT}/scripts/stamp-build-identity.py" "${INFO_PLIST}" "${APP_GIT_COMMIT}" "${APP_BUILD_NUMBER}"
 
 if find "${APP}" -type l -print -quit | grep -q .; then
   fail "The app bundle contains a symbolic link"
@@ -700,7 +702,8 @@ if find "${APP}" -name 'embedded.mobileprovision' -print -quit | grep -q .; then
   fail "Unexpected provisioning profile in app bundle"
 fi
 
-readonly EXECUTABLE_NAME="$(python3 - "${INFO_PLIST}" "${EXPECTED_BUNDLE_ID}" "${EXPECTED_DEPLOYMENT_TARGET}" "${EXPECTED_DEVICE_FAMILY}" "${APP_GIT_COMMIT}" "${APP_BUILD_NUMBER}" <<'PY'
+EXECUTABLE_NAME=""
+if ! EXECUTABLE_NAME="$(python3 - "${INFO_PLIST}" "${EXPECTED_BUNDLE_ID}" "${EXPECTED_DEPLOYMENT_TARGET}" "${EXPECTED_DEVICE_FAMILY}" "${APP_GIT_COMMIT}" "${APP_BUILD_NUMBER}" <<'PY'
 import plistlib
 import sys
 
@@ -725,7 +728,10 @@ if not isinstance(executable, str) or not executable or executable in (".", ".."
     raise SystemExit(f"Unsafe CFBundleExecutable: {executable!r}")
 print(executable)
 PY
-)"
+)"; then
+  fail "Built Info.plist identity verification failed"
+fi
+readonly EXECUTABLE_NAME
 readonly EXECUTABLE="${APP}/${EXECUTABLE_NAME}"
 [[ -f "${EXECUTABLE}" && ! -L "${EXECUTABLE}" ]] || fail "Main executable is missing or unsafe"
 

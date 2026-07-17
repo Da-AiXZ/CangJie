@@ -299,3 +299,11 @@ Always download the newest run log and isolate the first causal compiler/test/ru
 ## P-074 Audit tests must use the same explicit persistence equivalence as production
 
 A security regression test can fail even when the protected mutation was rejected and all business fields are unchanged if it compares a SQLite-restored aggregate with a JSON-restored receipt snapshot using synthesized whole-object `Equatable`. Keep ordinary `Equatable` exact; do not make approximate floating-point equality global because adjacency is not transitive. At persistence/audit boundaries, use the explicit one-ULP-only audit equivalence and retain strict comparisons for every business field. A test that verifies frozen-state immutability must therefore use that named audit relation rather than broad equality or a broad time tolerance.
+
+## P-075 Source Info.plist placeholders are not final artifact evidence
+
+Xcode processes and merges the source plist during the build. A custom placeholder and a visible command-line build setting do not prove that the final app bundle retained the custom key. For user-visible build identity, stamp the built plist after compilation but before signing, permit only known unstamped values, write atomically, reopen and verify, then let the packaging verifier inspect it again. Never patch identity after signing.
+
+## P-076 Declaration builtins can mask command-substitution failure
+
+In Bash, `readonly NAME="$(command)"` or `local NAME="$(command)"` can report the declaration builtin's success instead of the command substitution's failure. For security-critical discovery and verification, assign inside an explicit checked branch, fail immediately, and apply `readonly` only after a valid value exists. Otherwise one root error can be followed by misleading cascade errors such as a missing executable path.
