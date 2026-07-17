@@ -16,6 +16,22 @@ struct TransientNotice: Identifiable, Equatable {
     let message: String
 }
 
+private struct AgentBusinessMilestone: Equatable {
+    let projectIDs: [UUID]
+    let focusedProjectID: UUID?
+    let interviewStep: Int
+    let interviewAnswerCount: Int
+    let currentQuestion: String
+    let approvalID: UUID?
+    let approvalStatus: String?
+    let approvalBindingHash: String?
+    let chapterLogicalID: UUID?
+    let chapterStage: String?
+    let chapterVersionID: UUID?
+    let chapterVersionHash: String?
+    let chapterRevision: Int?
+}
+
 struct BuildIdentity: Equatable {
     let version: String
     let build: String
@@ -103,6 +119,7 @@ final class AppViewModel: ObservableObject {
     private var streamTask: Task<Void, Never>?
     private var streamGeneration: UUID?
     private var noticeDismissTask: Task<Void, Never>?
+    private var projectedBusinessMilestone: AgentBusinessMilestone?
 
     init(
         database: AppDatabase? = nil,
@@ -422,6 +439,7 @@ final class AppViewModel: ObservableObject {
         lastToolReceipt = snapshot.lastReceipt
         latestAgentRun = snapshot.latestRun
         chapter = snapshot.chapter
+        projectedBusinessMilestone = Self.businessMilestone(for: snapshot)
     }
 
     func saveDraft() {
@@ -478,9 +496,16 @@ final class AppViewModel: ObservableObject {
         guard let runtime else { return }
         do {
             let snapshot = try runtime.restore()
+            let restoredMilestone = Self.businessMilestone(for: snapshot)
+            let milestoneChanged = projectedBusinessMilestone != restoredMilestone
             apply(runtimeSnapshot: snapshot)
-            businessStatus = Self.businessStatus(for: snapshot)
+            if milestoneChanged {
+                businessStatus = Self.businessStatus(for: snapshot)
+            }
         } catch {
+#if DEBUG
+            print("Agent runtime projection restore failed:", error)
+#endif
             publishError("Agent restore failed (AGENT-RESTORE)")
         }
     }
@@ -589,10 +614,16 @@ final class AppViewModel: ObservableObject {
             businessStatus = result.status
             return result.snapshot
         } catch let error as AppDatabaseError {
+#if DEBUG
+            print("Chapter operation failed [chapter command]:", error)
+#endif
             handleChapterError(error, operation: "chapter command")
             restoreRuntimeProjection()
             return nil
         } catch {
+#if DEBUG
+            print("Chapter operation failed [chapter command]:", error)
+#endif
             publishError("Chapter command failed (CHAPTER-COMMAND)")
             restoreRuntimeProjection()
             return nil
@@ -631,6 +662,24 @@ final class AppViewModel: ObservableObject {
         } else {
             errorMessage = message
         }
+    }
+
+    private static func businessMilestone(for snapshot: AgentRuntimeSnapshot) -> AgentBusinessMilestone {
+        AgentBusinessMilestone(
+            projectIDs: snapshot.projects.map { $0.id },
+            focusedProjectID: snapshot.session.focusedProjectID,
+            interviewStep: snapshot.session.interviewStep,
+            interviewAnswerCount: snapshot.session.interviewAnswers.count,
+            currentQuestion: snapshot.session.currentQuestion,
+            approvalID: snapshot.openingPlanApproval?.id,
+            approvalStatus: snapshot.openingPlanApproval?.status.rawValue,
+            approvalBindingHash: snapshot.openingPlanApproval?.bindingHash,
+            chapterLogicalID: snapshot.chapter?.calibration.chapterLogicalID,
+            chapterStage: snapshot.chapter?.stage.rawValue,
+            chapterVersionID: snapshot.chapter?.activeVersion.id,
+            chapterVersionHash: snapshot.chapter?.activeVersion.contentHash,
+            chapterRevision: snapshot.chapter?.activeVersion.revision
+        )
     }
 
     private static func businessStatus(for snapshot: AgentRuntimeSnapshot) -> String {

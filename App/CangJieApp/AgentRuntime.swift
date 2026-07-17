@@ -75,10 +75,10 @@ final class AgentRuntime {
             now: now
         )
         let projects = try database.listProjects()
-        let storedSession = try database.loadAgentSession(conversationID: conversation.id)
+        let focusedProjectID = try database.focusedProjectID(conversationID: conversation.id)
         let run = AgentRunSnapshot(
             id: UUID(),
-            projectID: storedSession?.focusedProjectID ?? projects.first?.id,
+            projectID: focusedProjectID ?? projects.first?.id,
             kind: "agentTurn",
             status: .running,
             idempotencyKey: "agent.turn." + userMessage.id.uuidString,
@@ -89,6 +89,7 @@ final class AgentRuntime {
         try database.saveAgentRun(run, conversationID: conversation.id)
 
         do {
+        let storedSession = try database.loadAgentSession(conversationID: conversation.id)
         if projects.isEmpty && Self.isProjectCreationIntent(text) {
             let tool = try database.executeProjectCreateTool(
                 conversationID: conversation.id,
@@ -119,7 +120,7 @@ final class AgentRuntime {
             return AgentTurnResult(snapshot: try restore(now: now), status: "Waiting for a novel idea")
         }
 
-        let current = try database.loadAgentSession(conversationID: conversation.id) ?? AgentSessionState(
+        let current = storedSession ?? AgentSessionState(
             focusedProjectID: projects.first?.id,
             interviewStep: 0,
             currentQuestion: Self.interviewQuestions[0],
@@ -305,7 +306,7 @@ final class AgentRuntime {
             let intent = ChapterAgentTemplates.intent(for: text, stage: .notStarted)
             guard intent == .generate else {
                 try appendAssistant(
-                    "The opening plan is approved. Say ‘生成第一章’, ‘开始生成第一章’, ‘继续’, or ‘generate chapter’ to begin the governed Chapter 1 calibration.",
+                    "Chapter planning is unlocked. Say ‘生成第一章’, ‘开始生成第一章’, ‘继续’, or ‘generate chapter’ to begin the governed Chapter 1 calibration.",
                     now: now
                 )
                 try finish(run: run, status: .waitingUser, stage: "chapter.1.notStarted", now: now)

@@ -134,6 +134,22 @@ extension AppDatabase {
         }
     }
 
+    func focusedProjectID(conversationID: UUID) throws -> UUID? {
+        try queue.read { db in
+            guard let row = try Row.fetchOne(
+                db,
+                sql: "SELECT focusedProjectID FROM agentSession WHERE conversationID = ?",
+                arguments: [conversationID.uuidString]
+            ) else { return nil }
+            let projectText: String? = row["focusedProjectID"]
+            guard let projectText else { return nil }
+            guard let projectID = UUID(uuidString: projectText) else {
+                throw AppDatabaseError.invalidAgentSession
+            }
+            return projectID
+        }
+    }
+
     func saveAgentRun(_ run: AgentRunSnapshot, conversationID: UUID) throws {
         try queue.write { db in try Self.upsertAgentRun(run, conversationID: conversationID, in: db) }
     }
