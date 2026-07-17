@@ -295,3 +295,7 @@ If session decoding, provider data, or command interpretation throws before the 
 ## P-073 CI diagnosis starts from the first real error and preserves raw encoding
 
 Always download the newest run log and isolate the first causal compiler/test/runtime error before editing. GitHub logs captured through PowerShell tools may be UTF-16 even when the source is UTF-8; inspect with an encoding-aware reader and do not rewrite product files based on terminal mojibake. Record run IDs and remove temporary logs before commit.
+
+## P-074 Audit tests must use the same explicit persistence equivalence as production
+
+A security regression test can fail even when the protected mutation was rejected and all business fields are unchanged if it compares a SQLite-restored aggregate with a JSON-restored receipt snapshot using synthesized whole-object `Equatable`. Keep ordinary `Equatable` exact; do not make approximate floating-point equality global because adjacency is not transitive. At persistence/audit boundaries, use the explicit one-ULP-only audit equivalence and retain strict comparisons for every business field. A test that verifies frozen-state immutability must therefore use that named audit relation rather than broad equality or a broad time tolerance.

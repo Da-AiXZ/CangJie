@@ -258,3 +258,9 @@ UI smoke: Agent-first launch and scrollable opening-plan approval review passed
 ```
 
 Next gate: commit this operational documentation, verify the final HEAD remains green, dispatch `build-ipa.yml`, verify Bundle ID `com.juyang.CangJie`, iPadOS 16.6 deployment target, exact commit identity, ad-hoc/fakesign entitlements, SHA-256 and manifest, then request target-iPad acceptance.
+
+## 2026-07-17 M1-C final-HEAD CI assertion repair
+
+Final documentation commit `641e30a` preserved the implementation but exposed one nondeterministic audit assertion in iPadOS CI run `29555834009`. Core CI `29555834104` passed. The first real iPadOS error was `testChapterApprovedFrozenRejectsForgedApprovalAndFurtherMutation`: the database correctly rejected the forged mutation, and every visible business field remained identical, but the test compared a SQLite-restored `ChapterCalibration` to the receipt-restored calibration with synthesized `Equatable` instead of the established one-ULP-only audit equivalence.
+
+The test now asserts `isAuditEquivalent(to:)`. This does not change product behavior or weaken the frozen-chapter trigger, exact version/hash binding, receipt validation, lock integrity, diagnosis state, rewrite scope, or canon gates. It applies the same narrowly tested timestamp representation rule already used by production receipt reconciliation. The final candidate must be built only after Core and iPadOS CI are green for the new documentation-inclusive HEAD.
