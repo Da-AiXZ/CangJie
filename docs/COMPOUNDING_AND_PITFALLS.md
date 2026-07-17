@@ -186,3 +186,88 @@ Attaching a UI-test identifier to a compound container can collapse or overwrite
 ## P-046 Manual visible persistence does not prove every structured field
 
 Seeing all interview exchanges after force-quit proves that the conversation projection is durable, but it does not by itself prove that the structured interview answer array retained every element or that the plan compiler consumed all of them. Keep the evidence layers explicit: physical-device tests validate what the user can observe, while deterministic database/runtime restore tests validate hidden structured state and its downstream use. Do not overclaim either layer, and do not dismiss a valid device result merely because part of the invariant is intentionally non-visible.
+
+## P-047 Pending work must be projected by state, not object existence
+
+A durable approval record remains valuable after completion, but it no longer belongs in the central pending queue. Render the central action card only when `status == pending`; after exact success, remove it only from the action projection while preserving approved history, binding evidence, and receipts in the artifact inspector.
+
+## P-048 Governed authorization content must never be hidden by line limits
+
+A compact card may summarize an approval and use `ViewThatFits` to remain actionable in landscape, but ellipsis is not an acceptable substitute for the exact artifact, binding, budget, expiry, expected diff, status, and full plan being authorized. Open a scrollable review surface in every orientation and place the exact action inside that surface.
+
+## P-049 Foreground activation is a reconciliation boundary
+
+An overwrite install or suspended process can resume with an old in-memory projection. On `.active`, restore and reconcile durable state idempotently. This path may project records and append an independently idempotent missing success message, but it must never repeat a paid tool mutation or create a second receipt.
+
+## P-050 Every device candidate needs visible build identity
+
+An IPA filename is not sufficient evidence that an overwrite install is running the intended binary. Embed and display marketing version, numeric build, and a short Git commit. The packaging script must verify the embedded values before uploading the candidate.
+
+## P-051 Byte-exact paragraph locks must not normalize before comparison
+
+Normalizing CRLF to LF or trimming whitespace before lock validation can silently alter content that the author explicitly protected. Paragraph segmentation must operate on raw UTF-8 and distinguish LF, CRLF, and CR. The protected payload includes the paragraph content plus its adjacent blank-line separator bytes, so changing a trailing or leading separator fails closed.
+
+## P-052 Downstream execution must reuse the canonical approval validator
+
+A chapter generator must not infer authorization from an `approved` status field. Reuse the same canonical validator that checks the latest artifact identity and content hash, exact approval binding and current policy, project/conversation scope, and the completed approval receipt's request, binding, input, tool/version, idempotency key, and output reference. A forged or orphaned approval row must not unlock downstream work.
+
+## P-053 Version identity and receipts are scope-bound capabilities
+
+A UUID is not sufficient authority by itself. Bind chapter reads and mutations to conversation ID, project ID, logical chapter ID, chapter number, exact version ID/content hash, and the receipt's matching scope and output reference. Reject cross-project and cross-conversation references before any write, even when the referenced UUID exists.
+
+## P-054 Idempotent replay must return the receipt's historical snapshot
+
+Returning the current aggregate state for an old idempotency key rewrites history: later locks, diagnosis answers, rewrites, or acceptance can make the old result appear to have produced state that did not exist then. Persist a hashed result snapshot keyed by receipt ID and validate receipt tool/version/input/scope/output against it. Replay the captured version and calibration, not today's active projection.
+
+## P-055 Validate lineage before trusting active or historical chapter state
+
+Immutable rows are not enough if their parent graph can be malformed. V1 must own its logical ID, use revision 1, and have no parent. Each later revision must be contiguous, parent the immediately preceding revision, and remain in the same conversation, project, and chapter. Diagnosis and rejection history must point to exact version/hash pairs in that validated lineage.
+
+## P-056 Bound chapter inputs by UTF-8 bytes before opening a write transaction
+
+Character counts do not bound storage, hashing, JSON, or database costs for multilingual text. Enforce strict UTF-8 byte limits at every chapter tool boundary, including title, prose, evidence, rejection, diagnosis question/answer, rewrite scope, hashes, and idempotency keys. Also cap paragraph count, per-paragraph bytes, and lock-index count. Fail before writes so rejected oversized input cannot leave partial state or receipts.
+
+## P-057 Dismissal is a projection-confirmed state transition
+
+A button callback returning without throwing is not enough reason to close governed UI. First verify the exact displayed request/version/hash, execute the tool, apply the returned durable snapshot, and confirm that the projection shows the same binding in its terminal state. Only then dismiss. On stale input, failure, or projection mismatch, keep the surface open and show the error.
+
+## P-058 Human-visible separators are part of the tested UI contract
+
+A transient acknowledgement can be semantically correct while its separators are corrupted by encoding or font pipelines. Use the literal ASCII `|` for the Refresh message and assert its rendered accessibility label contains the expected number of pipes and no replacement `?`. Keep transient feedback separate from the durable business status.
+
+
+## P-059 Windows SwiftPM success does not type-check the iOS App target
+
+`swift test` can be fully green while SwiftUI/GRDB App-only files still contain deterministic Xcode compile errors. Before push, parse all App and XCTest Swift files, but treat that only as a syntax gate; run a focused App-target review for mixed closure return types, invalid optional operators, framework-specific overloads, and other type errors, then let authoritative Xcode CI decide. Never present core-package tests as proof that the iOS target compiles.
+
+## P-060 Valid UTF-8 can still be unreadable mojibake
+
+A replacement-character or `????` scan does not catch text that was decoded and re-encoded through the wrong code page, because strings such as mojibake remain technically valid UTF-8. Review user-facing Chinese source semantically, scan for known mojibake markers, and keep representative Chinese intent/template tests. When rewriting paragraph text, operate on decoded content while preserving the original raw LF, CRLF, or CR separator bytes so fixing encoding does not weaken byte-exact locks.
+
+## P-061 Terminal chapter state needs database-level canonical evidence
+
+Swift replay validation is necessary but not sufficient for an irreversible terminal state. The database transition into `approvedFrozen` must itself require the canonical `chapter.accept` tool/version, exact `chapter:<activeVersionID>:accept` summary, nonblank input hash and idempotency key, matching conversation/project/output, and a matching immutable result snapshot. Direct insertion of an already-frozen calibration is forbidden.
+
+## P-062 Receipt, result snapshot, and terminal projection are one transaction
+
+An accept flow has a deliberate order: build the immutable receipt, insert the receipt, insert its immutable result snapshot, then perform the guarded calibration transition. Any failure in the final transition must roll the entire transaction back so no orphaned success evidence remains. Tests must inject a final-update failure and assert both receipt and snapshot counts stay zero.
+
+## P-063 Recovery evidence must bind to the originating durable run
+
+A latest receipt in the same conversation is not proof that it belongs to a particular interrupted run. Agent-originated chapter tools record `originRunID`; restore validates the receipt-bound snapshot, appends the missing assistant result once, and completes only that exact nonterminal run. Direct UI-only tools such as paragraph locking do not impersonate Agent-run completion.
+
+## P-064 Do not pipe Chinese source through a Windows console code page
+
+A UTF-8 file can be destroyed before Python sees it when a PowerShell here-string containing Chinese is piped through the console encoding. For source containing Chinese, use `.NET` `WriteAllText` with `UTF8Encoding(false)` or another byte-safe direct writer. After every such edit, parse the file and keep readable Chinese regression fixtures.
+
+## P-065 Fix the whole visible separator family, not one reported string
+
+When one transient message displays `?` instead of a separator, search all user-facing status strings for the same encoding artifact. The Refresh acknowledgement and draft-save acknowledgement now use literal ASCII `|`; SQL placeholders and Swift ternary operators are not presentation defects and must not be rewritten.
+
+## P-066 Origin run identity belongs in idempotent replay
+
+Matching tool input, scope, and idempotency key is still insufficient when the durable result is used to settle an interrupted Agent run. Chapter replay must compare the requested `originRunID` with the stored receipt. A different run may not inherit another run's committed result, even when every business input is otherwise identical.
+
+## P-067 Durable run scope must be proven at the database boundary
+
+An `originRunID` string is not evidence by itself. Persist the run's project scope, keep its idempotency identity immutable, and reject any receipt whose origin run is missing or belongs to another conversation or project. Migration must also fail closed when historical origin bindings cannot be reconciled exactly; do not silently bless ambiguous recovery evidence.

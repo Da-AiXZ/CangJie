@@ -149,6 +149,17 @@ extension AppDatabase {
         }
     }
 
+    func agentRun(id: UUID, conversationID: UUID) throws -> AgentRunSnapshot? {
+        try queue.read { db in
+            guard let row = try Row.fetchOne(
+                db,
+                sql: "SELECT * FROM agentRun WHERE id = ? AND conversationID = ? LIMIT 1",
+                arguments: [id.uuidString, conversationID.uuidString]
+            ) else { return nil }
+            return try Self.decodeAgentRun(row)
+        }
+    }
+
     func agentRun(idempotencyKey: String) throws -> AgentRunSnapshot? {
         try queue.read { db in
             guard let row = try Row.fetchOne(
@@ -335,20 +346,63 @@ extension AppDatabase {
     private static func upsertAgentRun(_ run: AgentRunSnapshot, conversationID: UUID, in db: Database) throws {
         try db.execute(
             sql: """
-            INSERT INTO agentRun (id, conversationID, kind, status, idempotencyKey, currentStage, startedAt, updatedAt)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO agentRun (
+                id, conversationID, projectID, kind, status, idempotencyKey,
+                currentStage, startedAt, updatedAt
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(idempotencyKey) DO UPDATE SET
                 status = excluded.status,
                 currentStage = excluded.currentStage,
                 updatedAt = excluded.updatedAt
+            WHERE agentRun.id = excluded.id
+              AND agentRun.conversationID = excluded.conversationID
+              AND agentRun.projectID IS excluded.projectID
+              AND agentRun.kind = excluded.kind
             """,
-            arguments: [run.id.uuidString, conversationID.uuidString, run.kind, run.status.rawValue, run.idempotencyKey, run.currentStage, run.startedAt.timeIntervalSince1970, run.updatedAt.timeIntervalSince1970]
+            arguments: [
+                run.id.uuidString,
+                conversationID.uuidString,
+                run.projectID?.uuidString,
+                run.kind,
+                run.status.rawValue,
+                run.idempotencyKey,
+                run.currentStage,
+                run.startedAt.timeIntervalSince1970,
+                run.updatedAt.timeIntervalSince1970
+            ]
         )
+        guard let stored = try Row.fetchOne(
+            db,
+            sql: "SELECT id, conversationID, projectID, kind FROM agentRun WHERE idempotencyKey = ? LIMIT 1",
+            arguments: [run.idempotencyKey]
+        ) else {
+            throw AppDatabaseError.idempotencyConflict
+        }
+        let storedID: String = stored["id"]
+        let storedConversationID: String = stored["conversationID"]
+        let storedProjectID: String? = stored["projectID"]
+        let storedKind: String = stored["kind"]
+        guard storedID == run.id.uuidString,
+              storedConversationID == conversationID.uuidString,
+              storedProjectID == run.projectID?.uuidString,
+              storedKind == run.kind else {
+            throw AppDatabaseError.idempotencyConflict
+        }
     }
 
     private static func decodeAgentRun(_ row: Row) throws -> AgentRunSnapshot {
         guard let id = UUID(uuidString: row["id"]), let status = AgentRunStatus(rawValue: row["status"]) else { throw AppDatabaseError.invalidAgentRun }
-        return AgentRunSnapshot(id: id, kind: row["kind"], status: status, idempotencyKey: row["idempotencyKey"], currentStage: row["currentStage"], startedAt: Date(timeIntervalSince1970: row["startedAt"]), updatedAt: Date(timeIntervalSince1970: row["updatedAt"]))
+        let projectText: String? = row["projectID"]
+        return AgentRunSnapshot(
+            id: id,
+            projectID: projectText.flatMap(UUID.init(uuidString:)),
+            kind: row["kind"],
+            status: status,
+            idempotencyKey: row["idempotencyKey"],
+            currentStage: row["currentStage"],
+            startedAt: Date(timeIntervalSince1970: row["startedAt"]),
+            updatedAt: Date(timeIntervalSince1970: row["updatedAt"])
+        )
     }
 
     static func receipt(idempotencyKey: String, in db: Database) throws -> ToolReceipt? {
@@ -361,9 +415,9 @@ extension AppDatabase {
             sql: """
             INSERT INTO toolReceipt (
                 id, toolID, toolVersion, inputSummary, inputHash, outcome, conversationID,
-                projectID, approvalRequestID, approvalBindingHash, idempotencyKey,
+                projectID, approvalRequestID, approvalBindingHash, originRunID, idempotencyKey,
                 outputReference, createdAt
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             arguments: [
                 receipt.id.uuidString,
@@ -376,6 +430,7 @@ extension AppDatabase {
                 receipt.projectID?.uuidString,
                 receipt.approvalRequestID?.uuidString,
                 receipt.approvalBindingHash,
+                receipt.originRunID?.uuidString,
                 receipt.idempotencyKey,
                 receipt.outputReference,
                 receipt.createdAt.timeIntervalSince1970
@@ -388,6 +443,7 @@ extension AppDatabase {
         let conversationText: String? = row["conversationID"]
         let projectText: String? = row["projectID"]
         let approvalRequestText: String? = row["approvalRequestID"]
+        let originRunText: String? = row["originRunID"]
         return ToolReceipt(
             id: id,
             toolID: row["toolID"],
@@ -399,6 +455,7 @@ extension AppDatabase {
             projectID: projectText.flatMap { UUID(uuidString: $0) },
             approvalRequestID: approvalRequestText.flatMap { UUID(uuidString: $0) },
             approvalBindingHash: row["approvalBindingHash"],
+            originRunID: originRunText.flatMap { UUID(uuidString: $0) },
             idempotencyKey: row["idempotencyKey"],
             outputReference: row["outputReference"],
             createdAt: Date(timeIntervalSince1970: row["createdAt"])

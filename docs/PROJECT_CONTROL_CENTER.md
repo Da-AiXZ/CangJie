@@ -1,7 +1,7 @@
 # CangJie Project Control Center
 
 - Authority: current operational truth
-- Updated: 2026-07-16
+- Updated: 2026-07-17
 - Repository: `F:\project\CangJie`
 - Remote: `https://github.com/Da-AiXZ/CangJie`, branch `main`
 
@@ -15,7 +15,11 @@ CangJie is agent-first: persistent center conversation controls a governed novel
 
 ## Current milestone
 
-M1 First-Chapter Agent Vertical Slice. The recoverable-runtime candidate at commit `a0fa83b` passed the user's detailed physical-device gate. That test exposed two non-blocking presentation defects: an unchanged project Refresh had no acknowledgement, and lifecycle checkpoint text could replace the durable Agent business status. Both fixes, plus exact opening-plan approval binding and paired restore/reconciliation, passed Core/iPadOS CI and were packaged from commit `874f73d`; the new candidate now awaits a focused physical-device differential gate. M1-B is not yet complete.
+M1 First-Chapter Agent Vertical Slice. M1-B exact opening-plan approval remains device-accepted at the business-state level. The current 2026-07-17 M1-C implementation checkpoint implements the previously bundled presentation/reconciliation corrections: Refresh feedback uses literal `|` separators rather than `?`; only a pending approval is projected as a central action card; an exact successful approval removes that central card while the right drawer retains the approved binding and receipt history; foreground activation restores the durable projection; and landscape uses a compact summary card that opens a scrollable full-detail review.
+
+The same worktree implements the first governed Chapter 1 calibration loop: approved opening-plan validation through the canonical approval validator, immutable V1 generation, paragraph locks, accept-and-freeze or reject-and-diagnose, exactly three ordered one-question diagnosis turns, exact rewrite-scope confirmation, immutable V2 with parent lineage, byte-exact locked-paragraph and separator validation, V1/V2 diff review, exact-version acceptance, scope-bound receipts, receipt-bound historical snapshot replay, and restart recovery. The opening-plan approval review closes only after the exact operation succeeds and the reapplied projection confirms the same request ID and binding hash as `approved`; chapter actions separately remain bound to the exact displayed version ID and content hash.
+
+This is implementation status, not acceptance. The checkpoint still requires authoritative Xcode/iPadOS CI compilation and tests, a green identity-verified IPA build, and physical-device acceptance on the target iPad.
 
 ```text
 open -> restore conversation/session/run/messages -> center conversation
@@ -24,6 +28,11 @@ open -> restore conversation/session/run/messages -> center conversation
 -> openingPlan.save transaction -> waitingApproval artifact plus receipt
 -> restart -> restore the same conversation and approval state
 -> openingPlan.approve transaction -> approved artifact plus receipt
+-> chapter.generate -> canonical approval validation -> immutable V1 plus scoped receipt/snapshot
+-> accept exact V1 -> approvedFrozen, or reject -> three ordered diagnosis answers
+-> confirm exact rewrite scope -> chapter.rewrite -> immutable V2 linked to V1
+-> byte-exact lock/separator validation -> diff review -> accept exact V2 -> approvedFrozen
+-> restart/replay -> validate lineage and return the receipt-bound historical snapshot
 ```
 
 ## Validated baseline
@@ -83,14 +92,33 @@ Novel package concepts are recorded in the plan. `cc.zip` is clean-room abstract
 
 ## Immediate queue
 
-1. Install the exact run `29539149285` candidate over the existing app and confirm launch plus old-data retention.
-2. Differentially verify that Novel Projects Refresh now shows an acknowledgement while leaving the Agent business status unchanged.
-3. Put the app inactive/background and return; checkpoint feedback may appear as a secondary notice, but the durable business status must remain the actual creative stage.
-4. Create a fresh project through conversation, reach the Opening Plan, inspect the exact request/revision/hash/tool/budget/expiration/diff/binding/status fields, approve through `Approve exact revision`, and verify the result survives force-quit.
-5. Keep the manifest's separate Keychain device gate fail-closed until create/read/update/delete/reinstall/isolation can be exercised through an explicit device-validation surface.
-6. Do not enter M1-C implementation until items 1-4 pass physical-device acceptance; then begin V1 chapter generation, evidence review, locked ranges, diagnostic rejection, confirmed rewrite scope, V2 diff, acceptance, and retained history.
+1. Review and commit the current M1-C worktree without weakening exact approval, scope, lineage, replay, byte-exact lock, or UI projection gates.
+2. Push the exact commit and require authoritative Xcode 16.4 iPadOS CI to compile the App, AppTests, and UITests and run the new chapter/approval coverage; Windows parse checks are not acceptance.
+3. Only after green CI, build an identity-verified TrollStore IPA, download it, and verify manifest, embedded version/build/commit, archive contents, and SHA-256.
+4. Run the target-iPad differential gate: Refresh displays two literal `|` separators and no `?`; exact approval succeeds, closes the central pending card, remains in right-side history, survives restart, and is fully scrollable in landscape.
+5. Run the complete Chapter 1 device gate: generate V1, lock a paragraph, reject, answer the three ordered questions one at a time, inspect and confirm the exact rewrite scope, generate V2, verify the lock and V1/V2 history/diff, accept and freeze the exact version, then force-quit/restart and inspect receipts/history.
+6. Keep M1-C marked unaccepted until both Xcode CI/IPA verification and physical-device acceptance pass. Keep the separate Keychain device gate fail-closed until its explicit CRUD/reinstall/isolation surface is exercised.
 
 ## Change log
+
+### 2026-07-17 M1-C governed Chapter 1 pre-CI checkpoint
+
+Status: implementation prepared for authoritative CI. No Xcode CI result, candidate IPA, or physical-device acceptance exists for this checkpoint yet.
+
+Implemented in the current worktree:
+
+- Refresh acknowledgement now renders `Projects refreshed | <count> <noun> | <time>` and UI coverage asserts exactly two literal pipes, no question-mark substitution, and no change to the durable Agent business status.
+- The opening-plan action card is state-projected only for `pending`. A compact `ViewThatFits` summary keeps review reachable in landscape; the exact request, revision, artifact hash, tool/version, targets, budget, expiration, expected diff, binding, status, and full plan live in a scrollable review. After exact success the central card disappears, while the right artifact drawer retains approved status, binding metadata, and the tool receipt.
+- Approval review dismissal is fail-closed: `approveOpeningPlan` first verifies the displayed request/binding is still pending, executes the exact tool, reapplies the returned runtime snapshot, and returns success only when the projection contains the same request ID and binding hash with `approved` status. The detail sheet independently checks that projection before dismissing.
+- Chapter generation reuses the canonical `requireExactApprovedOpeningPlan` validator, including latest artifact identity/content hash, current approval policy/binding, and completed approval-receipt identity; chapter generation cannot rely on status text or an orphaned `approved` row.
+- Added the governed Chapter 1 state machine and UI: immutable V1 plus evidence review; paragraph lock/unlock; exact accept-and-freeze; rejection without reroll; the ordered `root-cause`, `must-preserve`, and `chapter-end` questions asked one at a time; exact rewrite-scope text/hash confirmation; immutable V2; byte-exact lock validation; diff/history review; and exact-version freeze with restart restoration.
+- Chapter versions and receipts are scope-bound to conversation/project and exact version/hash inputs. V1 owns the logical ID; later revisions must be contiguous and parent the immediately preceding revision in the same conversation, project, and chapter. Calibration diagnosis and rejection entries must reference a version/hash in that validated lineage.
+- Idempotent replay is receipt-bound to a `chapterToolResultSnapshot`. Replay validates receipt tool/version/input/scope/output plus the snapshot hash, then returns the historical version and calibration captured for that receipt rather than silently substituting today's active calibration.
+- Chapter boundary inputs now have pre-write UTF-8 hard limits: title `<512` bytes, body `<1,048,576`, evidence `<131,072`, rejection `<32,768`, question `<16,384`, answer and rewrite scope `<65,536`, question ID/hash `<128`, idempotency key `<512`; at most 10,000 paragraphs, each `<262,144` bytes, and at most 2,000 locked indexes.
+- Paragraph splitting and lock binding operate on raw UTF-8. A protected paragraph includes its adjacent blank-line separator bytes, and distinguishes LF, CRLF, and CR; trimming or newline normalization cannot make a changed lock pass.
+- The final pre-CI review caught App-target-only type errors and mojibake in `ChapterAgentTemplates.swift` that Windows `swift test` could not compile. The template now uses `ChapterContentIntegrity.rewritingParagraphs` so every replacement is a `String`, original LF/CRLF/CR paragraph separators remain byte-exact, locked paragraphs are untouched, and all Chinese intent/template text is valid UTF-8.
+
+Verification state: deterministic tests were added for canonical approval receipt identity, cross-scope rejection, UTF-8 caps, trailing-separator preservation, receipt-to-historical-snapshot replay, raw UTF-8 lock comparison, immutable V1/V2 lineage, exact acceptance, restart recovery, landscape scrolling, central-card removal, and retained right-side history. These tests and all iOS source still require the authoritative Xcode CI run before any IPA is eligible for device testing.
 
 ### 2026-07-16 M1-B exact-approval candidate and prior-device acceptance
 
@@ -178,3 +206,34 @@ The first repair commit `73b9d49` made Core CI run `29537449945` pass. iPadOS CI
 ## 2026-07-16 Exact-approval CI test correction
 
 iPadOS CI run `29537777876` compiled the App and exposed three test-contract issues. The exact replay fixture created a 500-unit approval but executed under the zero-unit default policy; it now supplies the exact matching current policy for both execution and replay. The focused-project fixture used an approval expiration in 1970 while restore correctly evaluates the current wall clock; it now isolates project pairing with a future expiration. The approval-card identifier was attached to the container and masked descendant identifiers in the SwiftUI accessibility hierarchy; it now identifies the visible card title so request, revision, hash, policy, status, and action remain individually inspectable.
+
+## 2026-07-17 M1-B device-feedback repair plus M1-C pre-CI checkpoint
+
+Status: implementation and deterministic Windows gates complete; authoritative Xcode/iPadOS CI and a new identity-verified IPA are still pending.
+
+Included in the current worktree:
+
+- User-reported Refresh feedback renders literal ASCII `|` separators. The same visible separator audit also corrected the draft-save acknowledgement.
+- Exact opening-plan approval closes the central pending card only after the durable projection confirms the same request ID and binding hash as `approved`; approved metadata and `artifact.openingPlan.approve` remain visible in the right artifact history.
+- Landscape no longer relies on a truncated authorization card: a compact summary opens a scrollable exact review containing the full plan, hook, protagonist, approval binding, budget, expiry, targets, expected diff, and action.
+- Chapter 1 calibration is implemented end to end: immutable V1, evidence review, byte-exact paragraph locks, exact accept or diagnostic rejection, three ordered questions, explicit rewrite-scope confirmation, immutable V2 with parent lineage and diff, and exact acceptance/freeze. V2 cannot be rejected into an unbounded V3 loop.
+- Chapter receipts now optionally bind `originRunID`. Restore reconciles committed Agent chapter tools to the exact interrupted run, appends a missing result message once, and does not let direct paragraph-lock receipts complete an Agent run.
+- Final pre-push review found that `originRunID` was not yet part of replay identity and was stored without durable run-scope proof. Migration `m1c-origin-run-binding-v3` now gives each Agent run an immutable project scope, rejects missing or cross-conversation/project origin runs at the database boundary, fails migration on legacy mismatches, and treats a different run ID under the same chapter idempotency key as a conflict.
+- `approvedFrozen` is protected both in Swift and SQLite. Direct frozen inserts are rejected; the transition requires canonical nonblank accept evidence and a matching immutable result snapshot; any final-transition failure rolls receipt and snapshot writes back atomically.
+- Agent input is capped at 32,768 UTF-8 bytes before run creation. Chapter tool boundaries enforce field, body, paragraph, lock-index, hash, and idempotency limits before writes.
+- Build candidates embed and display marketing version, numeric Actions build number, and the exact short Git commit; CI and packaging verify this identity before upload.
+
+Local evidence on 2026-07-17:
+
+```text
+swiftc -parse App/CangJieApp/*.swift: pass
+swiftc -parse App/CangJieAppTests/*.swift: pass
+swiftc -parse App/CangJieUITests/*.swift: pass
+swift test: 60 tests, 0 failures
+App database regressions added for origin-run replay identity and missing/cross-project run rejection; authoritative execution remains Xcode CI
+python scripts/tests/test-build-identity-contract.py: pass
+git diff --check: pass (line-ending warnings only)
+secret/private-binary scan: no tracked IPA, ZIP, SQLite, database, key, profile, or private source package
+```
+
+This checkpoint is not a device candidate. Next: complete focused review, commit and push `main`, inspect the first causal error of each GitHub run if any, make Core and iPadOS CI green, then build and verify a new TrollStore IPA before requesting physical-device acceptance.

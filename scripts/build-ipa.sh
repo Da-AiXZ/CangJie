@@ -649,6 +649,10 @@ readonly AUDITED_GRDB_REVISION="$(git --git-dir="${GRDB_GIT_DIRECTORY}" rev-pars
 [[ -z "$(git -C "${GRDB_CHECKOUT}" status --porcelain --untracked-files=all)" ]] || fail "GRDB checkout is not clean"
 verify_grdb_privacy_manifest "${GRDB_CHECKOUT}/GRDB/PrivacyInfo.xcprivacy"
 
+readonly APP_GIT_COMMIT="$(git -C "${ROOT}" rev-parse --short=12 HEAD 2>/dev/null || printf 'unknown')"
+readonly APP_BUILD_NUMBER="${GITHUB_RUN_NUMBER:-1}"
+[[ "${APP_BUILD_NUMBER}" =~ ^[0-9]+$ ]] || fail "Build number must be numeric: ${APP_BUILD_NUMBER}"
+
 xcodebuild build \
   -project CangJie.xcodeproj \
   -scheme CangJie \
@@ -662,7 +666,9 @@ xcodebuild build \
   ONLY_ACTIVE_ARCH=NO \
   CODE_SIGNING_ALLOWED=NO \
   CODE_SIGNING_REQUIRED=NO \
-  CODE_SIGN_IDENTITY=""
+  CODE_SIGN_IDENTITY="" \
+  CANGJIE_GIT_COMMIT="${APP_GIT_COMMIT}" \
+  CURRENT_PROJECT_VERSION="${APP_BUILD_NUMBER}"
 
 verify_entitlements_contract_unchanged "${ENTITLEMENTS_CONTRACT_SHA256}"
 
@@ -694,16 +700,18 @@ if find "${APP}" -name 'embedded.mobileprovision' -print -quit | grep -q .; then
   fail "Unexpected provisioning profile in app bundle"
 fi
 
-readonly EXECUTABLE_NAME="$(python3 - "${INFO_PLIST}" "${EXPECTED_BUNDLE_ID}" "${EXPECTED_DEPLOYMENT_TARGET}" "${EXPECTED_DEVICE_FAMILY}" <<'PY'
+readonly EXECUTABLE_NAME="$(python3 - "${INFO_PLIST}" "${EXPECTED_BUNDLE_ID}" "${EXPECTED_DEPLOYMENT_TARGET}" "${EXPECTED_DEVICE_FAMILY}" "${APP_GIT_COMMIT}" "${APP_BUILD_NUMBER}" <<'PY'
 import plistlib
 import sys
 
-path, expected_bundle_id, expected_target, expected_family = sys.argv[1:5]
+path, expected_bundle_id, expected_target, expected_family, expected_commit, expected_build = sys.argv[1:7]
 with open(path, "rb") as source:
     info = plistlib.load(source)
 checks = {
     "CFBundleIdentifier": expected_bundle_id,
     "MinimumOSVersion": expected_target,
+    "CangJieGitCommit": expected_commit,
+    "CFBundleVersion": expected_build,
 }
 for key, expected in checks.items():
     actual = info.get(key)

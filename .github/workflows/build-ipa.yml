@@ -24,6 +24,8 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           persist-credentials: false
+      - name: Verify visible build identity contract
+        run: python3 scripts/tests/test-build-identity-contract.py
       - name: Static validation
         run: bash -n scripts/build-ipa.sh scripts/install-ldid.sh scripts/find-ipad-simulator.sh scripts/tests/test-install-ldid.sh scripts/tests/test-build-ipa-entitlements.sh
       - name: Test artifact manifest contract

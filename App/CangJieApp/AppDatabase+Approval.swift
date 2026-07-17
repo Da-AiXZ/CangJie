@@ -37,6 +37,9 @@ extension AppDatabase {
         estimatedCostMinorUnits: Int = 0,
         budgetCeilingMinorUnits: Int = 2_000
     ) throws -> OpeningPlanSaveToolResult {
+        guard !idempotencyKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            throw AppDatabaseError.idempotencyConflict
+        }
         let expirationMilliseconds = try Self.requiredEpochMilliseconds(
             expiresAt ?? now.addingTimeInterval(7 * 24 * 60 * 60)
         )
@@ -81,6 +84,7 @@ extension AppDatabase {
             if let receipt = try Self.receipt(idempotencyKey: idempotencyKey, in: db) {
                 guard receipt.toolID == Self.openingPlanSaveToolID,
                       receipt.toolVersion == Self.openingPlanSaveToolVersion,
+                      receipt.inputSummary == "openingPlan:waitingApproval",
                       receipt.inputHash == saveInputHash,
                       receipt.outcome == "completed",
                       receipt.conversationID == conversationID,
@@ -180,6 +184,9 @@ extension AppDatabase {
         now: Date = Date(),
         currentPolicy: OpeningPlanApprovalExecutionPolicy = .current
     ) throws -> OpeningPlanApprovalToolResult {
+        guard !idempotencyKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            throw AppDatabaseError.idempotencyConflict
+        }
         let nowMilliseconds = try Self.requiredEpochMilliseconds(now)
         var deferredError: AppDatabaseError?
         let result: OpeningPlanApprovalToolResult? = try queue.write { db in
@@ -196,6 +203,7 @@ extension AppDatabase {
                       ),
                       receipt.toolID == currentPolicy.toolID,
                       receipt.toolVersion == currentPolicy.toolVersion,
+                      receipt.inputSummary == "openingPlan:approved",
                       receipt.inputHash == displayedBindingHash,
                       receipt.outcome == "completed",
                       receipt.conversationID == conversationID,
@@ -641,13 +649,97 @@ extension AppDatabase {
         }
         return receipt.toolID == policy.toolID
             && receipt.toolVersion == policy.toolVersion
+            && receipt.inputSummary == "openingPlan:approved"
             && receipt.inputHash == approval.bindingHash
             && receipt.outcome == "completed"
             && receipt.conversationID == conversationID
             && receipt.projectID == approval.projectID
             && receipt.approvalRequestID == approval.id
             && receipt.approvalBindingHash == approval.bindingHash
+            && receipt.idempotencyKey?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
             && receipt.outputReference == artifact.id.uuidString
+    }
+
+    static func requireExactApprovedOpeningPlan(
+        conversationID: UUID,
+        projectID: UUID,
+        artifactID: UUID,
+        artifactHash: String,
+        in db: Database
+    ) throws -> AgentArtifact {
+        guard let artifact = try artifact(id: artifactID.uuidString, in: db),
+              artifact.kind == "openingPlan",
+              artifact.conversationID == conversationID,
+              artifact.projectID == projectID,
+              artifact.contentHash == artifactHash,
+              artifact.contentHash == ApprovalFingerprint.artifactHash(
+                conversationID: artifact.conversationID,
+                projectID: artifact.projectID,
+                kind: artifact.kind,
+                title: artifact.title,
+                body: artifact.body
+              ) else {
+            throw AppDatabaseError.chapterBindingMismatch
+        }
+        guard let latest = try latestArtifact(
+            kind: "openingPlan",
+            conversationID: conversationID,
+            projectID: projectID,
+            in: db
+        ), latest.id == artifact.id,
+              let project = try project(id: projectID.uuidString, in: db),
+              let row = try Row.fetchOne(
+                db,
+                sql: """
+                SELECT * FROM approvalRequest
+                WHERE artifactID = ?
+                  AND artifactLogicalID = ?
+                  AND artifactRevision = ?
+                  AND artifactHash = ?
+                  AND conversationID = ?
+                  AND projectID = ?
+                  AND status = ?
+                ORDER BY approvedAt DESC, updatedAt DESC, rowid DESC
+                LIMIT 1
+                """,
+                arguments: [
+                    artifact.id.uuidString,
+                    artifact.logicalID.uuidString,
+                    artifact.revision,
+                    artifact.contentHash,
+                    conversationID.uuidString,
+                    projectID.uuidString,
+                    ApprovalRequestStatus.approved.rawValue
+                ]
+              ) else {
+            throw AppDatabaseError.chapterOpeningPlanNotApproved
+        }
+        do {
+            let approval = try decodeApprovalRequest(row)
+            let policy = OpeningPlanApprovalExecutionPolicy.current
+            guard approval.status == .approved,
+                  try currentApprovalValidation(
+                    approval,
+                    artifact: artifact,
+                    project: project,
+                    conversationID: conversationID,
+                    policy: policy,
+                    nowEpochMilliseconds: approval.expiresAtEpochMilliseconds - 1,
+                    enforceExpiration: false
+                  ) == .approved,
+                  try hasCompletedApprovalReceipt(
+                    approval: approval,
+                    artifact: artifact,
+                    conversationID: conversationID,
+                    policy: policy,
+                    in: db
+                  ) else {
+                throw AppDatabaseError.chapterOpeningPlanNotApproved
+            }
+        } catch AppDatabaseError.invalidApprovalRequest {
+            throw AppDatabaseError.chapterOpeningPlanNotApproved
+        }
+        return artifact
     }
 
     private static func requiredEpochMilliseconds(_ date: Date) throws -> Int64 {

@@ -1,3 +1,4 @@
+import CangJieCore
 import CryptoKit
 import Foundation
 import SwiftUI
@@ -13,6 +14,48 @@ struct TransientNotice: Identifiable, Equatable {
     let id: UUID
     let kind: Kind
     let message: String
+}
+
+struct BuildIdentity: Equatable {
+    let version: String
+    let build: String
+    let commit: String
+
+    var displayText: String {
+        "Version \(version) | Build \(build) | Commit \(commit)"
+    }
+
+    init(infoDictionary: [String: Any]?) {
+        version = Self.nonEmptyString(
+            forKeys: ["CFBundleShortVersionString"],
+            in: infoDictionary
+        ) ?? "unavailable"
+        build = Self.nonEmptyString(
+            forKeys: ["CFBundleVersion"],
+            in: infoDictionary
+        ) ?? "unavailable"
+        let fullCommit = Self.nonEmptyString(
+            forKeys: ["CangJieGitCommit"],
+            in: infoDictionary
+        )
+        commit = fullCommit.map { String($0.prefix(12)) } ?? "unavailable"
+    }
+
+    private static func nonEmptyString(
+        forKeys keys: [String],
+        in infoDictionary: [String: Any]?
+    ) -> String? {
+        guard let infoDictionary else { return nil }
+        for key in keys {
+            guard let rawValue = infoDictionary[key] else { continue }
+            let value = String(describing: rawValue)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            if !value.isEmpty {
+                return value
+            }
+        }
+        return nil
+    }
 }
 
 @MainActor
@@ -38,8 +81,19 @@ final class AppViewModel: ObservableObject {
     @Published private(set) var interviewStep = 0
     @Published private(set) var lastToolReceipt: ToolReceipt?
     @Published private(set) var latestAgentRun: AgentRunSnapshot?
+    @Published private(set) var chapter: ChapterRuntimeSnapshot?
 
     var status: String { errorMessage ?? businessStatus }
+    var chapterNeedsReview: Bool {
+        chapter?.stage == .reviewingV1 || chapter?.stage == .reviewingV2
+    }
+    var chapterNeedsRewriteScopeApproval: Bool {
+        chapter?.stage == .awaitingRewriteConfirmation
+    }
+    var chapterParagraphs: [String] {
+        chapter.map { ChapterContentIntegrity.paragraphs(in: $0.activeVersion.body) } ?? []
+    }
+    let buildIdentity: BuildIdentity
 
     private static let maximumStreamOutputBytes = 256 * 1_024
     private let database: AppDatabase?
@@ -53,9 +107,11 @@ final class AppViewModel: ObservableObject {
     init(
         database: AppDatabase? = nil,
         databaseFactory: () throws -> AppDatabase = { try AppDatabase.makeDefault() },
-        keychain: any SecretRepository = KeychainSecretRepository()
+        keychain: any SecretRepository = KeychainSecretRepository(),
+        bundleInfo: [String: Any]? = Bundle.main.infoDictionary
     ) {
         self.keychain = keychain
+        buildIdentity = BuildIdentity(infoDictionary: bundleInfo)
         let defaultsKey = "m0TaskID"
         if let stored = UserDefaults.standard.string(forKey: defaultsKey),
            let id = UUID(uuidString: stored) {
@@ -127,14 +183,15 @@ final class AppViewModel: ObservableObject {
             let noun = refreshedProjects.count == 1 ? "project" : "projects"
             publishTransientNotice(
                 kind: .projectRefresh,
-                message: "Projects refreshed ? \(refreshedProjects.count) \(noun) ? \(Date().formatted(date: .omitted, time: .standard))"
+                message: "Projects refreshed | \(refreshedProjects.count) \(noun) | \(Date().formatted(date: .omitted, time: .standard))"
             )
         } catch {
             publishError("Project list failed (DB-PROJECT-LIST)")
         }
     }
 
-    func approveOpeningPlan(requestID: UUID, displayedBindingHash: String) {
+    @discardableResult
+    func approveOpeningPlan(requestID: UUID, displayedBindingHash: String) -> Bool {
         guard let runtime,
               let displayed = openingPlanApproval,
               displayed.id == requestID,
@@ -143,7 +200,7 @@ final class AppViewModel: ObservableObject {
               !planBody.isEmpty else {
             businessStatus = "Opening plan changed; review the latest approval card"
             publishError("Displayed approval is no longer current (AGENT-APPROVAL-STALE)")
-            return
+            return false
         }
         isAgentWorking = true
         defer { isAgentWorking = false }
@@ -154,6 +211,9 @@ final class AppViewModel: ObservableObject {
             )
             apply(runtimeSnapshot: result.snapshot)
             businessStatus = result.status
+            return openingPlanApproval?.id == requestID
+                && openingPlanApproval?.bindingHash == displayedBindingHash
+                && openingPlanApproval?.status == .approved
         } catch let error as AppDatabaseError {
             switch error {
             case .approvalRequiresReapproval:
@@ -171,12 +231,162 @@ final class AppViewModel: ObservableObject {
             if let snapshot = try? runtime.restore() {
                 apply(runtimeSnapshot: snapshot)
             }
+            return false
         } catch {
             publishError("Plan approval failed (AGENT-APPROVAL)")
+            return false
         }
     }
 
+    func setChapterParagraphLocked(
+        _ paragraphIndex: Int,
+        locked: Bool,
+        versionID: UUID,
+        displayedContentHash: String
+    ) {
+        guard let database,
+              let runtime,
+              let current = exactDisplayedChapter(
+                versionID: versionID,
+                displayedContentHash: displayedContentHash,
+                allowedStages: [.reviewingV1, .reviewingV2]
+              ) else { return }
+        guard chapterParagraphs.indices.contains(paragraphIndex) else {
+            publishError("Chapter paragraph is no longer available (CHAPTER-PARAGRAPH)")
+            return
+        }
+
+        let sourceIndexes = current.calibration.lockedParagraphIndexes
+        var target = Set(sourceIndexes)
+        if locked {
+            target.insert(paragraphIndex)
+        } else {
+            target.remove(paragraphIndex)
+        }
+        let targetIndexes = target.sorted()
+        guard targetIndexes != sourceIndexes else { return }
+
+        let transitionBinding = Self.payloadHash(
+            for: [
+                versionID.uuidString,
+                displayedContentHash,
+                sourceIndexes.map(String.init).joined(separator: ","),
+                targetIndexes.map(String.init).joined(separator: ",")
+            ].joined(separator: "|")
+        )
+        let idempotencyKey = [
+            "chapter.lockParagraph.set",
+            versionID.uuidString,
+            transitionBinding
+        ].joined(separator: ".")
+
+        isAgentWorking = true
+        defer { isAgentWorking = false }
+        do {
+            _ = try database.executeChapterLockParagraphSetTool(
+                conversationID: current.calibration.conversationID,
+                projectID: current.calibration.projectID,
+                versionID: versionID,
+                displayedContentHash: displayedContentHash,
+                lockedParagraphIndexes: targetIndexes,
+                idempotencyKey: idempotencyKey
+            )
+            let snapshot = try runtime.restore()
+            apply(runtimeSnapshot: snapshot)
+            businessStatus = locked
+                ? "Chapter 1 paragraph \(paragraphIndex + 1) locked"
+                : "Chapter 1 paragraph \(paragraphIndex + 1) unlocked"
+        } catch let error as AppDatabaseError {
+            handleChapterError(error, operation: "lock paragraph")
+            restoreRuntimeProjection()
+        } catch {
+            publishError("Chapter paragraph lock failed (CHAPTER-LOCK)")
+            restoreRuntimeProjection()
+        }
+    }
+
+    @discardableResult
+    func acceptChapter(versionID: UUID, displayedContentHash: String) -> Bool {
+        guard exactDisplayedChapter(
+            versionID: versionID,
+            displayedContentHash: displayedContentHash,
+            allowedStages: [.reviewingV1, .reviewingV2]
+        ) != nil else { return false }
+        guard let snapshot = performChapterAgentCommand("accept and freeze"),
+              let projected = snapshot.chapter,
+              projected.activeVersion.id == versionID,
+              projected.activeVersion.contentHash == displayedContentHash,
+              projected.stage == .approvedFrozen,
+              projected.calibration.acceptedVersionID == versionID else {
+            publishError("Chapter acceptance was not confirmed by the persisted projection (CHAPTER-PROJECTION)")
+            restoreRuntimeProjection()
+            return false
+        }
+        return true
+    }
+
+    @discardableResult
+    func rejectChapter(
+        reason: String,
+        versionID: UUID,
+        displayedContentHash: String
+    ) -> Bool {
+        let trimmedReason = reason.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedReason.isEmpty else {
+            publishError("A concrete rejection reason is required (CHAPTER-REJECT-REASON)")
+            return false
+        }
+        guard exactDisplayedChapter(
+            versionID: versionID,
+            displayedContentHash: displayedContentHash,
+            allowedStages: [.reviewingV1]
+        ) != nil else { return false }
+        guard let snapshot = performChapterAgentCommand("reject: " + trimmedReason),
+              let projected = snapshot.chapter,
+              projected.activeVersion.id == versionID,
+              projected.activeVersion.contentHash == displayedContentHash,
+              projected.stage == .diagnosing,
+              projected.calibration.rejectionHistory.last?.versionID == versionID,
+              projected.calibration.rejectionHistory.last?.versionHash == displayedContentHash else {
+            publishError("Chapter rejection was not confirmed by the persisted projection (CHAPTER-PROJECTION)")
+            restoreRuntimeProjection()
+            return false
+        }
+        return true
+    }
+
+    @discardableResult
+    func confirmChapterRewrite(
+        sourceVersionID: UUID,
+        displayedSourceHash: String,
+        rewriteScopeHash: String
+    ) -> Bool {
+        guard let current = exactDisplayedChapter(
+            versionID: sourceVersionID,
+            displayedContentHash: displayedSourceHash,
+            allowedStages: [.awaitingRewriteConfirmation]
+        ), current.calibration.rewriteScopeHash == rewriteScopeHash else {
+            publishError("Displayed rewrite scope is no longer current (CHAPTER-STALE)")
+            restoreRuntimeProjection()
+            return false
+        }
+        guard let snapshot = performChapterAgentCommand("confirm rewrite"),
+              let projected = snapshot.chapter,
+              projected.stage == .reviewingV2,
+              projected.activeVersion.parentVersionID == sourceVersionID,
+              projected.activeVersion.revision == current.activeVersion.revision + 1 else {
+            publishError("Chapter rewrite was not confirmed by the persisted projection (CHAPTER-PROJECTION)")
+            restoreRuntimeProjection()
+            return false
+        }
+        return true
+    }
+
     func sendAgentMessage() {
+        guard draft.utf8.count < AgentRuntime.maximumInputUTF8Bytes else {
+            publishError("Agent input is too large (AGENT-INPUT-LIMIT)")
+            return
+        }
         let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
         guard let runtime else {
@@ -211,6 +421,7 @@ final class AppViewModel: ObservableObject {
         planAwaitingApproval = snapshot.openingPlanApproval?.status == .pending
         lastToolReceipt = snapshot.lastReceipt
         latestAgentRun = snapshot.latestRun
+        chapter = snapshot.chapter
     }
 
     func saveDraft() {
@@ -222,7 +433,7 @@ final class AppViewModel: ObservableObject {
             try database.saveDraft(draft)
             publishTransientNotice(
                 kind: .storage,
-                message: "Draft saved ? \(Date().formatted(date: .omitted, time: .standard))"
+                message: "Draft saved | \(Date().formatted(date: .omitted, time: .standard))"
             )
         } catch {
             publishError("Draft save failed (DB-WRITE)")
@@ -257,9 +468,20 @@ final class AppViewModel: ObservableObject {
         case .background:
             createCheckpoint(reason: "sceneBackground")
         case .active:
-            break
+            restoreRuntimeProjection()
         @unknown default:
             createCheckpoint(reason: "sceneUnknown")
+        }
+    }
+
+    private func restoreRuntimeProjection() {
+        guard let runtime else { return }
+        do {
+            let snapshot = try runtime.restore()
+            apply(runtimeSnapshot: snapshot)
+            businessStatus = Self.businessStatus(for: snapshot)
+        } catch {
+            publishError("Agent restore failed (AGENT-RESTORE)")
         }
     }
 
@@ -338,6 +560,60 @@ final class AppViewModel: ObservableObject {
         publishTransientNotice(kind: .network, message: "Streaming probe cancelled")
     }
 
+    private func exactDisplayedChapter(
+        versionID: UUID,
+        displayedContentHash: String,
+        allowedStages: [ChapterCalibrationStage]
+    ) -> ChapterRuntimeSnapshot? {
+        guard let current = chapter,
+              current.activeVersion.id == versionID,
+              current.activeVersion.contentHash == displayedContentHash,
+              allowedStages.contains(current.stage) else {
+            publishError("Displayed chapter revision is no longer current (CHAPTER-STALE)")
+            restoreRuntimeProjection()
+            return nil
+        }
+        return current
+    }
+
+    private func performChapterAgentCommand(_ command: String) -> AgentRuntimeSnapshot? {
+        guard let runtime else {
+            publishError("Agent runtime unavailable")
+            return nil
+        }
+        isAgentWorking = true
+        defer { isAgentWorking = false }
+        do {
+            let result = try runtime.handleUserMessage(command)
+            apply(runtimeSnapshot: result.snapshot)
+            businessStatus = result.status
+            return result.snapshot
+        } catch let error as AppDatabaseError {
+            handleChapterError(error, operation: "chapter command")
+            restoreRuntimeProjection()
+            return nil
+        } catch {
+            publishError("Chapter command failed (CHAPTER-COMMAND)")
+            restoreRuntimeProjection()
+            return nil
+        }
+    }
+
+    private func handleChapterError(_ error: AppDatabaseError, operation: String) {
+        switch error {
+        case .chapterBindingMismatch, .idempotencyConflict:
+            publishError("Displayed chapter revision is stale (CHAPTER-STALE)")
+        case .invalidChapterParagraphIndex:
+            publishError("Chapter paragraph index is invalid (CHAPTER-PARAGRAPH)")
+        case .chapterOperationNotAllowed:
+            publishError("Chapter operation is not allowed in the current stage (CHAPTER-STAGE)")
+        case .chapterLockedContentChanged:
+            publishError("Locked chapter content changed; rewrite stopped (CHAPTER-LOCK-INTEGRITY)")
+        default:
+            publishError("Failed to \(operation) (CHAPTER-TOOL)")
+        }
+    }
+
     private func publishTransientNotice(kind: TransientNotice.Kind, message: String) {
         noticeDismissTask?.cancel()
         let notice = TransientNotice(id: UUID(), kind: kind, message: message)
@@ -358,6 +634,23 @@ final class AppViewModel: ObservableObject {
     }
 
     private static func businessStatus(for snapshot: AgentRuntimeSnapshot) -> String {
+        if let chapter = snapshot.chapter {
+            switch chapter.stage {
+            case .notStarted:
+                return "Opening plan approved; Chapter 1 generation ready"
+            case .reviewingV1, .reviewingV2:
+                return "Chapter 1 revision \(chapter.activeVersion.revision) awaiting review"
+            case .diagnosing:
+                return "Chapter 1 diagnosis in progress"
+            case .awaitingRewriteConfirmation:
+                return "Waiting for exact rewrite-scope confirmation"
+            case .rewriting:
+                return "Chapter 1 rewrite in progress"
+            case .approvedFrozen:
+                return "Chapter 1 approved and frozen"
+            }
+        }
+
         if let approval = snapshot.openingPlanApproval {
             switch approval.status {
             case .pending:

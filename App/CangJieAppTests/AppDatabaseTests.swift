@@ -144,12 +144,14 @@ final class AppDatabaseTests: XCTestCase {
         }
     }
 
-    func testAgentRunRetryReusesIdempotencyKeyWithoutUniqueConstraintFailure() throws {
+    func testAgentRunRetryRequiresOriginalDurableIdentity() throws {
         try withDatabase { database in
             let conversation = try database.ensureDefaultConversation()
+            let project = try database.createProject(title: "Run identity", premise: "P")
             let key = "agent.approval.plan-1"
             let first = AgentRunSnapshot(
                 id: UUID(),
+                projectID: project.id,
                 kind: "approval",
                 status: .running,
                 idempotencyKey: key,
@@ -157,21 +159,36 @@ final class AppDatabaseTests: XCTestCase {
                 startedAt: Date(timeIntervalSince1970: 600),
                 updatedAt: Date(timeIntervalSince1970: 600)
             )
-            let retry = AgentRunSnapshot(
-                id: UUID(),
+            let validRetry = AgentRunSnapshot(
+                id: first.id,
+                projectID: project.id,
                 kind: "approval",
                 status: .completed,
                 idempotencyKey: key,
                 currentStage: "openingPlan.approved",
-                startedAt: Date(timeIntervalSince1970: 601),
+                startedAt: first.startedAt,
                 updatedAt: Date(timeIntervalSince1970: 602)
+            )
+            let differentRun = AgentRunSnapshot(
+                id: UUID(),
+                projectID: project.id,
+                kind: "approval",
+                status: .completed,
+                idempotencyKey: key,
+                currentStage: "openingPlan.approved",
+                startedAt: Date(timeIntervalSince1970: 603),
+                updatedAt: Date(timeIntervalSince1970: 603)
             )
 
             try database.saveAgentRun(first, conversationID: conversation.id)
-            try database.saveAgentRun(retry, conversationID: conversation.id)
+            try database.saveAgentRun(validRetry, conversationID: conversation.id)
+            XCTAssertThrowsError(try database.saveAgentRun(differentRun, conversationID: conversation.id)) { error in
+                XCTAssertEqual(error as? AppDatabaseError, .idempotencyConflict)
+            }
 
             let restored = try database.agentRun(idempotencyKey: key)
             XCTAssertEqual(restored?.id, first.id)
+            XCTAssertEqual(restored?.projectID, project.id)
             XCTAssertEqual(restored?.status, .completed)
             XCTAssertEqual(restored?.currentStage, "openingPlan.approved")
         }
@@ -254,6 +271,71 @@ final class AppDatabaseTests: XCTestCase {
         }
     }
 
+    func testOpeningPlanBlankIdempotencyKeysFailClosedBeforeWrites() throws {
+        try withDatabase { database in
+            let conversation = try database.ensureDefaultConversation()
+            let project = try database.createProject(title: "Blank approval key", premise: "P")
+
+            XCTAssertThrowsError(try database.executeOpeningPlanSaveTool(
+                conversationID: conversation.id,
+                projectID: project.id,
+                title: "Opening plan",
+                body: "Body",
+                idempotencyKey: " \t "
+            )) { error in
+                XCTAssertEqual(error as? AppDatabaseError, .idempotencyConflict)
+            }
+            XCTAssertEqual(try database.countArtifacts(kind: "openingPlan"), 0)
+            XCTAssertEqual(try database.countToolReceipts(toolID: "artifact.openingPlan.save"), 0)
+
+            let saved = try database.executeOpeningPlanSaveTool(
+                conversationID: conversation.id,
+                projectID: project.id,
+                title: "Opening plan",
+                body: "Body",
+                idempotencyKey: "opening.blank.valid-save"
+            )
+            XCTAssertThrowsError(try database.executeOpeningPlanApprovalTool(
+                conversationID: conversation.id,
+                approvalRequestID: saved.approval.id,
+                displayedBindingHash: saved.approval.bindingHash,
+                idempotencyKey: "\n\t"
+            )) { error in
+                XCTAssertEqual(error as? AppDatabaseError, .idempotencyConflict)
+            }
+            XCTAssertEqual(try database.approvalRequest(id: saved.approval.id)?.status, .pending)
+            XCTAssertEqual(try database.countToolReceipts(toolID: "artifact.openingPlan.approve"), 0)
+        }
+    }
+
+    func testOpeningPlanReplayRejectsTamperedCanonicalInputSummary() throws {
+        try withDatabase { database in
+            let conversation = try database.ensureDefaultConversation()
+            let project = try database.createProject(title: "Tampered replay", premise: "P")
+            let saved = try database.executeOpeningPlanSaveTool(
+                conversationID: conversation.id,
+                projectID: project.id,
+                title: "Opening plan",
+                body: "Body",
+                idempotencyKey: "opening.tampered.save"
+            )
+            try database.queue.write { db in
+                try db.execute(
+                    sql: "UPDATE toolReceipt SET inputSummary = ? WHERE id = ?",
+                    arguments: ["tampered", saved.receipt.id.uuidString]
+                )
+            }
+            XCTAssertThrowsError(try database.executeOpeningPlanSaveTool(
+                conversationID: conversation.id,
+                projectID: project.id,
+                title: "Opening plan",
+                body: "Body",
+                idempotencyKey: "opening.tampered.save"
+            )) { error in
+                XCTAssertEqual(error as? AppDatabaseError, .idempotencyConflict)
+            }
+        }
+    }
     func testReusingIdempotencyKeyWithDifferentApprovalFingerprintFailsClosed() throws {
         try withDatabase { database in
             let conversation = try database.ensureDefaultConversation()
@@ -695,6 +777,1154 @@ final class AppDatabaseTests: XCTestCase {
             }
             XCTAssertEqual(try database.countArtifacts(kind: "note"), 1)
         }
+    }
+
+
+    func testChapterGenerateUsesCanonicalExactApprovalValidatorIncludingReceiptIdentity() throws {
+        try withDatabase { database in
+            let conversation = try database.ensureDefaultConversation()
+            let project = try database.createProject(title: "Canonical approval", premise: "P")
+            let openingPlan = try makeApprovedOpeningPlan(
+                database: database,
+                conversationID: conversation.id,
+                projectID: project.id,
+                keyPrefix: "chapter.canonical-approval"
+            )
+            try database.queue.write { db in
+                try db.execute(
+                    sql: "UPDATE toolReceipt SET inputSummary = ?, idempotencyKey = NULL WHERE id = ?",
+                    arguments: ["tampered", openingPlan.approvalReceiptID.uuidString]
+                )
+            }
+
+            XCTAssertThrowsError(try database.executeChapterGenerateTool(
+                conversationID: conversation.id,
+                projectID: project.id,
+                chapterNumber: 1,
+                title: "Chapter 1",
+                body: "Body",
+                evidenceReview: "Review",
+                openingPlanArtifactID: openingPlan.artifact.id,
+                openingPlanHash: openingPlan.artifact.contentHash,
+                idempotencyKey: "chapter.canonical-approval.generate"
+            )) { error in
+                XCTAssertEqual(error as? AppDatabaseError, .chapterOpeningPlanNotApproved)
+            }
+            XCTAssertEqual(try database.countChapterVersions(projectID: project.id, chapterNumber: 1), 0)
+        }
+    }
+
+    func testChapterDiagnosisRequiresCanonicalThreeQuestionOrderAndFinalScope() throws {
+        try withDatabase { database in
+            let setup = try makeGeneratedChapter(database: database, keyPrefix: "chapter.diagnosis-protocol")
+            _ = try database.executeChapterRejectTool(
+                conversationID: setup.conversationID,
+                projectID: setup.projectID,
+                versionID: setup.version.id,
+                displayedContentHash: setup.version.contentHash,
+                reason: "The protagonist is passive.",
+                idempotencyKey: "chapter.diagnosis-protocol.reject"
+            )
+
+            XCTAssertThrowsError(try database.executeChapterDiagnosisAnswerTool(
+                conversationID: setup.conversationID,
+                projectID: setup.projectID,
+                versionID: setup.version.id,
+                displayedContentHash: setup.version.contentHash,
+                questionID: "must-preserve",
+                question: ChapterDiagnosisProtocol.orderedQuestions[1],
+                answer: "The opening image.",
+                rewriteScope: nil,
+                idempotencyKey: "chapter.diagnosis-protocol.out-of-order"
+            )) { error in
+                XCTAssertEqual(error as? AppDatabaseError, .invalidChapterDiagnosis)
+            }
+            XCTAssertThrowsError(try database.executeChapterDiagnosisAnswerTool(
+                conversationID: setup.conversationID,
+                projectID: setup.projectID,
+                versionID: setup.version.id,
+                displayedContentHash: setup.version.contentHash,
+                questionID: "root-cause",
+                question: ChapterDiagnosisProtocol.orderedQuestions[0],
+                answer: "The protagonist only reacts.",
+                rewriteScope: "Scope is forbidden before question three.",
+                idempotencyKey: "chapter.diagnosis-protocol.early-scope"
+            )) { error in
+                XCTAssertEqual(error as? AppDatabaseError, .invalidRewriteScope)
+            }
+
+            _ = try database.executeChapterDiagnosisAnswerTool(
+                conversationID: setup.conversationID,
+                projectID: setup.projectID,
+                versionID: setup.version.id,
+                displayedContentHash: setup.version.contentHash,
+                questionID: "root-cause",
+                question: ChapterDiagnosisProtocol.orderedQuestions[0],
+                answer: "The protagonist only reacts.",
+                rewriteScope: nil,
+                idempotencyKey: "chapter.diagnosis-protocol.answer.1"
+            )
+            _ = try database.executeChapterDiagnosisAnswerTool(
+                conversationID: setup.conversationID,
+                projectID: setup.projectID,
+                versionID: setup.version.id,
+                displayedContentHash: setup.version.contentHash,
+                questionID: "must-preserve",
+                question: ChapterDiagnosisProtocol.orderedQuestions[1],
+                answer: "The opening image and paragraph one.",
+                rewriteScope: nil,
+                idempotencyKey: "chapter.diagnosis-protocol.answer.2"
+            )
+            XCTAssertThrowsError(try database.executeChapterDiagnosisAnswerTool(
+                conversationID: setup.conversationID,
+                projectID: setup.projectID,
+                versionID: setup.version.id,
+                displayedContentHash: setup.version.contentHash,
+                questionID: "chapter-end",
+                question: ChapterDiagnosisProtocol.orderedQuestions[2],
+                answer: "With an active irreversible choice.",
+                rewriteScope: nil,
+                idempotencyKey: "chapter.diagnosis-protocol.missing-final-scope"
+            )) { error in
+                XCTAssertEqual(error as? AppDatabaseError, .invalidRewriteScope)
+            }
+            let completed = try database.executeChapterDiagnosisAnswerTool(
+                conversationID: setup.conversationID,
+                projectID: setup.projectID,
+                versionID: setup.version.id,
+                displayedContentHash: setup.version.contentHash,
+                questionID: "chapter-end",
+                question: ChapterDiagnosisProtocol.orderedQuestions[2],
+                answer: "With an active irreversible choice.",
+                rewriteScope: "Keep paragraph 1 byte-exact; rewrite paragraph 2 around the choice.",
+                idempotencyKey: "chapter.diagnosis-protocol.answer.3"
+            )
+            XCTAssertEqual(completed.calibration.diagnosisEntries.map(\.questionID), ChapterDiagnosisProtocol.orderedQuestionIDs)
+            XCTAssertEqual(completed.calibration.stage, .awaitingRewriteConfirmation)
+            XCTAssertNotNil(completed.calibration.rewriteScopeHash)
+        }
+    }
+
+    func testChapterScopedReadsAndTriggersRejectCrossScopeVersionReferences() throws {
+        try withDatabase { database in
+            let first = try makeGeneratedChapter(database: database, keyPrefix: "chapter.scope.first")
+            let second = try makeGeneratedChapter(database: database, keyPrefix: "chapter.scope.second")
+
+            XCTAssertNotNil(try database.chapterVersion(
+                id: first.version.id,
+                conversationID: first.conversationID,
+                projectID: first.projectID
+            ))
+            XCTAssertNil(try database.chapterVersion(
+                id: first.version.id,
+                conversationID: first.conversationID,
+                projectID: second.projectID
+            ))
+            XCTAssertThrowsError(try database.queue.write { db in
+                try db.execute(
+                    sql: "UPDATE chapterCalibration SET activeVersionID = ? WHERE chapterLogicalID = ?",
+                    arguments: [second.version.id.uuidString, first.version.logicalID.uuidString]
+                )
+            })
+        }
+    }
+
+    func testChapterInputsEnforceUTF8HardLimitsBeforeWrites() throws {
+        try withDatabase { database in
+            let conversation = try database.ensureDefaultConversation()
+            let project = try database.createProject(title: "Limits", premise: "P")
+            let openingPlan = try makeApprovedOpeningPlan(
+                database: database,
+                conversationID: conversation.id,
+                projectID: project.id,
+                keyPrefix: "chapter.limits.plan"
+            )
+            XCTAssertThrowsError(try database.executeChapterGenerateTool(
+                conversationID: conversation.id,
+                projectID: project.id,
+                chapterNumber: 1,
+                title: String(repeating: "?", count: ChapterInputLimits.titleUTF8Bytes),
+                body: "Body",
+                evidenceReview: "Review",
+                openingPlanArtifactID: openingPlan.artifact.id,
+                openingPlanHash: openingPlan.artifact.contentHash,
+                idempotencyKey: "chapter.limits.generate"
+            )) { error in
+                XCTAssertEqual(error as? AppDatabaseError, .chapterInputLimitExceeded(field: "title"))
+            }
+            XCTAssertEqual(try database.countChapterVersions(projectID: project.id, chapterNumber: 1), 0)
+
+            let generated = try makeGeneratedChapter(database: database, keyPrefix: "chapter.limits.generated")
+            XCTAssertThrowsError(try database.executeChapterLockParagraphSetTool(
+                conversationID: generated.conversationID,
+                projectID: generated.projectID,
+                versionID: generated.version.id,
+                displayedContentHash: generated.version.contentHash,
+                lockedParagraphIndexes: Array(0...ChapterInputLimits.maximumLockedParagraphIndexes),
+                idempotencyKey: "chapter.limits.locked-indexes"
+            )) { error in
+                XCTAssertEqual(error as? AppDatabaseError, .chapterInputLimitExceeded(field: "lockedParagraphIndexes"))
+            }
+            XCTAssertThrowsError(try database.executeChapterRejectTool(
+                conversationID: generated.conversationID,
+                projectID: generated.projectID,
+                versionID: generated.version.id,
+                displayedContentHash: generated.version.contentHash,
+                reason: String(repeating: "?", count: ChapterInputLimits.rejectionUTF8Bytes),
+                idempotencyKey: "chapter.limits.rejection"
+            )) { error in
+                XCTAssertEqual(error as? AppDatabaseError, .chapterInputLimitExceeded(field: "rejection"))
+            }
+        }
+    }
+
+    func testLockedParagraphProtectsItsOriginalTrailingSeparatorBytes() throws {
+        XCTAssertThrowsError(try ChapterByteExactParagraphs.validateLockedParagraphs(
+            originalBody: "LOCKED\r\n\r\nunlocked",
+            revisedBody: "LOCKED\n\nunlocked",
+            indexes: [0]
+        )) { error in
+            XCTAssertEqual(error as? AppDatabaseError, .chapterLockedContentChanged(index: 0))
+        }
+    }
+
+    func testChapterReplayReturnsReceiptBoundHistoricalCalibrationSnapshot() throws {
+        try withDatabase { database in
+            let conversation = try database.ensureDefaultConversation()
+            let project = try database.createProject(title: "Replay snapshot", premise: "P")
+            let openingPlan = try makeApprovedOpeningPlan(
+                database: database,
+                conversationID: conversation.id,
+                projectID: project.id,
+                keyPrefix: "chapter.replay-snapshot.plan"
+            )
+            let generated = try database.executeChapterGenerateTool(
+                conversationID: conversation.id,
+                projectID: project.id,
+                chapterNumber: 1,
+                title: "Chapter 1",
+                body: "LOCKED\n\nunlocked",
+                evidenceReview: "Review",
+                openingPlanArtifactID: openingPlan.artifact.id,
+                openingPlanHash: openingPlan.artifact.contentHash,
+                idempotencyKey: "chapter.replay-snapshot.generate"
+            )
+            _ = try database.executeChapterLockParagraphSetTool(
+                conversationID: conversation.id,
+                projectID: project.id,
+                versionID: generated.version.id,
+                displayedContentHash: generated.version.contentHash,
+                lockedParagraphIndexes: [0],
+                idempotencyKey: "chapter.replay-snapshot.lock"
+            )
+            let replay = try database.executeChapterGenerateTool(
+                conversationID: conversation.id,
+                projectID: project.id,
+                chapterNumber: 1,
+                title: "Chapter 1",
+                body: "LOCKED\n\nunlocked",
+                evidenceReview: "Review",
+                openingPlanArtifactID: openingPlan.artifact.id,
+                openingPlanHash: openingPlan.artifact.contentHash,
+                idempotencyKey: "chapter.replay-snapshot.generate"
+            )
+            let live = try XCTUnwrap(try database.chapterCalibration(
+                conversationID: conversation.id,
+                projectID: project.id,
+                chapterNumber: 1
+            ))
+
+            XCTAssertTrue(replay.isReplay)
+            XCTAssertEqual(replay.calibration.stage, .reviewingV1)
+            XCTAssertEqual(replay.calibration.lockedParagraphIndexes, [])
+            XCTAssertEqual(live.lockedParagraphIndexes, [0])
+        }
+    }
+
+    func testChapterLockedParagraphComparisonIsRawUTF8WithoutTrimOrNewlineNormalization() throws {
+        XCTAssertThrowsError(try ChapterByteExactParagraphs.validateLockedParagraphs(
+            originalBody: "A\n\nKeep trailing space. \nsecond line\n\nC",
+            revisedBody: "A\n\nKeep trailing space.\nsecond line\n\nC",
+            indexes: [1]
+        )) { error in
+            XCTAssertEqual(error as? AppDatabaseError, .chapterLockedContentChanged(index: 1))
+        }
+        XCTAssertThrowsError(try ChapterByteExactParagraphs.validateLockedParagraphs(
+            originalBody: "A\r\n\r\nKeep\r\nline\r\n\r\nC",
+            revisedBody: "A\n\nKeep\nline\n\nC",
+            indexes: [1]
+        )) { error in
+            XCTAssertEqual(error as? AppDatabaseError, .chapterLockedContentChanged(index: 1))
+        }
+    }
+
+    func testChapterGeneratePersistsImmutableV1AndReplaysExactly() throws {
+        try withDatabase { database in
+            let conversation = try database.ensureDefaultConversation()
+            let project = try database.createProject(title: "Calibration", premise: "P")
+            let openingPlan = try makeApprovedOpeningPlan(
+                database: database,
+                conversationID: conversation.id,
+                projectID: project.id,
+                keyPrefix: "chapter.generate.plan"
+            )
+
+            let first = try database.executeChapterGenerateTool(
+                conversationID: conversation.id,
+                projectID: project.id,
+                chapterNumber: 1,
+                title: "Chapter 1",
+                body: "Kept paragraph.\n\nRewrite me.",
+                evidenceReview: "No canon conflicts.",
+                openingPlanArtifactID: openingPlan.id,
+                openingPlanHash: openingPlan.contentHash,
+                idempotencyKey: "chapter.generate.v1",
+                now: Date(timeIntervalSince1970: 10_000)
+            )
+            let replay = try database.executeChapterGenerateTool(
+                conversationID: conversation.id,
+                projectID: project.id,
+                chapterNumber: 1,
+                title: "Chapter 1",
+                body: "Kept paragraph.\n\nRewrite me.",
+                evidenceReview: "No canon conflicts.",
+                openingPlanArtifactID: openingPlan.id,
+                openingPlanHash: openingPlan.contentHash,
+                idempotencyKey: "chapter.generate.v1",
+                now: Date(timeIntervalSince1970: 10_100)
+            )
+
+            XCTAssertEqual(first.version, replay.version)
+            XCTAssertEqual(first.receipt, replay.receipt)
+            XCTAssertFalse(first.isReplay)
+            XCTAssertTrue(replay.isReplay)
+            XCTAssertEqual(first.version.revision, 1)
+            XCTAssertEqual(first.version.creationStatus, .calibrationReview)
+            XCTAssertEqual(first.calibration.stage.rawValue, "reviewingV1")
+            XCTAssertEqual(try database.listChapterVersions(
+                chapterLogicalID: first.version.logicalID,
+                conversationID: conversation.id,
+                projectID: project.id
+            ), [first.version])
+            XCTAssertThrowsError(try database.queue.write { db in
+                try db.execute(
+                    sql: "UPDATE chapterVersion SET body = ? WHERE id = ?",
+                    arguments: ["mutated", first.version.id.uuidString]
+                )
+            })
+        }
+    }
+
+    func testChapterGenerateRequiresExactApprovedOpeningPlanAndRejectsIdempotencyConflict() throws {
+        try withDatabase { database in
+            let conversation = try database.ensureDefaultConversation()
+            let project = try database.createProject(title: "Exact plan", premise: "P")
+            let openingPlan = try makeApprovedOpeningPlan(
+                database: database,
+                conversationID: conversation.id,
+                projectID: project.id,
+                keyPrefix: "chapter.generate.exact-plan"
+            )
+
+            XCTAssertThrowsError(try database.executeChapterGenerateTool(
+                conversationID: conversation.id,
+                projectID: project.id,
+                chapterNumber: 1,
+                title: "Chapter 1",
+                body: "Body",
+                evidenceReview: "Review",
+                openingPlanArtifactID: openingPlan.id,
+                openingPlanHash: "wrong-hash",
+                idempotencyKey: "chapter.generate.wrong-plan"
+            )) { error in
+                XCTAssertEqual(error as? AppDatabaseError, .chapterBindingMismatch)
+            }
+
+            _ = try database.executeChapterGenerateTool(
+                conversationID: conversation.id,
+                projectID: project.id,
+                chapterNumber: 1,
+                title: "Chapter 1",
+                body: "Body",
+                evidenceReview: "Review",
+                openingPlanArtifactID: openingPlan.id,
+                openingPlanHash: openingPlan.contentHash,
+                idempotencyKey: "chapter.generate.conflict"
+            )
+            XCTAssertThrowsError(try database.executeChapterGenerateTool(
+                conversationID: conversation.id,
+                projectID: project.id,
+                chapterNumber: 1,
+                title: "Chapter 1",
+                body: "Different body",
+                evidenceReview: "Review",
+                openingPlanArtifactID: openingPlan.id,
+                openingPlanHash: openingPlan.contentHash,
+                idempotencyKey: "chapter.generate.conflict"
+            )) { error in
+                XCTAssertEqual(error as? AppDatabaseError, .idempotencyConflict)
+            }
+            XCTAssertEqual(try database.countChapterVersions(projectID: project.id, chapterNumber: 1), 1)
+        }
+    }
+
+    func testChapterLockRejectAndDiagnosisPersistExactStateAndReceipts() throws {
+        try withDatabase { database in
+            let setup = try makeGeneratedChapter(database: database, keyPrefix: "chapter.diagnosis")
+            let locked = try database.executeChapterLockParagraphSetTool(
+                conversationID: setup.conversationID,
+                projectID: setup.projectID,
+                versionID: setup.version.id,
+                displayedContentHash: setup.version.contentHash,
+                lockedParagraphIndexes: [0, 0],
+                idempotencyKey: "chapter.lock.1"
+            )
+            XCTAssertEqual(locked.calibration.lockedParagraphIndexes, [0])
+
+            XCTAssertThrowsError(try database.executeChapterLockParagraphSetTool(
+                conversationID: setup.conversationID,
+                projectID: setup.projectID,
+                versionID: setup.version.id,
+                displayedContentHash: setup.version.contentHash,
+                lockedParagraphIndexes: [9],
+                idempotencyKey: "chapter.lock.invalid"
+            )) { error in
+                XCTAssertEqual(error as? AppDatabaseError, .invalidChapterParagraphIndex(9))
+            }
+
+            let rejected = try database.executeChapterRejectTool(
+                conversationID: setup.conversationID,
+                projectID: setup.projectID,
+                versionID: setup.version.id,
+                displayedContentHash: setup.version.contentHash,
+                reason: "The protagonist feels passive.",
+                idempotencyKey: "chapter.reject.1"
+            )
+            XCTAssertEqual(rejected.calibration.stage.rawValue, "diagnosing")
+
+            _ = try database.executeChapterDiagnosisAnswerTool(
+                conversationID: setup.conversationID,
+                projectID: setup.projectID,
+                versionID: setup.version.id,
+                displayedContentHash: setup.version.contentHash,
+                questionID: "root-cause",
+                question: ChapterDiagnosisProtocol.orderedQuestions[0],
+                answer: "The protagonist reacts instead of choosing.",
+                rewriteScope: nil,
+                idempotencyKey: "chapter.diagnosis.answer.1"
+            )
+            _ = try database.executeChapterDiagnosisAnswerTool(
+                conversationID: setup.conversationID,
+                projectID: setup.projectID,
+                versionID: setup.version.id,
+                displayedContentHash: setup.version.contentHash,
+                questionID: "must-preserve",
+                question: ChapterDiagnosisProtocol.orderedQuestions[1],
+                answer: "The opening image and the locked first paragraph.",
+                rewriteScope: nil,
+                idempotencyKey: "chapter.diagnosis.answer.2"
+            )
+            let completed = try database.executeChapterDiagnosisAnswerTool(
+                conversationID: setup.conversationID,
+                projectID: setup.projectID,
+                versionID: setup.version.id,
+                displayedContentHash: setup.version.contentHash,
+                questionID: "chapter-end",
+                question: ChapterDiagnosisProtocol.orderedQuestions[2],
+                answer: "Urgent anticipation of an irreversible choice.",
+                rewriteScope: "Keep paragraph 1 byte-identical; rewrite paragraph 2 around an active choice.",
+                idempotencyKey: "chapter.diagnosis.answer.3"
+            )
+
+            XCTAssertEqual(completed.calibration.stage.rawValue, "awaitingRewriteConfirmation")
+            XCTAssertEqual(completed.calibration.diagnosisEntries.map(\.questionID), ChapterDiagnosisProtocol.orderedQuestionIDs)
+            XCTAssertFalse(completed.calibration.diagnosisHash.isEmpty)
+            XCTAssertFalse(try XCTUnwrap(completed.calibration.rewriteScopeHash).isEmpty)
+            XCTAssertEqual(try database.countToolReceipts(toolID: "chapter.lockParagraph.set"), 1)
+            XCTAssertEqual(try database.countToolReceipts(toolID: "chapter.reject"), 1)
+            XCTAssertEqual(try database.countToolReceipts(toolID: "chapter.diagnosis.answer"), 3)
+        }
+    }
+
+    func testChapterRewriteFailsClosedWhenLockedParagraphChangesThenPreservesV1AndV2() throws {
+        try withDatabase { database in
+            let setup = try makeGeneratedChapter(database: database, keyPrefix: "chapter.rewrite")
+            _ = try database.executeChapterLockParagraphSetTool(
+                conversationID: setup.conversationID,
+                projectID: setup.projectID,
+                versionID: setup.version.id,
+                displayedContentHash: setup.version.contentHash,
+                lockedParagraphIndexes: [0],
+                idempotencyKey: "chapter.rewrite.lock"
+            )
+            _ = try database.executeChapterRejectTool(
+                conversationID: setup.conversationID,
+                projectID: setup.projectID,
+                versionID: setup.version.id,
+                displayedContentHash: setup.version.contentHash,
+                reason: "Weak agency",
+                idempotencyKey: "chapter.rewrite.reject"
+            )
+            _ = try database.executeChapterDiagnosisAnswerTool(
+                conversationID: setup.conversationID,
+                projectID: setup.projectID,
+                versionID: setup.version.id,
+                displayedContentHash: setup.version.contentHash,
+                questionID: "root-cause",
+                question: ChapterDiagnosisProtocol.orderedQuestions[0],
+                answer: "The protagonist reacts instead of making a consequential choice.",
+                rewriteScope: nil,
+                idempotencyKey: "chapter.rewrite.diagnosis.1"
+            )
+            _ = try database.executeChapterDiagnosisAnswerTool(
+                conversationID: setup.conversationID,
+                projectID: setup.projectID,
+                versionID: setup.version.id,
+                displayedContentHash: setup.version.contentHash,
+                questionID: "must-preserve",
+                question: ChapterDiagnosisProtocol.orderedQuestions[1],
+                answer: "Preserve paragraph 1 and its opening image byte-for-byte.",
+                rewriteScope: nil,
+                idempotencyKey: "chapter.rewrite.diagnosis.2"
+            )
+            let diagnosis = try database.executeChapterDiagnosisAnswerTool(
+                conversationID: setup.conversationID,
+                projectID: setup.projectID,
+                versionID: setup.version.id,
+                displayedContentHash: setup.version.contentHash,
+                questionID: "chapter-end",
+                question: ChapterDiagnosisProtocol.orderedQuestions[2],
+                answer: "End on a decisive, irreversible choice.",
+                rewriteScope: "Preserve paragraph 1; rewrite paragraph 2.",
+                idempotencyKey: "chapter.rewrite.diagnosis.3"
+            )
+            let rewriteScopeHash = try XCTUnwrap(diagnosis.calibration.rewriteScopeHash)
+
+            XCTAssertThrowsError(try database.executeChapterRewriteTool(
+                conversationID: setup.conversationID,
+                projectID: setup.projectID,
+                sourceVersionID: setup.version.id,
+                displayedSourceHash: setup.version.contentHash,
+                diagnosisHash: diagnosis.calibration.diagnosisHash,
+                rewriteScopeHash: rewriteScopeHash,
+                displayedLockedParagraphIndexes: [0],
+                title: "Chapter 1",
+                body: "Changed kept paragraph.\n\nA decisive new ending.",
+                evidenceReview: "Review V2",
+                idempotencyKey: "chapter.rewrite.changed-lock"
+            )) { error in
+                XCTAssertEqual(error as? AppDatabaseError, .chapterLockedContentChanged(index: 0))
+            }
+            XCTAssertEqual(try database.countChapterVersions(projectID: setup.projectID, chapterNumber: 1), 1)
+
+            let rewritten = try database.executeChapterRewriteTool(
+                conversationID: setup.conversationID,
+                projectID: setup.projectID,
+                sourceVersionID: setup.version.id,
+                displayedSourceHash: setup.version.contentHash,
+                diagnosisHash: diagnosis.calibration.diagnosisHash,
+                rewriteScopeHash: rewriteScopeHash,
+                displayedLockedParagraphIndexes: [0],
+                title: "Chapter 1",
+                body: "Kept paragraph.\n\nA decisive new ending.",
+                evidenceReview: "Review V2",
+                idempotencyKey: "chapter.rewrite.valid"
+            )
+
+            XCTAssertEqual(rewritten.version.revision, 2)
+            XCTAssertEqual(rewritten.version.parentVersionID, setup.version.id)
+            XCTAssertEqual(rewritten.calibration.stage.rawValue, "reviewingV2")
+            XCTAssertEqual(rewritten.calibration.diagnosisEntries.map(\.questionID), ChapterDiagnosisProtocol.orderedQuestionIDs)
+            XCTAssertEqual(try database.listChapterVersions(
+                chapterLogicalID: setup.version.logicalID,
+                conversationID: setup.conversationID,
+                projectID: setup.projectID
+            ).map(\.id), [setup.version.id, rewritten.version.id])
+        }
+    }
+
+    func testChapterReviewingV2CannotBeRejectedAgain() throws {
+        try withDatabase { database in
+            let setup = try makeGeneratedChapter(database: database, keyPrefix: "chapter.v2-reject")
+            _ = try database.executeChapterRejectTool(
+                conversationID: setup.conversationID,
+                projectID: setup.projectID,
+                versionID: setup.version.id,
+                displayedContentHash: setup.version.contentHash,
+                reason: "The protagonist needs a consequential choice.",
+                idempotencyKey: "chapter.v2-reject.reject-v1"
+            )
+            _ = try database.executeChapterDiagnosisAnswerTool(
+                conversationID: setup.conversationID,
+                projectID: setup.projectID,
+                versionID: setup.version.id,
+                displayedContentHash: setup.version.contentHash,
+                questionID: "root-cause",
+                question: ChapterDiagnosisProtocol.orderedQuestions[0],
+                answer: "The protagonist only reacts.",
+                rewriteScope: nil,
+                idempotencyKey: "chapter.v2-reject.diagnosis.1"
+            )
+            _ = try database.executeChapterDiagnosisAnswerTool(
+                conversationID: setup.conversationID,
+                projectID: setup.projectID,
+                versionID: setup.version.id,
+                displayedContentHash: setup.version.contentHash,
+                questionID: "must-preserve",
+                question: ChapterDiagnosisProtocol.orderedQuestions[1],
+                answer: "Preserve the first paragraph.",
+                rewriteScope: nil,
+                idempotencyKey: "chapter.v2-reject.diagnosis.2"
+            )
+            let diagnosis = try database.executeChapterDiagnosisAnswerTool(
+                conversationID: setup.conversationID,
+                projectID: setup.projectID,
+                versionID: setup.version.id,
+                displayedContentHash: setup.version.contentHash,
+                questionID: "chapter-end",
+                question: ChapterDiagnosisProtocol.orderedQuestions[2],
+                answer: "Create anticipation around an irreversible choice.",
+                rewriteScope: "Preserve paragraph 1; rewrite paragraph 2 around the choice.",
+                idempotencyKey: "chapter.v2-reject.diagnosis.3"
+            )
+            let rewritten = try database.executeChapterRewriteTool(
+                conversationID: setup.conversationID,
+                projectID: setup.projectID,
+                sourceVersionID: setup.version.id,
+                displayedSourceHash: setup.version.contentHash,
+                diagnosisHash: diagnosis.calibration.diagnosisHash,
+                rewriteScopeHash: try XCTUnwrap(diagnosis.calibration.rewriteScopeHash),
+                displayedLockedParagraphIndexes: [],
+                title: "Chapter 1",
+                body: "Kept paragraph.\n\nThe protagonist makes an irreversible choice.",
+                evidenceReview: "Review V2",
+                idempotencyKey: "chapter.v2-reject.rewrite"
+            )
+
+            XCTAssertThrowsError(try database.executeChapterRejectTool(
+                conversationID: setup.conversationID,
+                projectID: setup.projectID,
+                versionID: rewritten.version.id,
+                displayedContentHash: rewritten.version.contentHash,
+                reason: "Reject V2 again.",
+                idempotencyKey: "chapter.v2-reject.reject-v2"
+            ))
+            let calibration = try XCTUnwrap(try database.chapterCalibration(
+                conversationID: setup.conversationID,
+                projectID: setup.projectID,
+                chapterNumber: 1
+            ))
+            XCTAssertEqual(calibration.stage, .reviewingV2)
+            XCTAssertEqual(calibration.rejectionHistory.count, 1)
+            XCTAssertEqual(try database.countToolReceipts(toolID: "chapter.reject"), 1)
+        }
+    }
+
+    func testChapterBlankIdempotencyKeysFailClosedBeforeWrites() throws {
+        try withDatabase { database in
+            let conversation = try database.ensureDefaultConversation()
+            let project = try database.createProject(title: "Blank idempotency", premise: "P")
+            let openingPlan = try makeApprovedOpeningPlan(
+                database: database,
+                conversationID: conversation.id,
+                projectID: project.id,
+                keyPrefix: "chapter.blank-idempotency.plan"
+            )
+
+            XCTAssertThrowsError(try database.executeChapterGenerateTool(
+                conversationID: conversation.id,
+                projectID: project.id,
+                chapterNumber: 1,
+                title: "Chapter 1",
+                body: "Body",
+                evidenceReview: "Review",
+                openingPlanArtifactID: openingPlan.id,
+                openingPlanHash: openingPlan.contentHash,
+                idempotencyKey: " \t "
+            ))
+            XCTAssertEqual(try database.countChapterVersions(projectID: project.id, chapterNumber: 1), 0)
+            XCTAssertEqual(try database.countToolReceipts(toolID: "chapter.generate"), 0)
+
+            let generated = try makeGeneratedChapter(database: database, keyPrefix: "chapter.blank-idempotency.generated")
+            XCTAssertThrowsError(try database.executeChapterRejectTool(
+                conversationID: generated.conversationID,
+                projectID: generated.projectID,
+                versionID: generated.version.id,
+                displayedContentHash: generated.version.contentHash,
+                reason: "Needs revision.",
+                idempotencyKey: " \t "
+            ))
+            let calibration = try XCTUnwrap(try database.chapterCalibration(
+                conversationID: generated.conversationID,
+                projectID: generated.projectID,
+                chapterNumber: 1
+            ))
+            XCTAssertEqual(calibration.stage, .reviewingV1)
+            XCTAssertTrue(calibration.rejectionHistory.isEmpty)
+            XCTAssertEqual(try database.countToolReceipts(toolID: "chapter.reject"), 0)
+        }
+    }
+
+    func testChapterApprovedFrozenRejectsTamperedAcceptEvidence() throws {
+        try withDatabase { database in
+            let generated = try makeGeneratedChapter(database: database, keyPrefix: "chapter.forged-evidence")
+            let receiptID = UUID()
+            try database.queue.write { db in
+                try db.execute(
+                    sql: """
+                    INSERT INTO toolReceipt (
+                        id, toolID, toolVersion, inputSummary, inputHash, outcome,
+                        conversationID, projectID, idempotencyKey, outputReference, createdAt
+                    ) VALUES (?, 'chapter.accept', '1', ?, 'forged-input-hash', 'completed', ?, ?, ?, ?, ?)
+                    """,
+                    arguments: [
+                        receiptID.uuidString,
+                        "tampered-summary",
+                        generated.conversationID.uuidString,
+                        generated.projectID.uuidString,
+                        "chapter.forged-evidence.accept",
+                        generated.version.id.uuidString,
+                        Date().timeIntervalSince1970
+                    ]
+                )
+                try db.execute(
+                    sql: """
+                    INSERT INTO chapterToolResultSnapshot (
+                        receiptID, toolID, inputHash, conversationID, projectID,
+                        chapterLogicalID, chapterNumber, versionID,
+                        calibrationJSON, calibrationHash, createdAt
+                    ) VALUES (?, 'chapter.accept', 'forged-input-hash', ?, ?, ?, 1, ?, '{}', 'forged-calibration-hash', ?)
+                    """,
+                    arguments: [
+                        receiptID.uuidString,
+                        generated.conversationID.uuidString,
+                        generated.projectID.uuidString,
+                        generated.version.logicalID.uuidString,
+                        generated.version.id.uuidString,
+                        Date().timeIntervalSince1970
+                    ]
+                )
+            }
+
+            XCTAssertThrowsError(try database.queue.write { db in
+                try db.execute(
+                    sql: "UPDATE chapterCalibration SET stage = 'approvedFrozen', acceptedVersionID = activeVersionID WHERE chapterLogicalID = ?",
+                    arguments: [generated.version.logicalID.uuidString]
+                )
+            })
+            let calibration = try XCTUnwrap(try database.chapterCalibration(
+                conversationID: generated.conversationID,
+                projectID: generated.projectID,
+                chapterNumber: 1
+            ))
+            XCTAssertEqual(calibration.stage, .reviewingV1)
+        }
+    }
+
+    func testChapterApprovedFrozenRejectsBlankAcceptIdempotencyKey() throws {
+        try withDatabase { database in
+            let generated = try makeGeneratedChapter(database: database, keyPrefix: "chapter.blank-accept-evidence")
+            let receiptID = UUID()
+            let canonicalSummary = "chapter:\(generated.version.id.uuidString):accept"
+            try database.queue.write { db in
+                try db.execute(
+                    sql: """
+                    INSERT INTO toolReceipt (
+                        id, toolID, toolVersion, inputSummary, inputHash, outcome,
+                        conversationID, projectID, idempotencyKey, outputReference, createdAt
+                    ) VALUES (?, 'chapter.accept', '1', ?, 'forged-input-hash', 'completed', ?, ?, '   ', ?, ?)
+                    """,
+                    arguments: [
+                        receiptID.uuidString,
+                        canonicalSummary,
+                        generated.conversationID.uuidString,
+                        generated.projectID.uuidString,
+                        generated.version.id.uuidString,
+                        Date().timeIntervalSince1970
+                    ]
+                )
+                try db.execute(
+                    sql: """
+                    INSERT INTO chapterToolResultSnapshot (
+                        receiptID, toolID, inputHash, conversationID, projectID,
+                        chapterLogicalID, chapterNumber, versionID,
+                        calibrationJSON, calibrationHash, createdAt
+                    ) VALUES (?, 'chapter.accept', 'forged-input-hash', ?, ?, ?, 1, ?, '{}', 'forged-calibration-hash', ?)
+                    """,
+                    arguments: [
+                        receiptID.uuidString,
+                        generated.conversationID.uuidString,
+                        generated.projectID.uuidString,
+                        generated.version.logicalID.uuidString,
+                        generated.version.id.uuidString,
+                        Date().timeIntervalSince1970
+                    ]
+                )
+            }
+
+            XCTAssertThrowsError(try database.queue.write { db in
+                try db.execute(
+                    sql: "UPDATE chapterCalibration SET stage = 'approvedFrozen', acceptedVersionID = activeVersionID WHERE chapterLogicalID = ?",
+                    arguments: [generated.version.logicalID.uuidString]
+                )
+            })
+        }
+    }
+
+    func testChapterApprovedFrozenCannotBeInsertedDirectly() throws {
+        try withDatabase { database in
+            let conversation = try database.ensureDefaultConversation()
+            let project = try database.createProject(title: "Direct frozen insert", premise: "P")
+            let versionID = UUID()
+            try database.queue.write { db in
+                try db.execute(
+                    sql: """
+                    INSERT INTO chapterVersion (
+                        id, logicalID, conversationID, projectID, chapterNumber, revision,
+                        parentVersionID, title, body, contentHash, creationStatus,
+                        evidenceReview, diffSummary, createdAt
+                    ) VALUES (?, ?, ?, ?, 1, 1, NULL, 'Chapter 1', 'Body', 'hash', 'calibrationReview', 'Review', NULL, ?)
+                    """,
+                    arguments: [
+                        versionID.uuidString,
+                        versionID.uuidString,
+                        conversation.id.uuidString,
+                        project.id.uuidString,
+                        Date().timeIntervalSince1970
+                    ]
+                )
+            }
+
+            XCTAssertThrowsError(try database.queue.write { db in
+                try db.execute(
+                    sql: """
+                    INSERT INTO chapterCalibration (
+                        chapterLogicalID, conversationID, projectID, chapterNumber,
+                        activeVersionID, stage, diagnosisEntriesJSON, diagnosisHash,
+                        rejectionHistoryJSON, lockedParagraphIndexesJSON,
+                        rewriteScope, rewriteScopeHash, acceptedVersionID, updatedAt
+                    ) VALUES (?, ?, ?, 1, ?, 'approvedFrozen', '[]', 'hash', '[]', '[]', NULL, NULL, ?, ?)
+                    """,
+                    arguments: [
+                        versionID.uuidString,
+                        conversation.id.uuidString,
+                        project.id.uuidString,
+                        versionID.uuidString,
+                        versionID.uuidString,
+                        Date().timeIntervalSince1970
+                    ]
+                )
+            })
+            XCTAssertNil(try database.chapterCalibration(
+                conversationID: conversation.id,
+                projectID: project.id,
+                chapterNumber: 1
+            ))
+        }
+    }
+
+    func testChapterAcceptRollsBackReceiptAndSnapshotWhenFreezeUpdateFails() throws {
+        try withDatabase { database in
+            let generated = try makeGeneratedChapter(database: database, keyPrefix: "chapter.accept-rollback")
+            try database.queue.write { db in
+                try db.execute(sql: """
+                    CREATE TRIGGER test_reject_chapter_freeze
+                    BEFORE UPDATE ON chapterCalibration
+                    WHEN NEW.stage = 'approvedFrozen'
+                    BEGIN
+                        SELECT RAISE(ABORT, 'test freeze rejection');
+                    END
+                    """)
+            }
+
+            XCTAssertThrowsError(try database.executeChapterAcceptTool(
+                conversationID: generated.conversationID,
+                projectID: generated.projectID,
+                versionID: generated.version.id,
+                displayedContentHash: generated.version.contentHash,
+                idempotencyKey: "chapter.accept-rollback.accept"
+            ))
+            XCTAssertEqual(try database.countToolReceipts(toolID: "chapter.accept"), 0)
+            let snapshotCount = try database.queue.read { db in
+                try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM chapterToolResultSnapshot WHERE toolID = 'chapter.accept'") ?? -1
+            }
+            XCTAssertEqual(snapshotCount, 0)
+        }
+    }
+
+    func testChapterApprovedFrozenRejectsForgedApprovalAndFurtherMutation() throws {
+        try withDatabase { database in
+            let generated = try makeGeneratedChapter(database: database, keyPrefix: "chapter.approved-frozen")
+
+            XCTAssertThrowsError(try database.queue.write { db in
+                try db.execute(
+                    sql: """
+                    UPDATE chapterCalibration
+                    SET stage = 'approvedFrozen', acceptedVersionID = activeVersionID
+                    WHERE chapterLogicalID = ?
+                    """,
+                    arguments: [generated.version.logicalID.uuidString]
+                )
+            })
+            let reviewing = try XCTUnwrap(try database.chapterCalibration(
+                conversationID: generated.conversationID,
+                projectID: generated.projectID,
+                chapterNumber: 1
+            ))
+            XCTAssertEqual(reviewing.stage, .reviewingV1)
+            XCTAssertNil(reviewing.acceptedVersionID)
+
+            let accepted = try database.executeChapterAcceptTool(
+                conversationID: generated.conversationID,
+                projectID: generated.projectID,
+                versionID: generated.version.id,
+                displayedContentHash: generated.version.contentHash,
+                idempotencyKey: "chapter.approved-frozen.accept"
+            )
+            XCTAssertEqual(accepted.calibration.stage, .approvedFrozen)
+            XCTAssertEqual(accepted.calibration.acceptedVersionID, generated.version.id)
+
+            XCTAssertThrowsError(try database.queue.write { db in
+                try db.execute(
+                    sql: "UPDATE chapterCalibration SET updatedAt = updatedAt + 1 WHERE chapterLogicalID = ?",
+                    arguments: [generated.version.logicalID.uuidString]
+                )
+            })
+            let frozen = try XCTUnwrap(try database.chapterCalibration(
+                conversationID: generated.conversationID,
+                projectID: generated.projectID,
+                chapterNumber: 1
+            ))
+            XCTAssertEqual(frozen, accepted.calibration)
+        }
+    }
+
+    func testChapterAcceptBindsExactDisplayedVersionAndSurvivesReopen() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let path = directory.appendingPathComponent("test.sqlite").path
+        defer { XCTAssertNoThrow(try FileManager.default.removeItem(at: directory)) }
+
+        var scope: (conversationID: UUID, projectID: UUID, versionID: UUID, versionHash: String)?
+        do {
+            let database = try AppDatabase(path: path)
+            let generated = try makeGeneratedChapter(database: database, keyPrefix: "chapter.accept")
+            scope = (generated.conversationID, generated.projectID, generated.version.id, generated.version.contentHash)
+
+            XCTAssertThrowsError(try database.executeChapterAcceptTool(
+                conversationID: generated.conversationID,
+                projectID: generated.projectID,
+                versionID: generated.version.id,
+                displayedContentHash: "not-what-user-saw",
+                idempotencyKey: "chapter.accept.wrong-hash"
+            )) { error in
+                XCTAssertEqual(error as? AppDatabaseError, .chapterBindingMismatch)
+            }
+
+            let accepted = try database.executeChapterAcceptTool(
+                conversationID: generated.conversationID,
+                projectID: generated.projectID,
+                versionID: generated.version.id,
+                displayedContentHash: generated.version.contentHash,
+                idempotencyKey: "chapter.accept.exact"
+            )
+            XCTAssertEqual(accepted.calibration.stage.rawValue, "approvedFrozen")
+            XCTAssertEqual(accepted.calibration.acceptedVersionID, generated.version.id)
+            XCTAssertEqual(accepted.receipt.outputReference, generated.version.id.uuidString)
+        }
+
+        let restoredScope = try XCTUnwrap(scope)
+        let reopened = try AppDatabase(path: path)
+        let calibration = try XCTUnwrap(try reopened.chapterCalibration(
+            conversationID: restoredScope.conversationID,
+            projectID: restoredScope.projectID,
+            chapterNumber: 1
+        ))
+        XCTAssertEqual(calibration.stage.rawValue, "approvedFrozen")
+        XCTAssertEqual(calibration.acceptedVersionID, restoredScope.versionID)
+        XCTAssertEqual(try reopened.chapterVersion(
+            id: restoredScope.versionID,
+            conversationID: restoredScope.conversationID,
+            projectID: restoredScope.projectID
+        )?.contentHash, restoredScope.versionHash)
+        XCTAssertEqual(try reopened.countToolReceipts(toolID: "chapter.accept"), 1)
+    }
+
+    func testChapterReplayRejectsDifferentOriginRun() throws {
+        try withDatabase { database in
+            let conversation = try database.ensureDefaultConversation()
+            let project = try database.createProject(title: "Origin replay", premise: "P")
+            let openingPlan = try makeApprovedOpeningPlan(
+                database: database,
+                conversationID: conversation.id,
+                projectID: project.id,
+                keyPrefix: "chapter.origin-replay.plan"
+            )
+            let firstRun = AgentRunSnapshot(
+                id: UUID(),
+                projectID: project.id,
+                kind: "agentTurn",
+                status: .running,
+                idempotencyKey: "agent.turn.origin-replay.first",
+                currentStage: "interpret",
+                startedAt: Date(timeIntervalSince1970: 4_000),
+                updatedAt: Date(timeIntervalSince1970: 4_000)
+            )
+            let secondRun = AgentRunSnapshot(
+                id: UUID(),
+                projectID: project.id,
+                kind: "agentTurn",
+                status: .running,
+                idempotencyKey: "agent.turn.origin-replay.second",
+                currentStage: "interpret",
+                startedAt: Date(timeIntervalSince1970: 4_001),
+                updatedAt: Date(timeIntervalSince1970: 4_001)
+            )
+            try database.saveAgentRun(firstRun, conversationID: conversation.id)
+            try database.saveAgentRun(secondRun, conversationID: conversation.id)
+
+            _ = try database.executeChapterGenerateTool(
+                conversationID: conversation.id,
+                projectID: project.id,
+                chapterNumber: 1,
+                title: "Chapter 1",
+                body: "Body",
+                evidenceReview: "Review",
+                openingPlanArtifactID: openingPlan.id,
+                openingPlanHash: openingPlan.contentHash,
+                idempotencyKey: "chapter.origin-replay.generate",
+                originRunID: firstRun.id
+            )
+            XCTAssertThrowsError(try database.executeChapterGenerateTool(
+                conversationID: conversation.id,
+                projectID: project.id,
+                chapterNumber: 1,
+                title: "Chapter 1",
+                body: "Body",
+                evidenceReview: "Review",
+                openingPlanArtifactID: openingPlan.id,
+                openingPlanHash: openingPlan.contentHash,
+                idempotencyKey: "chapter.origin-replay.generate",
+                originRunID: secondRun.id
+            )) { error in
+                XCTAssertEqual(error as? AppDatabaseError, .idempotencyConflict)
+            }
+            XCTAssertEqual(try database.countToolReceipts(toolID: "chapter.generate"), 1)
+        }
+    }
+
+    func testChapterReceiptOriginRunMustExistAndMatchProjectScope() throws {
+        try withDatabase { database in
+            let conversation = try database.ensureDefaultConversation()
+            let firstProject = try database.createProject(title: "First scope", premise: "P1")
+            let secondProject = try database.createProject(title: "Second scope", premise: "P2")
+            let openingPlan = try makeApprovedOpeningPlan(
+                database: database,
+                conversationID: conversation.id,
+                projectID: secondProject.id,
+                keyPrefix: "chapter.origin-scope.plan"
+            )
+            let wrongProjectRun = AgentRunSnapshot(
+                id: UUID(),
+                projectID: firstProject.id,
+                kind: "agentTurn",
+                status: .running,
+                idempotencyKey: "agent.turn.origin-scope.wrong-project",
+                currentStage: "interpret",
+                startedAt: Date(timeIntervalSince1970: 4_100),
+                updatedAt: Date(timeIntervalSince1970: 4_100)
+            )
+            try database.saveAgentRun(wrongProjectRun, conversationID: conversation.id)
+
+            XCTAssertThrowsError(try database.executeChapterGenerateTool(
+                conversationID: conversation.id,
+                projectID: secondProject.id,
+                chapterNumber: 1,
+                title: "Chapter 1",
+                body: "Body",
+                evidenceReview: "Review",
+                openingPlanArtifactID: openingPlan.id,
+                openingPlanHash: openingPlan.contentHash,
+                idempotencyKey: "chapter.origin-scope.missing-run",
+                originRunID: UUID()
+            ))
+            XCTAssertThrowsError(try database.executeChapterGenerateTool(
+                conversationID: conversation.id,
+                projectID: secondProject.id,
+                chapterNumber: 1,
+                title: "Chapter 1",
+                body: "Body",
+                evidenceReview: "Review",
+                openingPlanArtifactID: openingPlan.id,
+                openingPlanHash: openingPlan.contentHash,
+                idempotencyKey: "chapter.origin-scope.wrong-project",
+                originRunID: wrongProjectRun.id
+            ))
+            XCTAssertEqual(try database.countChapterVersions(projectID: secondProject.id, chapterNumber: 1), 0)
+            XCTAssertEqual(try database.countToolReceipts(toolID: "chapter.generate"), 0)
+        }
+    }
+
+    private struct ApprovedOpeningPlanFixture {
+        let artifact: AgentArtifact
+        let approvalID: UUID
+        let approvalReceiptID: UUID
+
+        var id: UUID { artifact.id }
+        var contentHash: String { artifact.contentHash }
+    }
+
+    private func makeApprovedOpeningPlan(
+        database: AppDatabase,
+        conversationID: UUID,
+        projectID: UUID,
+        keyPrefix: String
+    ) throws -> ApprovedOpeningPlanFixture {
+        let saved = try database.executeOpeningPlanSaveTool(
+            conversationID: conversationID,
+            projectID: projectID,
+            title: "Opening plan",
+            body: "Approved opening plan",
+            idempotencyKey: keyPrefix + ".save",
+            expiresAt: Date(timeIntervalSinceNow: 3_600)
+        )
+        let approved = try database.executeOpeningPlanApprovalTool(
+            conversationID: conversationID,
+            approvalRequestID: saved.approval.id,
+            displayedBindingHash: saved.approval.bindingHash,
+            idempotencyKey: keyPrefix + ".approve"
+        )
+        return ApprovedOpeningPlanFixture(
+            artifact: approved.artifact,
+            approvalID: approved.approval.id,
+            approvalReceiptID: approved.receipt.id
+        )
+    }
+
+    private func makeGeneratedChapter(
+        database: AppDatabase,
+        keyPrefix: String
+    ) throws -> (conversationID: UUID, projectID: UUID, version: ChapterVersion) {
+        let conversation = try database.ensureDefaultConversation()
+        let project = try database.createProject(title: "Generated", premise: "P")
+        let openingPlan = try makeApprovedOpeningPlan(
+            database: database,
+            conversationID: conversation.id,
+            projectID: project.id,
+            keyPrefix: keyPrefix + ".plan"
+        )
+        let generated = try database.executeChapterGenerateTool(
+            conversationID: conversation.id,
+            projectID: project.id,
+            chapterNumber: 1,
+            title: "Chapter 1",
+            body: "Kept paragraph.\n\nRewrite me.",
+            evidenceReview: "Review V1",
+            openingPlanArtifactID: openingPlan.id,
+            openingPlanHash: openingPlan.contentHash,
+            idempotencyKey: keyPrefix + ".generate"
+        )
+        return (conversation.id, project.id, generated.version)
     }
 
     private func withDatabase(_ body: (AppDatabase) throws -> Void) throws {

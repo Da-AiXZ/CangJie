@@ -1,3 +1,4 @@
+import CangJieCore
 import Foundation
 
 enum AgentMessageRole: String, Codable, Equatable {
@@ -67,12 +68,33 @@ enum AgentRunStatus: String, Codable, Equatable {
 
 struct AgentRunSnapshot: Identifiable, Equatable {
     let id: UUID
+    let projectID: UUID?
     let kind: String
     let status: AgentRunStatus
     let idempotencyKey: String
     let currentStage: String
     let startedAt: Date
     let updatedAt: Date
+
+    init(
+        id: UUID,
+        projectID: UUID? = nil,
+        kind: String,
+        status: AgentRunStatus,
+        idempotencyKey: String,
+        currentStage: String,
+        startedAt: Date,
+        updatedAt: Date
+    ) {
+        self.id = id
+        self.projectID = projectID
+        self.kind = kind
+        self.status = status
+        self.idempotencyKey = idempotencyKey
+        self.currentStage = currentStage
+        self.startedAt = startedAt
+        self.updatedAt = updatedAt
+    }
 }
 
 struct ProjectCreateToolResult: Equatable {
@@ -85,6 +107,30 @@ struct ArtifactToolResult: Equatable {
     let receipt: ToolReceipt
 }
 
+/// Read-only chapter projection exposed to the Agent-first UI. Persistence and
+/// state transitions remain owned by the chapter repository/tool APIs.
+struct ChapterRuntimeSnapshot: Equatable {
+    let calibration: ChapterCalibration
+    let activeVersion: ChapterVersion
+    let versions: [ChapterVersion]
+    let lastReceipt: ToolReceipt?
+
+    var stage: ChapterCalibrationStage { calibration.stage }
+    var activeDiagnosisEntries: [ChapterDiagnosisEntry] {
+        calibration.diagnosisEntries.filter {
+            $0.versionID == activeVersion.id && $0.versionHash == activeVersion.contentHash
+        }
+    }
+
+    var diagnosisAnswers: [String] {
+        activeDiagnosisEntries.map(\.answer)
+    }
+
+    var nextDiagnosisQuestionIndex: Int {
+        min(activeDiagnosisEntries.count, ChapterDiagnosisProtocol.orderedQuestionIDs.count)
+    }
+}
+
 struct AgentRuntimeSnapshot {
     let conversation: AgentConversation
     let messages: [AgentMessage]
@@ -92,6 +138,7 @@ struct AgentRuntimeSnapshot {
     let session: AgentSessionState
     let openingPlan: AgentArtifact?
     let openingPlanApproval: ApprovalRequest?
+    let chapter: ChapterRuntimeSnapshot?
     let lastReceipt: ToolReceipt?
     let latestRun: AgentRunSnapshot?
 }

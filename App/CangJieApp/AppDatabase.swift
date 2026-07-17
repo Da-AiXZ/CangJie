@@ -12,6 +12,7 @@ struct ToolReceipt: Identifiable, Equatable {
     let projectID: UUID?
     let approvalRequestID: UUID?
     let approvalBindingHash: String?
+    let originRunID: UUID?
     let idempotencyKey: String?
     let outputReference: String?
     let createdAt: Date
@@ -27,6 +28,7 @@ struct ToolReceipt: Identifiable, Equatable {
         projectID: UUID?,
         approvalRequestID: UUID? = nil,
         approvalBindingHash: String? = nil,
+        originRunID: UUID? = nil,
         idempotencyKey: String?,
         outputReference: String?,
         createdAt: Date
@@ -41,6 +43,7 @@ struct ToolReceipt: Identifiable, Equatable {
         self.projectID = projectID
         self.approvalRequestID = approvalRequestID
         self.approvalBindingHash = approvalBindingHash
+        self.originRunID = originRunID
         self.idempotencyKey = idempotencyKey
         self.outputReference = outputReference
         self.createdAt = createdAt
@@ -135,6 +138,16 @@ enum AppDatabaseError: Error, Equatable {
     case approvalRequiresReapproval
     case approvalExpired
     case approvalBudgetExceeded
+    case invalidChapterVersion
+    case invalidChapterCalibration
+    case chapterBindingMismatch
+    case chapterOpeningPlanNotApproved
+    case chapterOperationNotAllowed
+    case invalidChapterParagraphIndex(Int)
+    case chapterLockedContentChanged(index: Int)
+    case invalidChapterDiagnosis
+    case invalidRewriteScope
+    case chapterInputLimitExceeded(field: String)
 }
 
 final class AppDatabase {
@@ -619,6 +632,303 @@ final class AppDatabase {
                 table.add(column: "idempotencyKey", .text)
             }
             try db.execute(sql: "CREATE UNIQUE INDEX agentMessage_on_idempotencyKey ON agentMessage(idempotencyKey) WHERE idempotencyKey IS NOT NULL")
+        }
+        migrator.registerMigration("m1c-chapter-calibration-v1") { db in
+            try db.create(table: "chapterVersion") { table in
+                table.column("id", .text).primaryKey()
+                table.column("logicalID", .text).notNull().indexed()
+                table.column("conversationID", .text).notNull().indexed().references("agentConversation", onDelete: .restrict)
+                table.column("projectID", .text).notNull().indexed().references("novelProject", onDelete: .restrict)
+                table.column("chapterNumber", .integer).notNull()
+                table.column("revision", .integer).notNull()
+                table.column("parentVersionID", .text).references("chapterVersion", onDelete: .restrict)
+                table.column("title", .text).notNull()
+                table.column("body", .text).notNull()
+                table.column("contentHash", .text).notNull()
+                table.column("creationStatus", .text).notNull()
+                table.column("evidenceReview", .text).notNull()
+                table.column("diffSummary", .text)
+                table.column("createdAt", .double).notNull()
+                table.uniqueKey(["logicalID", "revision"])
+            }
+            try db.execute(sql: "CREATE INDEX chapterVersion_scope_revision ON chapterVersion(conversationID, projectID, chapterNumber, revision ASC)")
+            try db.create(table: "chapterCalibration") { table in
+                table.column("chapterLogicalID", .text).primaryKey()
+                table.column("conversationID", .text).notNull().indexed().references("agentConversation", onDelete: .restrict)
+                table.column("projectID", .text).notNull().indexed().references("novelProject", onDelete: .restrict)
+                table.column("chapterNumber", .integer).notNull()
+                table.column("activeVersionID", .text).notNull().references("chapterVersion", onDelete: .restrict)
+                table.column("stage", .text).notNull().indexed()
+                table.column("diagnosisEntriesJSON", .text).notNull()
+                table.column("diagnosisHash", .text).notNull()
+                table.column("rejectionHistoryJSON", .text).notNull()
+                table.column("lockedParagraphIndexesJSON", .text).notNull()
+                table.column("rewriteScope", .text)
+                table.column("rewriteScopeHash", .text)
+                table.column("acceptedVersionID", .text).references("chapterVersion", onDelete: .restrict)
+                table.column("updatedAt", .double).notNull()
+                table.uniqueKey(["conversationID", "projectID", "chapterNumber"])
+            }
+            try db.execute(sql: "CREATE INDEX chapterCalibration_active_version ON chapterCalibration(activeVersionID)")
+            try db.create(table: "chapterToolResultSnapshot") { table in
+                table.column("receiptID", .text).primaryKey().references("toolReceipt", onDelete: .restrict)
+                table.column("toolID", .text).notNull()
+                table.column("inputHash", .text).notNull()
+                table.column("conversationID", .text).notNull().indexed().references("agentConversation", onDelete: .restrict)
+                table.column("projectID", .text).notNull().indexed().references("novelProject", onDelete: .restrict)
+                table.column("chapterLogicalID", .text).notNull().indexed()
+                table.column("chapterNumber", .integer).notNull()
+                table.column("versionID", .text).notNull().references("chapterVersion", onDelete: .restrict)
+                table.column("calibrationJSON", .text).notNull()
+                table.column("calibrationHash", .text).notNull()
+                table.column("createdAt", .double).notNull()
+            }
+            try db.execute(sql: "CREATE INDEX chapterToolSnapshot_scope ON chapterToolResultSnapshot(conversationID, projectID, chapterLogicalID, createdAt DESC)")
+            try db.execute(sql: """
+                CREATE TRIGGER chapterVersion_immutable_update
+                BEFORE UPDATE ON chapterVersion
+                BEGIN
+                    SELECT RAISE(ABORT, 'chapterVersion is immutable');
+                END
+                """)
+            try db.execute(sql: """
+                CREATE TRIGGER chapterVersion_immutable_delete
+                BEFORE DELETE ON chapterVersion
+                BEGIN
+                    SELECT RAISE(ABORT, 'chapterVersion is immutable');
+                END
+                """)
+            try db.execute(sql: """
+                CREATE TRIGGER chapterVersion_integrity_insert
+                BEFORE INSERT ON chapterVersion
+                WHEN NEW.chapterNumber <= 0
+                  OR NEW.revision <= 0
+                  OR length(NEW.contentHash) = 0
+                  OR length(NEW.title) = 0
+                  OR length(NEW.body) = 0
+                BEGIN
+                    SELECT RAISE(ABORT, 'invalid chapterVersion identity');
+                END
+                """)
+            try db.execute(sql: """
+                CREATE TRIGGER chapterVersion_lineage_insert
+                BEFORE INSERT ON chapterVersion
+                WHEN (NEW.revision = 1 AND (NEW.parentVersionID IS NOT NULL OR NEW.logicalID <> NEW.id))
+                  OR (NEW.revision > 1 AND (
+                    NEW.parentVersionID IS NULL
+                    OR NOT EXISTS (
+                        SELECT 1 FROM chapterVersion AS parent
+                        WHERE parent.id = NEW.parentVersionID
+                          AND parent.logicalID = NEW.logicalID
+                          AND parent.conversationID = NEW.conversationID
+                          AND parent.projectID = NEW.projectID
+                          AND parent.chapterNumber = NEW.chapterNumber
+                          AND parent.revision = NEW.revision - 1
+                    )
+                  ))
+                BEGIN
+                    SELECT RAISE(ABORT, 'invalid chapterVersion lineage');
+                END
+                """)
+            try db.execute(sql: """
+                CREATE TRIGGER chapterCalibration_scope_insert
+                BEFORE INSERT ON chapterCalibration
+                WHEN NOT EXISTS (
+                    SELECT 1 FROM chapterVersion AS active
+                    WHERE active.id = NEW.activeVersionID
+                      AND active.logicalID = NEW.chapterLogicalID
+                      AND active.conversationID = NEW.conversationID
+                      AND active.projectID = NEW.projectID
+                      AND active.chapterNumber = NEW.chapterNumber
+                )
+                OR (NEW.stage = 'approvedFrozen' AND (NEW.acceptedVersionID IS NULL OR NEW.acceptedVersionID <> NEW.activeVersionID))
+                OR (NEW.stage <> 'approvedFrozen' AND NEW.acceptedVersionID IS NOT NULL)
+                OR (NEW.acceptedVersionID IS NOT NULL AND NOT EXISTS (
+                    SELECT 1 FROM chapterVersion AS accepted
+                    WHERE accepted.id = NEW.acceptedVersionID
+                      AND accepted.logicalID = NEW.chapterLogicalID
+                      AND accepted.conversationID = NEW.conversationID
+                      AND accepted.projectID = NEW.projectID
+                      AND accepted.chapterNumber = NEW.chapterNumber
+                ))
+                BEGIN
+                    SELECT RAISE(ABORT, 'invalid chapterCalibration scope');
+                END
+                """)
+            try db.execute(sql: """
+                CREATE TRIGGER chapterCalibration_scope_update
+                BEFORE UPDATE ON chapterCalibration
+                WHEN NEW.chapterLogicalID <> OLD.chapterLogicalID
+                  OR NEW.conversationID <> OLD.conversationID
+                  OR NEW.projectID <> OLD.projectID
+                  OR NEW.chapterNumber <> OLD.chapterNumber
+                  OR NOT EXISTS (
+                    SELECT 1 FROM chapterVersion AS active
+                    WHERE active.id = NEW.activeVersionID
+                      AND active.logicalID = NEW.chapterLogicalID
+                      AND active.conversationID = NEW.conversationID
+                      AND active.projectID = NEW.projectID
+                      AND active.chapterNumber = NEW.chapterNumber
+                )
+                OR (NEW.stage = 'approvedFrozen' AND (NEW.acceptedVersionID IS NULL OR NEW.acceptedVersionID <> NEW.activeVersionID))
+                OR (NEW.stage <> 'approvedFrozen' AND NEW.acceptedVersionID IS NOT NULL)
+                OR (NEW.acceptedVersionID IS NOT NULL AND NOT EXISTS (
+                    SELECT 1 FROM chapterVersion AS accepted
+                    WHERE accepted.id = NEW.acceptedVersionID
+                      AND accepted.logicalID = NEW.chapterLogicalID
+                      AND accepted.conversationID = NEW.conversationID
+                      AND accepted.projectID = NEW.projectID
+                      AND accepted.chapterNumber = NEW.chapterNumber
+                ))
+                BEGIN
+                    SELECT RAISE(ABORT, 'invalid chapterCalibration scope');
+                END
+                """)
+            try db.execute(sql: """
+                CREATE TRIGGER chapterToolResultSnapshot_immutable_update
+                BEFORE UPDATE ON chapterToolResultSnapshot
+                BEGIN
+                    SELECT RAISE(ABORT, 'chapterToolResultSnapshot is immutable');
+                END
+                """)
+            try db.execute(sql: """
+                CREATE TRIGGER chapterToolResultSnapshot_immutable_delete
+                BEFORE DELETE ON chapterToolResultSnapshot
+                BEGIN
+                    SELECT RAISE(ABORT, 'chapterToolResultSnapshot is immutable');
+                END
+                """)
+        }
+        migrator.registerMigration("m1c-chapter-calibration-v2") { db in
+            try db.alter(table: "toolReceipt") { table in
+                table.add(column: "originRunID", .text)
+            }
+            try db.execute(sql: "CREATE INDEX toolReceipt_origin_run ON toolReceipt(originRunID) WHERE originRunID IS NOT NULL")
+            try db.execute(sql: """
+                CREATE TRIGGER chapterCalibration_frozen_update
+                BEFORE UPDATE ON chapterCalibration
+                WHEN OLD.stage = 'approvedFrozen'
+                BEGIN
+                    SELECT RAISE(ABORT, 'approved chapter calibration is frozen');
+                END
+                """)
+            try db.execute(sql: """
+                CREATE TRIGGER chapterCalibration_approved_insert
+                BEFORE INSERT ON chapterCalibration
+                WHEN NEW.stage = 'approvedFrozen'
+                BEGIN
+                    SELECT RAISE(ABORT, 'approved chapter calibration must be reached by accept transition');
+                END
+                """)
+            try db.execute(sql: """
+                CREATE TRIGGER chapterCalibration_approved_receipt_update
+                BEFORE UPDATE ON chapterCalibration
+                WHEN NEW.stage = 'approvedFrozen'
+                  AND (
+                    OLD.stage NOT IN ('reviewingV1', 'reviewingV2')
+                    OR NEW.acceptedVersionID IS NULL
+                    OR NEW.acceptedVersionID <> NEW.activeVersionID
+                    OR NOT EXISTS (
+                        SELECT 1
+                        FROM toolReceipt AS receipt
+                        JOIN chapterToolResultSnapshot AS snapshot ON snapshot.receiptID = receipt.id
+                        WHERE receipt.toolID = 'chapter.accept'
+                          AND receipt.toolVersion = '1'
+                          AND receipt.inputSummary = 'chapter:' || NEW.activeVersionID || ':accept'
+                          AND receipt.inputHash IS NOT NULL
+                          AND length(trim(receipt.inputHash)) > 0
+                          AND receipt.outcome = 'completed'
+                          AND receipt.conversationID = NEW.conversationID
+                          AND receipt.projectID = NEW.projectID
+                          AND receipt.idempotencyKey IS NOT NULL
+                          AND length(trim(receipt.idempotencyKey)) > 0
+                          AND receipt.outputReference = NEW.activeVersionID
+                          AND snapshot.toolID = receipt.toolID
+                          AND snapshot.inputHash = receipt.inputHash
+                          AND snapshot.conversationID = NEW.conversationID
+                          AND snapshot.projectID = NEW.projectID
+                          AND snapshot.chapterLogicalID = NEW.chapterLogicalID
+                          AND snapshot.chapterNumber = NEW.chapterNumber
+                          AND snapshot.versionID = NEW.activeVersionID
+                    )
+                  )
+                BEGIN
+                    SELECT RAISE(ABORT, 'approved chapter calibration requires accept receipt');
+                END
+                """)
+        }
+        migrator.registerMigration("m1c-origin-run-binding-v3") { db in
+            try db.alter(table: "agentRun") { table in
+                table.add(column: "projectID", .text)
+            }
+            try db.execute(sql: "CREATE INDEX agentRun_project_scope ON agentRun(conversationID, projectID)")
+            try db.execute(sql: """
+                UPDATE agentRun
+                SET projectID = (
+                    SELECT receipt.projectID
+                    FROM toolReceipt AS receipt
+                    WHERE receipt.originRunID = agentRun.id
+                      AND receipt.conversationID = agentRun.conversationID
+                      AND receipt.projectID IS NOT NULL
+                    ORDER BY receipt.createdAt DESC, receipt.rowid DESC
+                    LIMIT 1
+                )
+                WHERE projectID IS NULL
+                  AND EXISTS (
+                    SELECT 1
+                    FROM toolReceipt AS receipt
+                    WHERE receipt.originRunID = agentRun.id
+                      AND receipt.conversationID = agentRun.conversationID
+                      AND receipt.projectID IS NOT NULL
+                )
+                """)
+            let invalidOriginBindingCount = try Int.fetchOne(
+                db,
+                sql: """
+                SELECT COUNT(*)
+                FROM toolReceipt AS receipt
+                LEFT JOIN agentRun AS run ON run.id = receipt.originRunID
+                WHERE receipt.originRunID IS NOT NULL
+                  AND (
+                    run.id IS NULL
+                    OR run.conversationID IS NOT receipt.conversationID
+                    OR run.projectID IS NOT receipt.projectID
+                  )
+                """
+            ) ?? 0
+            guard invalidOriginBindingCount == 0 else {
+                throw AppDatabaseError.invalidToolReceiptReference
+            }
+            try db.execute(sql: """
+                CREATE TRIGGER toolReceipt_origin_run_insert
+                BEFORE INSERT ON toolReceipt
+                WHEN NEW.originRunID IS NOT NULL
+                  AND NOT EXISTS (
+                    SELECT 1
+                    FROM agentRun AS run
+                    WHERE run.id = NEW.originRunID
+                      AND run.conversationID = NEW.conversationID
+                      AND run.projectID IS NEW.projectID
+                )
+                BEGIN
+                    SELECT RAISE(ABORT, 'tool receipt origin run scope mismatch');
+                END
+                """)
+            try db.execute(sql: """
+                CREATE TRIGGER toolReceipt_origin_run_update
+                BEFORE UPDATE OF originRunID, conversationID, projectID ON toolReceipt
+                WHEN NEW.originRunID IS NOT NULL
+                  AND NOT EXISTS (
+                    SELECT 1
+                    FROM agentRun AS run
+                    WHERE run.id = NEW.originRunID
+                      AND run.conversationID = NEW.conversationID
+                      AND run.projectID IS NEW.projectID
+                )
+                BEGIN
+                    SELECT RAISE(ABORT, 'tool receipt origin run scope mismatch');
+                END
+                """)
         }
         return migrator
     }
