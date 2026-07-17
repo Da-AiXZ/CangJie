@@ -90,8 +90,18 @@ import sys
 path, bundle_identifier = sys.argv[1:]
 try:
     with open(path, "rb") as source:
-        entitlements = plistlib.load(source)
-except (OSError, ValueError, TypeError, plistlib.InvalidFileException):
+        raw = source.read()
+except OSError:
+    raise SystemExit("Entitlements file is not a valid plist") from None
+
+if raw.startswith(b"\xef\xbb\xbf"):
+    raise SystemExit(
+        "Entitlements file must be UTF-8 without BOM for ldid compatibility"
+    )
+
+try:
+    entitlements = plistlib.loads(raw)
+except (ValueError, TypeError, plistlib.InvalidFileException):
     raise SystemExit("Entitlements file is not a valid plist") from None
 
 expected = {

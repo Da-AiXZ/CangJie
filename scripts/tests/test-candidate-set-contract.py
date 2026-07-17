@@ -45,4 +45,13 @@ assert ios.index('generate-build-identity.py') < ios.index('xcodegen generate')
 assert 'Use scripts/build-candidate-set.sh' in (ROOT / 'scripts/build-ipa.sh').read_text(encoding='utf-8')
 assert 'local bundle_identifier="${6:-${EXPECTED_BUNDLE_ID}}"' in (ROOT / 'scripts/build-ipa.sh').read_text(encoding='utf-8')
 
+for entitlement_name in [
+    "CangJie.entitlements",
+    "CangJieIsolationProbe.entitlements",
+]:
+    entitlement = (ROOT / "App" / "Config" / entitlement_name).read_bytes()
+    assert not entitlement.startswith(
+        b"\xef\xbb\xbf"
+    ), f"{entitlement_name} must not contain a UTF-8 BOM"
+
 print("candidate set build contract: ok")

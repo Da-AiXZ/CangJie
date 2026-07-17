@@ -63,6 +63,10 @@ fixtures = {
 for name, value in fixtures.items():
     fmt = plistlib.FMT_BINARY if name.endswith("binary") else plistlib.FMT_XML
     (root / name).write_bytes(plistlib.dumps(value, fmt=fmt, sort_keys=False))
+(root / "bom.xml").write_bytes(
+    b"\xef\xbb\xbf"
+    + plistlib.dumps(expected, fmt=plistlib.FMT_XML, sort_keys=False)
+)
 (root / "invalid.txt").write_text("{}", encoding="utf-8")
 PY
 
@@ -105,6 +109,9 @@ assert_failure() {
 
 assert_success valid-xml bash "${BUILD_SCRIPT}" --verify-entitlements "${FIXTURES}/valid.xml"
 assert_success valid-binary bash "${BUILD_SCRIPT}" --verify-entitlements "${FIXTURES}/valid.binary"
+assert_failure utf8-bom \
+  'Entitlements file must be UTF-8 without BOM for ldid compatibility' \
+  bash "${BUILD_SCRIPT}" --verify-entitlements "${FIXTURES}/bom.xml"
 assert_failure empty-dictionary 'Entitlement contract mismatch: {}' bash "${BUILD_SCRIPT}" --verify-entitlements "${FIXTURES}/empty.xml"
 assert_failure invalid-plist 'Entitlements file is not a valid plist' bash "${BUILD_SCRIPT}" --verify-entitlements "${FIXTURES}/invalid.txt"
 assert_failure missing-key 'Entitlement contract mismatch' bash "${BUILD_SCRIPT}" --verify-entitlements "${FIXTURES}/missing.xml"
