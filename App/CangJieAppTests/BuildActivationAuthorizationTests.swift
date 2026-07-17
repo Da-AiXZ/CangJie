@@ -125,6 +125,7 @@ final class BuildActivationAuthorizationTests: XCTestCase {
         let bodyMayFinish = DispatchSemaphore(value: 0)
         let mutationFinished = expectation(description: "mutation finishes")
         let revocationFinished = expectation(description: "revocation finishes")
+        let revocationReturned = DispatchSemaphore(value: 0)
         let resultLock = NSLock()
         var mutationRan = false
         var capturedMutationError: Error?
@@ -149,9 +150,10 @@ final class BuildActivationAuthorizationTests: XCTestCase {
         XCTAssertEqual(bodyStarted.wait(timeout: .now() + 2), .success)
         DispatchQueue.global(qos: .userInitiated).async {
             authorizer.update(allowed: false)
+            revocationReturned.signal()
             revocationFinished.fulfill()
         }
-        XCTAssertEqual(XCTWaiter.wait(for: [revocationFinished], timeout: 0.1), .timedOut)
+        XCTAssertEqual(revocationReturned.wait(timeout: .now() + 0.1), .timedOut)
         bodyMayFinish.signal()
         wait(for: [mutationFinished, revocationFinished], timeout: 2)
 
