@@ -167,6 +167,7 @@ struct DeviceDiagnosticsView: View {
         }
         .navigationTitle("Device Diagnostics")
         .scrollDismissesKeyboard(.interactively)
+        .accessibilityIdentifier("device-diagnostics-list")
     }
 
     private func diagnosticRow(_ title: String, _ value: String, _ identifier: String) -> some View {

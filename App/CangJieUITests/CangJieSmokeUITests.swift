@@ -30,6 +30,8 @@ final class CangJieSmokeUITests: XCTestCase {
 
         XCTAssertTrue(app.staticTexts["device-diagnostics-heading"].waitForExistence(timeout: 10))
         XCTAssertTrue(app.staticTexts["diagnostics-build-identity"].exists)
+        let diagnosticsList = app.descendants(matching: .any)["device-diagnostics-list"]
+        XCTAssertTrue(diagnosticsList.waitForExistence(timeout: 5))
 
         let inputHeading = app.staticTexts["keychain-probe-input-heading"]
         let input = app.secureTextFields["keychain-probe-input"]
@@ -40,74 +42,74 @@ final class CangJieSmokeUITests: XCTestCase {
         let delete = app.buttons["keychain-probe-delete"]
         let status = app.staticTexts["keychain-probe-status"]
         let guidance = app.staticTexts["keychain-probe-guidance"]
-        reveal(inputHeading, in: app, swiping: .up)
+        reveal(inputHeading, in: diagnosticsList, swiping: .up)
         XCTAssertEqual(inputHeading.label, "1. Disposable value input")
         XCTAssertTrue(input.exists)
         XCTAssertEqual(input.placeholderValue, "Type disposable value here")
 
-        reveal(actionHeading, in: app, swiping: .up)
+        reveal(actionHeading, in: diagnosticsList, swiping: .up)
         XCTAssertEqual(actionHeading.label, "2. Create or update and verify")
         XCTAssertTrue(actionHelp.exists)
         XCTAssertTrue(actionHelp.label.contains("secure field above"))
         XCTAssertTrue(save.exists)
 
-        reveal(status, in: app, swiping: .down)
+        reveal(status, in: diagnosticsList, swiping: .down)
         XCTAssertTrue(guidance.exists)
         if status.label == "Stored" {
-            reveal(delete, in: app, swiping: .up)
+            reveal(delete, in: diagnosticsList, swiping: .up)
             delete.tap()
-            reveal(status, in: app, swiping: .down)
+            reveal(status, in: diagnosticsList, swiping: .down)
         }
         assertEventually(status, hasLabel: "Absent")
         XCTAssertTrue(guidance.label.contains("tap Create and verify"))
 
-        reveal(input, in: app, swiping: .up)
+        reveal(input, in: diagnosticsList, swiping: .up)
         let firstValue = "ui-keychain-probe-one"
         input.tap()
         input.typeText(firstValue)
-        reveal(save, in: app, swiping: .up)
+        reveal(save, in: diagnosticsList, swiping: .up)
         XCTAssertTrue(save.isEnabled)
         save.tap()
         assertEventually(save, hasLabel: "Update and verify")
         XCTAssertFalse(save.isEnabled)
 
-        reveal(status, in: app, swiping: .down)
+        reveal(status, in: diagnosticsList, swiping: .down)
         assertEventually(status, hasLabel: "Stored")
         XCTAssertTrue(guidance.label.contains("same secure field below"))
         XCTAssertTrue(guidance.label.contains("tap Update and verify"))
         let firstDigest = app.staticTexts["keychain-probe-digest"]
-        reveal(firstDigest, in: app, swiping: .down)
+        reveal(firstDigest, in: diagnosticsList, swiping: .down)
         let firstDigestLabel = firstDigest.label
         XCTAssertEqual(firstDigestLabel.count, 12)
         assertNoAccessiblePlaintext(firstValue, in: app)
 
-        reveal(read, in: app, swiping: .up)
+        reveal(read, in: diagnosticsList, swiping: .up)
         read.tap()
-        reveal(firstDigest, in: app, swiping: .down)
+        reveal(firstDigest, in: diagnosticsList, swiping: .down)
 
-        reveal(input, in: app, swiping: .up)
+        reveal(input, in: diagnosticsList, swiping: .up)
         let updatedValue = "ui-keychain-probe-two"
         input.tap()
         input.typeText(updatedValue)
-        reveal(save, in: app, swiping: .up)
+        reveal(save, in: diagnosticsList, swiping: .up)
         XCTAssertTrue(save.isEnabled)
         save.tap()
         assertEventually(save, hasLabel: "Update and verify")
 
         let updatedDigest = app.staticTexts["keychain-probe-digest"]
-        reveal(updatedDigest, in: app, swiping: .down)
+        reveal(updatedDigest, in: diagnosticsList, swiping: .down)
         assertEventually(updatedDigest, changesFromLabel: firstDigestLabel)
         XCTAssertEqual(updatedDigest.label.count, 12)
         assertNoAccessiblePlaintext(updatedValue, in: app)
 
-        reveal(delete, in: app, swiping: .up)
+        reveal(delete, in: diagnosticsList, swiping: .up)
         delete.tap()
-        reveal(status, in: app, swiping: .down)
+        reveal(status, in: diagnosticsList, swiping: .down)
         assertEventually(status, hasLabel: "Absent")
         XCTAssertFalse(delete.isEnabled)
         XCTAssertTrue(guidance.label.contains("tap Create and verify"))
         assertEventuallyDisappears(app.staticTexts["keychain-probe-digest"])
-        reveal(save, in: app, swiping: .up)
+        reveal(save, in: diagnosticsList, swiping: .up)
         assertEventually(save, hasLabel: "Create and verify")
     }
 
@@ -243,7 +245,7 @@ final class CangJieSmokeUITests: XCTestCase {
     @discardableResult
     private func reveal(
         _ element: XCUIElement,
-        in app: XCUIApplication,
+        in scrollContainer: XCUIElement,
         swiping direction: SwipeDirection,
         maxSwipes: Int = 10,
         file: StaticString = #filePath,
@@ -255,9 +257,9 @@ final class CangJieSmokeUITests: XCTestCase {
             }
             switch direction {
             case .up:
-                app.swipeUp()
+                scrollContainer.swipeUp()
             case .down:
-                app.swipeDown()
+                scrollContainer.swipeDown()
             }
         }
 
