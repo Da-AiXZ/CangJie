@@ -32,48 +32,6 @@ private struct AgentBusinessMilestone: Equatable {
     let chapterRevision: Int?
 }
 
-struct BuildIdentity: Equatable {
-    let version: String
-    let build: String
-    let commit: String
-
-    var displayText: String {
-        "Version \(version) | Build \(build) | Commit \(commit)"
-    }
-
-    init(infoDictionary: [String: Any]?) {
-        version = Self.nonEmptyString(
-            forKeys: ["CFBundleShortVersionString"],
-            in: infoDictionary
-        ) ?? "unavailable"
-        build = Self.nonEmptyString(
-            forKeys: ["CFBundleVersion"],
-            in: infoDictionary
-        ) ?? "unavailable"
-        let fullCommit = Self.nonEmptyString(
-            forKeys: ["CangJieGitCommit"],
-            in: infoDictionary
-        )
-        commit = fullCommit.map { String($0.prefix(12)) } ?? "unavailable"
-    }
-
-    private static func nonEmptyString(
-        forKeys keys: [String],
-        in infoDictionary: [String: Any]?
-    ) -> String? {
-        guard let infoDictionary else { return nil }
-        for key in keys {
-            guard let rawValue = infoDictionary[key] else { continue }
-            let value = String(describing: rawValue)
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-            if !value.isEmpty {
-                return value
-            }
-        }
-        return nil
-    }
-}
-
 @MainActor
 final class AppViewModel: ObservableObject {
     @Published var draft = ""
@@ -83,6 +41,8 @@ final class AppViewModel: ObservableObject {
     @Published var apiKeyInput = ""
     @Published private(set) var hasStoredKey = false
     @Published private(set) var keychainProbeDigest: String?
+    @Published private(set) var isolationCanaryDigest: String?
+    @Published private(set) var isolationCanaryPresent = false
     @Published var streamURL = ""
     @Published var streamOutput = ""
     @Published var isStreaming = false
@@ -99,8 +59,11 @@ final class AppViewModel: ObservableObject {
     @Published private(set) var lastToolReceipt: ToolReceipt?
     @Published private(set) var latestAgentRun: AgentRunSnapshot?
     @Published private(set) var chapter: ChapterRuntimeSnapshot?
+    @Published private(set) var buildActivationMessage = "Checking executable identity..."
+    @Published private(set) var buildIdentity: BuildIdentity
 
     var status: String { errorMessage ?? businessStatus }
+    var isAgentExecutionAllowed: Bool { buildIdentity.isAgentExecutionAllowed }
     var chapterNeedsReview: Bool {
         chapter?.stage == .reviewingV1 || chapter?.stage == .reviewingV2
     }
@@ -110,14 +73,17 @@ final class AppViewModel: ObservableObject {
     var chapterParagraphs: [String] {
         chapter.map { ChapterContentIntegrity.paragraphs(in: $0.activeVersion.body) } ?? []
     }
-    let buildIdentity: BuildIdentity
-
     private static let maximumStreamOutputBytes = 256 * 1_024
     private static let maximumProbeSecretBytes = 4_096
     private static let probeAccount = "m0-probe"
     private let database: AppDatabase?
     private let runtime: AgentRuntime?
     private let keychain: any SecretRepository
+    private let isolationCanaryRepository: any IsolationCanaryRepository
+    private let buildActivationStore: any BuildActivationStore
+    private let compiledBuildStamp: BuildIdentityStamp
+    private let bundleIdentityLoader: any BundleBuildIdentityLoading
+    private let executionAuthorizer: BuildActivationAgentAuthorizer
     private let taskID: UUID
     private var streamTask: Task<Void, Never>?
     private var streamGeneration: UUID?
@@ -128,10 +94,27 @@ final class AppViewModel: ObservableObject {
         database: AppDatabase? = nil,
         databaseFactory: () throws -> AppDatabase = { try AppDatabase.makeDefault() },
         keychain: any SecretRepository = KeychainSecretRepository(),
-        bundleInfo: [String: Any]? = Bundle.main.infoDictionary
+        isolationCanaryRepository: any IsolationCanaryRepository = KeychainIsolationCanaryRepository(),
+        bundleInfo: [String: Any]? = BuildIdentityStamp.generated.infoDictionary,
+        compiledBuildStamp: BuildIdentityStamp = .generated,
+        buildActivationStore: any BuildActivationStore = UserDefaultsBuildActivationStore(),
+        bundleIdentityLoader: (any BundleBuildIdentityLoading)? = nil
     ) {
         self.keychain = keychain
-        buildIdentity = BuildIdentity(infoDictionary: bundleInfo)
+        self.isolationCanaryRepository = isolationCanaryRepository
+        self.buildActivationStore = buildActivationStore
+        self.compiledBuildStamp = compiledBuildStamp
+        let resolvedLoader = bundleIdentityLoader
+            ?? StaticBundleBuildIdentityLoader(infoDictionary: bundleInfo)
+        self.bundleIdentityLoader = resolvedLoader
+        let initialIdentity = BuildIdentity(
+            infoDictionary: resolvedLoader.loadInfoDictionary(),
+            compiled: compiledBuildStamp
+        )
+        buildIdentity = initialIdentity
+        let authorizer = BuildActivationAgentAuthorizer(allowed: initialIdentity.isAgentExecutionAllowed)
+        executionAuthorizer = authorizer
+
         let defaultsKey = "m0TaskID"
         if let stored = UserDefaults.standard.string(forKey: defaultsKey),
            let id = UUID(uuidString: stored) {
@@ -143,30 +126,45 @@ final class AppViewModel: ObservableObject {
         }
 
         let databaseState: (database: AppDatabase?, draft: String, notice: String?, error: String?)
-        do {
-            let resolved = try database ?? databaseFactory()
-            let restoredDraft = try resolved.loadDraft()?.content ?? ""
-            let restoredNotice: String
-            if let checkpoint = try resolved.latestCheckpoint(taskID: taskID) {
-                restoredNotice = Self.payloadHash(for: restoredDraft) == checkpoint.payloadHash
-                    ? "Restored checkpoint #\(checkpoint.sequence)"
-                    : "Draft is newer than the latest checkpoint"
-            } else {
-                restoredNotice = "SQLite ready; no checkpoint yet"
+        if !initialIdentity.isAgentExecutionAllowed {
+            databaseState = (nil, "", nil, nil)
+        } else {
+            do {
+                let resolved = try database ?? databaseFactory()
+                let restoredDraft = try resolved.loadDraft()?.content ?? ""
+                let restoredNotice: String
+                if let checkpoint = try resolved.latestCheckpoint(taskID: taskID) {
+                    restoredNotice = Self.payloadHash(for: restoredDraft) == checkpoint.payloadHash
+                        ? "Restored checkpoint #\(checkpoint.sequence)"
+                        : "Draft is newer than the latest checkpoint"
+                } else {
+                    restoredNotice = "SQLite ready; no checkpoint yet"
+                }
+                databaseState = (resolved, restoredDraft, restoredNotice, nil)
+            } catch {
+                databaseState = (nil, "", nil, "SQLite initialization failed (DB-INIT)")
             }
-            databaseState = (resolved, restoredDraft, restoredNotice, nil)
-        } catch {
-            databaseState = (nil, "", nil, "SQLite initialization failed (DB-INIT)")
         }
 
         self.database = databaseState.database
         if let resolvedDatabase = databaseState.database {
-            runtime = try? AgentRuntime(database: resolvedDatabase)
+            runtime = try? AgentRuntime(database: resolvedDatabase, authorizer: authorizer)
         } else {
             runtime = nil
         }
         draft = databaseState.draft
         errorMessage = databaseState.error
+
+        if initialIdentity.isAgentExecutionAllowed {
+            let token = compiledBuildStamp.activationToken
+            let wasAlreadyActivated = buildActivationStore.loadActivatedToken() == token
+            buildActivationStore.saveActivatedToken(token)
+            buildActivationMessage = wasAlreadyActivated
+                ? "Executable identity verified."
+                : "New executable activated: Build \(compiledBuildStamp.build), commit \(compiledBuildStamp.commit)."
+        } else {
+            buildActivationMessage = initialIdentity.diagnosticText
+        }
 
         if let runtime {
             do {
@@ -178,7 +176,9 @@ final class AppViewModel: ObservableObject {
                 publishError("Agent restore failed (AGENT-RESTORE)")
             }
         } else {
-            businessStatus = "Agent unavailable"
+            businessStatus = initialIdentity.isAgentExecutionAllowed
+                ? "Agent unavailable"
+                : "Update activation required; Agent mutations are paused"
         }
 
         if let notice = databaseState.notice {
@@ -186,6 +186,7 @@ final class AppViewModel: ObservableObject {
         }
 
         refreshProbeState(publishSuccess: false)
+        refreshIsolationCanary(publishSuccess: false)
     }
 
     func reloadProjects() {
@@ -208,6 +209,7 @@ final class AppViewModel: ObservableObject {
 
     @discardableResult
     func approveOpeningPlan(requestID: UUID, displayedBindingHash: String) -> Bool {
+        guard requireActiveBuildForAgentMutation() else { return false }
         guard let runtime,
               let displayed = openingPlanApproval,
               displayed.id == requestID,
@@ -260,6 +262,13 @@ final class AppViewModel: ObservableObject {
         versionID: UUID,
         displayedContentHash: String
     ) {
+        guard requireActiveBuildForAgentMutation() else { return }
+        do {
+            try executionAuthorizer.authorize(.chapterParagraphLock)
+        } catch {
+            publishError("Running executable identity is not active (BUILD-ACTIVATION)")
+            return
+        }
         guard let database,
               let runtime,
               let current = exactDisplayedChapter(
@@ -323,6 +332,7 @@ final class AppViewModel: ObservableObject {
 
     @discardableResult
     func acceptChapter(versionID: UUID, displayedContentHash: String) -> Bool {
+        guard requireActiveBuildForAgentMutation() else { return false }
         guard exactDisplayedChapter(
             versionID: versionID,
             displayedContentHash: displayedContentHash,
@@ -347,6 +357,7 @@ final class AppViewModel: ObservableObject {
         versionID: UUID,
         displayedContentHash: String
     ) -> Bool {
+        guard requireActiveBuildForAgentMutation() else { return false }
         let trimmedReason = reason.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedReason.isEmpty else {
             publishError("A concrete rejection reason is required (CHAPTER-REJECT-REASON)")
@@ -377,6 +388,7 @@ final class AppViewModel: ObservableObject {
         displayedSourceHash: String,
         rewriteScopeHash: String
     ) -> Bool {
+        guard requireActiveBuildForAgentMutation() else { return false }
         guard let current = exactDisplayedChapter(
             versionID: sourceVersionID,
             displayedContentHash: displayedSourceHash,
@@ -405,6 +417,7 @@ final class AppViewModel: ObservableObject {
         }
         let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
+        guard requireActiveBuildForAgentMutation() else { return }
         guard let runtime else {
             conversationMessages.append("You: " + text)
             conversationMessages.append("Agent: Database unavailable; no tool was executed.")
@@ -423,6 +436,10 @@ final class AppViewModel: ObservableObject {
         } catch {
             publishError("Agent turn failed (AGENT-TURN)")
         }
+    }
+
+    private func requireActiveBuildForAgentMutation() -> Bool {
+        revalidateBuildActivation()
     }
 
     private func apply(runtimeSnapshot snapshot: AgentRuntimeSnapshot) {
@@ -479,6 +496,7 @@ final class AppViewModel: ObservableObject {
     }
 
     func handleScenePhase(_ phase: ScenePhase) {
+        guard revalidateBuildActivation() else { return }
         switch phase {
         case .inactive:
             createCheckpoint(reason: "sceneInactive")
@@ -489,6 +507,36 @@ final class AppViewModel: ObservableObject {
         @unknown default:
             createCheckpoint(reason: "sceneUnknown")
         }
+    }
+
+    @discardableResult
+    private func revalidateBuildActivation() -> Bool {
+        let refreshed = BuildIdentity(
+            infoDictionary: bundleIdentityLoader.loadInfoDictionary(),
+            compiled: compiledBuildStamp
+        )
+        buildIdentity = refreshed
+        executionAuthorizer.update(allowed: refreshed.isAgentExecutionAllowed)
+        guard refreshed.isAgentExecutionAllowed else {
+            streamGeneration = nil
+            streamTask?.cancel()
+            streamTask = nil
+            isStreaming = false
+            isAgentWorking = false
+            buildActivationMessage = refreshed.diagnosticText
+            businessStatus = "Update activation required; Agent mutations are paused"
+            publishError("Running executable identity does not match the installed bundle (BUILD-ACTIVATION)")
+            return false
+        }
+
+        let token = compiledBuildStamp.activationToken
+        if buildActivationStore.loadActivatedToken() != token {
+            buildActivationStore.saveActivatedToken(token)
+            buildActivationMessage = "New executable activated: Build \(compiledBuildStamp.build), commit \(compiledBuildStamp.commit)."
+        } else {
+            buildActivationMessage = "Executable identity verified."
+        }
+        return true
     }
 
     private func restoreRuntimeProjection() {
@@ -572,6 +620,52 @@ final class AppViewModel: ObservableObject {
             hasStoredKey = false
             keychainProbeDigest = nil
             publishError("Keychain unavailable (KEY-READ)")
+        }
+    }
+
+
+    func prepareIsolationCanary() {
+        do {
+            isolationCanaryDigest = try isolationCanaryRepository.prepare()
+            isolationCanaryPresent = true
+            publishTransientNotice(kind: .storage, message: "Isolation canary prepared; install and run the paired Probe IPA")
+        } catch {
+            publishError("Isolation canary preparation failed (KEY-ISOLATION-PREPARE)")
+        }
+    }
+
+    func verifyIsolationCanary() {
+        refreshIsolationCanary(publishSuccess: true)
+    }
+
+    func deleteIsolationCanary() {
+        do {
+            try isolationCanaryRepository.delete()
+            isolationCanaryDigest = nil
+            isolationCanaryPresent = false
+            publishTransientNotice(kind: .storage, message: "Isolation canary deletion verified")
+        } catch {
+            publishError("Isolation canary deletion failed (KEY-ISOLATION-DELETE)")
+        }
+    }
+
+    private func refreshIsolationCanary(publishSuccess: Bool) {
+        do {
+            let digest = try isolationCanaryRepository.currentDigest()
+            isolationCanaryDigest = digest
+            isolationCanaryPresent = digest != nil
+            if publishSuccess {
+                publishTransientNotice(
+                    kind: .storage,
+                    message: digest == nil ? "Isolation canary is absent" : "Isolation canary remains unchanged"
+                )
+            }
+        } catch {
+            isolationCanaryDigest = nil
+            isolationCanaryPresent = false
+            if publishSuccess {
+                publishError("Isolation canary verification failed (KEY-ISOLATION-VERIFY)")
+            }
         }
     }
 

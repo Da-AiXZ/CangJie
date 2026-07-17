@@ -25,6 +25,7 @@ targets:
     platform: iOS
     sources:
       - path: App/CangJieApp
+      - path: App/Shared
     info:
       path: App/Config/Info.plist
     dependencies:
@@ -41,8 +42,10 @@ targets:
         CODE_SIGN_ENTITLEMENTS: App/Config/CangJie.entitlements
         CODE_SIGN_INJECT_BASE_ENTITLEMENTS: NO
         CURRENT_PROJECT_VERSION: 1
-        MARKETING_VERSION: 0.0.1
+        MARKETING_VERSION: 1.0
         CANGJIE_GIT_COMMIT: local
+        CANGJIE_EXECUTABLE_FINGERPRINT: local
+        CANGJIE_CANDIDATE_SET_ID: local
   CangJieAppTests:
     type: bundle.unit-test
     platform: iOS
@@ -65,6 +68,51 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.juyang.CangJie.uitests
         GENERATE_INFOPLIST_FILE: YES
+  CangJieKeychainIsolationProbe:
+    type: application
+    platform: iOS
+    sources:
+      - path: App/CangJieIsolationProbe
+      - path: App/Shared
+    info:
+      path: App/Config/IsolationProbeInfo.plist
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.juyang.CangJie.KeychainIsolationProbe
+        PRODUCT_NAME: CangJieKeychainIsolationProbe
+        TARGETED_DEVICE_FAMILY: 2
+        SUPPORTS_MACCATALYST: NO
+        GENERATE_INFOPLIST_FILE: NO
+        CODE_SIGN_STYLE: Manual
+        CODE_SIGN_ENTITLEMENTS: App/Config/CangJieIsolationProbe.entitlements
+        CODE_SIGN_INJECT_BASE_ENTITLEMENTS: NO
+        CURRENT_PROJECT_VERSION: 1
+        MARKETING_VERSION: 1.0
+        CANGJIE_GIT_COMMIT: local
+        CANGJIE_EXECUTABLE_FINGERPRINT: local
+        CANGJIE_CANDIDATE_SET_ID: local
+  CangJieIsolationProbeTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - path: App/CangJieIsolationProbeTests
+    dependencies:
+      - target: CangJieKeychainIsolationProbe
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.juyang.CangJie.KeychainIsolationProbe.tests
+        GENERATE_INFOPLIST_FILE: YES
+  CangJieIsolationProbeUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources:
+      - path: App/CangJieIsolationProbeUITests
+    dependencies:
+      - target: CangJieKeychainIsolationProbe
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.juyang.CangJie.KeychainIsolationProbe.uitests
+        GENERATE_INFOPLIST_FILE: YES
 schemes:
   CangJie:
     build:
@@ -78,6 +126,23 @@ schemes:
         - name: CangJieAppTests
           parallelizable: false
         - name: CangJieUITests
+          parallelizable: false
+    run:
+      config: Debug
+    archive:
+      config: Release
+  CangJieKeychainIsolationProbe:
+    build:
+      targets:
+        CangJieKeychainIsolationProbe: all
+        CangJieIsolationProbeTests: [test]
+        CangJieIsolationProbeUITests: [test]
+    test:
+      gatherCoverageData: true
+      targets:
+        - name: CangJieIsolationProbeTests
+          parallelizable: false
+        - name: CangJieIsolationProbeUITests
           parallelizable: false
     run:
       config: Debug

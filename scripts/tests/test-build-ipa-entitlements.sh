@@ -55,6 +55,10 @@ fixtures = {
         "application-identifier": "com.juyang.CangJie",
         "keychain-access-groups": ["com.juyang.CangJie", "com.juyang.Other"],
     },
+    "probe.xml": {
+        "application-identifier": "com.juyang.CangJie.KeychainIsolationProbe",
+        "keychain-access-groups": ["com.juyang.CangJie.KeychainIsolationProbe"],
+    },
 }
 for name, value in fixtures.items():
     fmt = plistlib.FMT_BINARY if name.endswith("binary") else plistlib.FMT_XML
@@ -109,6 +113,9 @@ assert_failure wrong-type 'Entitlement contract mismatch' bash "${BUILD_SCRIPT}"
 assert_failure extra-group 'Entitlement contract mismatch' bash "${BUILD_SCRIPT}" --verify-entitlements "${FIXTURES}/extra-group.xml"
 assert_failure missing-file 'Entitlements file is missing or unsafe' bash "${BUILD_SCRIPT}" --verify-entitlements "${FIXTURES}/missing.xml.nope"
 assert_failure verify-entitlements-arity 'Usage:' bash "${BUILD_SCRIPT}" --verify-entitlements
+assert_success probe-valid bash "${BUILD_SCRIPT}" --verify-entitlements-for-bundle "${FIXTURES}/probe.xml" "com.juyang.CangJie.KeychainIsolationProbe"
+assert_failure probe-rejects-main-group 'Entitlement contract mismatch' bash "${BUILD_SCRIPT}" --verify-entitlements-for-bundle "${FIXTURES}/valid.xml" "com.juyang.CangJie.KeychainIsolationProbe"
+assert_failure main-rejects-probe-group 'Entitlement contract mismatch' bash "${BUILD_SCRIPT}" --verify-entitlements-for-bundle "${FIXTURES}/probe.xml" "com.juyang.CangJie"
 
 if ln -s "${FIXTURES}/valid.xml" "${FIXTURES}/symlink.xml" 2>/dev/null && [[ -L "${FIXTURES}/symlink.xml" ]]; then
   assert_failure symlink-entitlements 'Entitlements file is missing or unsafe' bash "${BUILD_SCRIPT}" --verify-entitlements "${FIXTURES}/symlink.xml"

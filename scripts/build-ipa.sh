@@ -77,11 +77,13 @@ if state.get("revision") != "2cf6c756e1e5ef6901ebae16576a7e4e4b834622" or state.
     raise SystemExit(f"Unexpected SwiftPM state: {state!r}")
 PY
 }
-verify_entitlements() {
+verify_entitlements_for_bundle() {
   require_tool python3
   local path="$1"
+  local bundle_identifier="$2"
+  [[ "${bundle_identifier}" =~ ^[A-Za-z0-9.-]+$ ]] || fail "Unsafe entitlement bundle identifier: ${bundle_identifier}"
   [[ -f "${path}" && ! -L "${path}" ]] || fail "Entitlements file is missing or unsafe: ${path}"
-  python3 - "${path}" "${EXPECTED_BUNDLE_ID}" <<'PY'
+  python3 - "${path}" "${bundle_identifier}" <<'PY'
 import plistlib
 import sys
 
@@ -99,6 +101,10 @@ expected = {
 if entitlements != expected:
     raise SystemExit(f"Entitlement contract mismatch: {entitlements!r}")
 PY
+}
+
+verify_entitlements() {
+  verify_entitlements_for_bundle "$1" "${EXPECTED_BUNDLE_ID}"
 }
 
 verify_entitlements_contract_unchanged() {
@@ -128,6 +134,7 @@ extract_and_verify_signed_entitlements() {
   local app_path="$1"
   local output_path="$2"
   local diagnostics_path="$3"
+  local bundle_identifier="${4:-${EXPECTED_BUNDLE_ID}}"
   [[ -d "${app_path}" && ! -L "${app_path}" ]] || fail "Signed app bundle is missing or unsafe: ${app_path}"
   [[ "${output_path}" != "${diagnostics_path}" ]] || fail "Entitlement output and diagnostics paths must differ"
   rm -f "${output_path}" "${diagnostics_path}"
@@ -141,7 +148,7 @@ extract_and_verify_signed_entitlements() {
     rm -f "${output_path}" "${diagnostics_path}"
     fail "codesign returned no signed entitlements"
   fi
-  if ! verify_entitlements "${output_path}"; then
+  if ! verify_entitlements_for_bundle "${output_path}" "${bundle_identifier}"; then
     rm -f "${diagnostics_path}"
     return 1
   fi
@@ -167,6 +174,7 @@ extract_and_verify_codesign_executable_entitlements() {
   local executable_path="$1"
   local output_path="$2"
   local diagnostics_path="$3"
+  local bundle_identifier="${4:-${EXPECTED_BUNDLE_ID}}"
   [[ -f "${executable_path}" && ! -L "${executable_path}" ]] || fail "Signed executable is missing or unsafe: ${executable_path}"
   [[ "${output_path}" != "${diagnostics_path}" ]] || fail "Entitlement output and diagnostics paths must differ"
   rm -f "${output_path}" "${diagnostics_path}"
@@ -180,7 +188,7 @@ extract_and_verify_codesign_executable_entitlements() {
     rm -f "${output_path}" "${diagnostics_path}"
     fail "codesign returned no executable entitlements"
   fi
-  if ! verify_entitlements "${output_path}"; then
+  if ! verify_entitlements_for_bundle "${output_path}" "${bundle_identifier}"; then
     rm -f "${diagnostics_path}"
     return 1
   fi
@@ -192,6 +200,7 @@ extract_and_verify_ldid_entitlements() {
   local executable_path="$2"
   local output_path="$3"
   local diagnostics_path="$4"
+  local bundle_identifier="${5:-${EXPECTED_BUNDLE_ID}}"
   [[ -x "${ldid_path}" && -f "${ldid_path}" && ! -L "${ldid_path}" ]] || fail "ldid executable is missing or unsafe: ${ldid_path}"
   [[ -f "${executable_path}" && ! -L "${executable_path}" ]] || fail "Signed executable is missing or unsafe: ${executable_path}"
   [[ "${output_path}" != "${diagnostics_path}" ]] || fail "Entitlement output and diagnostics paths must differ"
@@ -206,7 +215,7 @@ extract_and_verify_ldid_entitlements() {
     rm -f "${output_path}" "${diagnostics_path}"
     fail "ldid returned no signed entitlements"
   fi
-  if ! verify_entitlements "${output_path}"; then
+  if ! verify_entitlements_for_bundle "${output_path}" "${bundle_identifier}"; then
     rm -f "${diagnostics_path}"
     return 1
   fi
@@ -236,6 +245,7 @@ sign_executable_with_ldid() {
   local entitlements_path="$2"
   local executable_path="$3"
   local diagnostics_root="$4"
+  local bundle_identifier="${5:-${EXPECTED_BUNDLE_ID}}"
   [[ -x "${ldid_path}" && -f "${ldid_path}" && ! -L "${ldid_path}" ]] || fail "ldid executable is missing or unsafe: ${ldid_path}"
   [[ -f "${entitlements_path}" && ! -L "${entitlements_path}" ]] || fail "Entitlements file is missing or unsafe: ${entitlements_path}"
   [[ -f "${executable_path}" && ! -L "${executable_path}" ]] || fail "Main executable is missing or unsafe: ${executable_path}"
@@ -249,17 +259,17 @@ sign_executable_with_ldid() {
   local requirements_path="${diagnostics_root}/designated-requirement.bin"
   local requirements_diagnostics="${diagnostics_root}/csreq.stderr"
   rm -f "${signing_diagnostics}" "${extracted_entitlements}" "${extraction_diagnostics}" "${codesign_diagnostics}" "${codesign_entitlements}" "${codesign_entitlements_diagnostics}" "${requirements_path}" "${requirements_diagnostics}"
-  compile_designated_requirement "${EXPECTED_BUNDLE_ID}" "${requirements_path}" "${requirements_diagnostics}"
+  compile_designated_requirement "${bundle_identifier}" "${requirements_path}" "${requirements_diagnostics}"
 
-  if ! "${ldid_path}" -Cadhoc "-I${EXPECTED_BUNDLE_ID}" "-Q${requirements_path}" "-S${entitlements_path}" "${executable_path}" >/dev/null 2>"${signing_diagnostics}"; then
+  if ! "${ldid_path}" -Cadhoc "-I${bundle_identifier}" "-Q${requirements_path}" "-S${entitlements_path}" "${executable_path}" >/dev/null 2>"${signing_diagnostics}"; then
     cat "${signing_diagnostics}" >&2
     rm -f "${signing_diagnostics}"
     fail "ldid failed to sign the main executable"
   fi
   rm -f "${signing_diagnostics}"
   verify_executable_signature "${executable_path}" "${codesign_diagnostics}"
-  extract_and_verify_ldid_entitlements "${ldid_path}" "${executable_path}" "${extracted_entitlements}" "${extraction_diagnostics}"
-  extract_and_verify_codesign_executable_entitlements "${executable_path}" "${codesign_entitlements}" "${codesign_entitlements_diagnostics}"
+  extract_and_verify_ldid_entitlements "${ldid_path}" "${executable_path}" "${extracted_entitlements}" "${extraction_diagnostics}" "${bundle_identifier}"
+  extract_and_verify_codesign_executable_entitlements "${executable_path}" "${codesign_entitlements}" "${codesign_entitlements_diagnostics}" "${bundle_identifier}"
 }
 
 
@@ -275,6 +285,7 @@ sign_app_with_ldid() {
   local app_path="$3"
   local executable_path="$4"
   local diagnostics_root="$5"
+  local bundle_identifier="${6:-${EXPECTED_BUNDLE_ID}}"
   [[ -x "${ldid_path}" && -f "${ldid_path}" && ! -L "${ldid_path}" ]] || fail "ldid executable is missing or unsafe: ${ldid_path}"
   [[ -f "${entitlements_path}" && ! -L "${entitlements_path}" ]] || fail "Entitlements file is missing or unsafe: ${entitlements_path}"
   [[ -d "${app_path}" && ! -L "${app_path}" ]] || fail "App bundle is missing or unsafe: ${app_path}"
@@ -296,7 +307,7 @@ sign_app_with_ldid() {
   local pre_sign_executable="${diagnostics_root}/pre-sign-executable"
   [[ -f "${info_path}" && ! -L "${info_path}" ]] || fail "App Info.plist is missing or unsafe: ${info_path}"
   rm -f "${shallow_signing_diagnostics}" "${executable_signing_diagnostics}" "${app_codesign_diagnostics}" "${executable_codesign_diagnostics}" "${extracted_entitlements}" "${extraction_diagnostics}" "${codesign_entitlements}" "${codesign_entitlements_diagnostics}" "${requirements_path}" "${requirements_diagnostics}"
-  compile_designated_requirement "${EXPECTED_BUNDLE_ID}" "${requirements_path}" "${requirements_diagnostics}"
+  compile_designated_requirement "${bundle_identifier}" "${requirements_path}" "${requirements_diagnostics}"
 
   if [[ "${LDID_DIAGNOSTICS:-0}" == "1" ]]; then
     cp -p "${executable_path}" "${pre_sign_executable}"
@@ -332,7 +343,7 @@ sign_app_with_ldid() {
   # when it is reached through bundle signing. Use that mode only to produce
   # the resource seal, then sign the executable directly with CS_ADHOC and
   # explicitly bind Info.plist and CodeResources as special slots.
-  if ! "${ldid_path}" -w "-I${EXPECTED_BUNDLE_ID}" "-Q${requirements_path}" "-S${entitlements_path}" "${app_path}" >/dev/null 2>"${shallow_signing_diagnostics}"; then
+  if ! "${ldid_path}" -w "-I${bundle_identifier}" "-Q${requirements_path}" "-S${entitlements_path}" "${app_path}" >/dev/null 2>"${shallow_signing_diagnostics}"; then
     cat "${shallow_signing_diagnostics}" >&2
     rm -f "${shallow_signing_diagnostics}"
     fail "ldid failed to shallow-sign the app bundle"
@@ -340,7 +351,7 @@ sign_app_with_ldid() {
   rm -f "${shallow_signing_diagnostics}"
   verify_code_resources "${app_path}"
 
-  if ! "${ldid_path}" -Cadhoc "-I${EXPECTED_BUNDLE_ID}" "-Q${requirements_path}" "-E1:${info_path}" "-E3:${resources_path}" "-S${entitlements_path}" "${executable_path}" >/dev/null 2>"${executable_signing_diagnostics}"; then
+  if ! "${ldid_path}" -Cadhoc "-I${bundle_identifier}" "-Q${requirements_path}" "-E1:${info_path}" "-E3:${resources_path}" "-S${entitlements_path}" "${executable_path}" >/dev/null 2>"${executable_signing_diagnostics}"; then
     cat "${executable_signing_diagnostics}" >&2
     rm -f "${executable_signing_diagnostics}"
     fail "ldid failed to ad-hoc sign the app executable"
@@ -348,7 +359,7 @@ sign_app_with_ldid() {
   rm -f "${executable_signing_diagnostics}"
   verify_code_signature "${app_path}" "${app_codesign_diagnostics}"
   verify_executable_signature "${executable_path}" "${executable_codesign_diagnostics}"
-  if ! extract_and_verify_ldid_entitlements "${ldid_path}" "${executable_path}" "${extracted_entitlements}" "${extraction_diagnostics}"; then
+  if ! extract_and_verify_ldid_entitlements "${ldid_path}" "${executable_path}" "${extracted_entitlements}" "${extraction_diagnostics}" "${bundle_identifier}"; then
     if [[ "${LDID_DIAGNOSTICS:-0}" == "1" && -f "${pre_sign_executable}" ]]; then
       printf '%s\n' 'ldid entitlement diagnostic: variant experiments' >&2
       copied_entitlements="${diagnostics_root}/variant-entitlements.plist"
@@ -361,17 +372,17 @@ sign_app_with_ldid() {
             "${ldid_path}" -Cadhoc "-S${entitlements_path}" "${variant_path}" >/dev/null 2>"${diagnostics_root}/variant-${variant}.stderr" || true
             ;;
           copied-entitlements)
-            "${ldid_path}" -Cadhoc "-I${EXPECTED_BUNDLE_ID}" "-Q${requirements_path}" "-S${copied_entitlements}" "${variant_path}" >/dev/null 2>"${diagnostics_root}/variant-${variant}.stderr" || true
+            "${ldid_path}" -Cadhoc "-I${bundle_identifier}" "-Q${requirements_path}" "-S${copied_entitlements}" "${variant_path}" >/dev/null 2>"${diagnostics_root}/variant-${variant}.stderr" || true
             ;;
           no-special-slots)
-            "${ldid_path}" -Cadhoc "-I${EXPECTED_BUNDLE_ID}" "-Q${requirements_path}" "-S${entitlements_path}" "${variant_path}" >/dev/null 2>"${diagnostics_root}/variant-${variant}.stderr" || true
+            "${ldid_path}" -Cadhoc "-I${bundle_identifier}" "-Q${requirements_path}" "-S${entitlements_path}" "${variant_path}" >/dev/null 2>"${diagnostics_root}/variant-${variant}.stderr" || true
             ;;
           merge-with-special-slots)
-            "${ldid_path}" -Cadhoc -M "-I${EXPECTED_BUNDLE_ID}" "-Q${requirements_path}" "-E1:${info_path}" "-E3:${resources_path}" "-S${entitlements_path}" "${variant_path}" >/dev/null 2>"${diagnostics_root}/variant-${variant}.stderr" || true
+            "${ldid_path}" -Cadhoc -M "-I${bundle_identifier}" "-Q${requirements_path}" "-E1:${info_path}" "-E3:${resources_path}" "-S${entitlements_path}" "${variant_path}" >/dev/null 2>"${diagnostics_root}/variant-${variant}.stderr" || true
             ;;
           remove-then-sign)
             "${ldid_path}" -r "${variant_path}" >/dev/null 2>"${diagnostics_root}/variant-${variant}.stderr" || true
-            "${ldid_path}" -Cadhoc "-I${EXPECTED_BUNDLE_ID}" "-Q${requirements_path}" "-E1:${info_path}" "-E3:${resources_path}" "-S${entitlements_path}" "${variant_path}" >>"${diagnostics_root}/variant-${variant}.stdout" 2>>"${diagnostics_root}/variant-${variant}.stderr" || true
+            "${ldid_path}" -Cadhoc "-I${bundle_identifier}" "-Q${requirements_path}" "-E1:${info_path}" "-E3:${resources_path}" "-S${entitlements_path}" "${variant_path}" >>"${diagnostics_root}/variant-${variant}.stdout" 2>>"${diagnostics_root}/variant-${variant}.stderr" || true
             ;;
         esac
         printf 'variant=%s ldid-entitlements\n' "${variant}" >&2
@@ -389,7 +400,7 @@ sign_app_with_ldid() {
     codesign -dvv "${executable_path}" >&2 || true
     fail "ldid entitlement verification failed for the app executable"
   fi
-  if ! extract_and_verify_codesign_executable_entitlements "${executable_path}" "${codesign_entitlements}" "${codesign_entitlements_diagnostics}"; then
+  if ! extract_and_verify_codesign_executable_entitlements "${executable_path}" "${codesign_entitlements}" "${codesign_entitlements_diagnostics}" "${bundle_identifier}"; then
     printf '%s\n' 'codesign entitlement diagnostic: raw extraction' >&2
     cat "${codesign_entitlements}" >&2 || true
     printf '%s\n' 'codesign entitlement diagnostic: ldid extraction' >&2
@@ -405,6 +416,7 @@ verify_final_executable() {
   local executable_path="$2"
   local expected_sha256="$3"
   local diagnostics_root="$4"
+  local bundle_identifier="${5:-${EXPECTED_BUNDLE_ID}}"
   [[ "${expected_sha256}" =~ ^[0-9a-f]{64}$ ]] || fail "Invalid expected executable SHA-256"
   [[ -f "${executable_path}" && ! -L "${executable_path}" && -x "${executable_path}" ]] || fail "Final executable is missing, unsafe, or not executable: ${executable_path}"
   local actual_sha256
@@ -412,8 +424,8 @@ verify_final_executable() {
   [[ "${actual_sha256}" == "${expected_sha256}" ]] || fail "Final executable SHA-256 mismatch: ${actual_sha256}"
   mkdir -p "${diagnostics_root}"
   verify_executable_signature "${executable_path}" "${diagnostics_root}/codesign-verify.stderr"
-  extract_and_verify_ldid_entitlements "${ldid_path}" "${executable_path}" "${diagnostics_root}/ldid-entitlements.plist" "${diagnostics_root}/ldid-entitlements.stderr"
-  extract_and_verify_codesign_executable_entitlements "${executable_path}" "${diagnostics_root}/codesign-entitlements.plist" "${diagnostics_root}/codesign-entitlements.stderr"
+  extract_and_verify_ldid_entitlements "${ldid_path}" "${executable_path}" "${diagnostics_root}/ldid-entitlements.plist" "${diagnostics_root}/ldid-entitlements.stderr" "${bundle_identifier}"
+  extract_and_verify_codesign_executable_entitlements "${executable_path}" "${diagnostics_root}/codesign-entitlements.plist" "${diagnostics_root}/codesign-entitlements.stderr" "${bundle_identifier}"
   local codesign_details
   codesign_details="$(codesign -dvv "${executable_path}" 2>&1)" || fail "Failed to inspect final executable signature"
   grep -q '^Signature=adhoc$' <<< "${codesign_details}" || fail "The final executable is not ad-hoc signed"
@@ -537,6 +549,11 @@ case "${1:-}" in
     verify_grdb_resource_bundle "$2"
     exit 0
     ;;
+  --verify-entitlements-for-bundle)
+    [[ "$#" == "3" && -n "${2:-}" && -n "${3:-}" ]] || fail "Usage: $0 --verify-entitlements-for-bundle <entitlements.plist> <bundle-id>"
+    verify_entitlements_for_bundle "$2" "$3"
+    exit 0
+    ;;
   --verify-entitlements)
     [[ "$#" == "2" && -n "${2:-}" ]] || fail "Usage: $0 --verify-entitlements <entitlements.plist>"
     verify_entitlements "$2"
@@ -557,6 +574,14 @@ case "${1:-}" in
     sign_executable_with_ldid "$2" "$3" "$4" "${verification_root}"
     exit 0
     ;;
+  --sign-app-with-ldid-for-bundle)
+    [[ "$#" == "6" && -n "${2:-}" && -n "${3:-}" && -n "${4:-}" && -n "${5:-}" && -n "${6:-}" ]] || fail "Usage: $0 --sign-app-with-ldid-for-bundle <ldid> <entitlements.plist> <App.app> <executable> <bundle-id>"
+    verification_root="$(mktemp -d)"
+    trap 'rm -rf "${verification_root}"' EXIT
+    verify_entitlements_for_bundle "$3" "$6"
+    sign_app_with_ldid "$2" "$3" "$4" "$5" "${verification_root}" "$6"
+    exit 0
+    ;;
   --sign-app-with-ldid)
     [[ "$#" == "5" && -n "${2:-}" && -n "${3:-}" && -n "${4:-}" && -n "${5:-}" ]] || fail "Usage: $0 --sign-app-with-ldid <ldid> <entitlements.plist> <App.app> <executable>"
     verification_root="$(mktemp -d)"
@@ -573,6 +598,7 @@ case "${1:-}" in
     ;;
   "")
     [[ "$#" == "0" ]] || fail "Unexpected empty build argument"
+    fail "Legacy single-IPA build is disabled. Use scripts/build-candidate-set.sh"
     ;;
   *)
     fail "Unknown build-ipa option: $1"

@@ -57,7 +57,7 @@ struct OpeningPlanApprovalDetailView: View {
                         }
                     }
                     .buttonStyle(.borderedProminent)
-                    .disabled(model.isAgentWorking || approval.status != .pending)
+                    .disabled(model.isAgentWorking || !model.isAgentExecutionAllowed || approval.status != .pending)
                     .accessibilityIdentifier("opening-plan-approve-button")
                 }
                 .frame(maxWidth: 760, alignment: .leading)

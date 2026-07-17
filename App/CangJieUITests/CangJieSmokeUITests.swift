@@ -8,9 +8,11 @@ final class CangJieSmokeUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["agent-control-plane-title"].waitForExistence(timeout: 10))
         XCTAssertTrue(app.textViews["agent-composer"].exists)
         XCTAssertTrue(app.buttons["novel-projects-link"].exists || app.staticTexts["Novel Projects"].exists)
-        XCTAssertTrue(
-            app.descendants(matching: .any)["build-identity"].waitForExistence(timeout: 5)
-        )
+        let identity = app.descendants(matching: .any)["build-identity"]
+        XCTAssertTrue(identity.waitForExistence(timeout: 5))
+        XCTAssertTrue(identity.label.contains("Executable Version"))
+        XCTAssertTrue(identity.label.contains("Active"))
+        XCTAssertTrue(app.staticTexts["build-activation-status"].exists)
     }
 
     func testDeviceDiagnosticsVerifiesKeychainCreateReadUpdateAndDelete() {

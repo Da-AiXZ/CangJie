@@ -82,6 +82,10 @@ struct ContentView: View {
                         .foregroundStyle(.secondary)
                         .textSelection(.enabled)
                         .accessibilityIdentifier("build-identity")
+                    Text(model.buildActivationMessage)
+                        .font(.caption)
+                        .foregroundStyle(model.isAgentExecutionAllowed ? Color.green : Color.red)
+                        .accessibilityIdentifier("build-activation-status")
                 }
             }
             .navigationTitle("CangJie")
@@ -150,6 +154,25 @@ struct ContentView: View {
             }
             .padding()
             Divider()
+            if !model.isAgentExecutionAllowed {
+                VStack(alignment: .leading, spacing: 6) {
+                    Label("New version is not fully active", systemImage: "exclamationmark.shield.fill")
+                        .font(.headline)
+                    Text(model.buildIdentity.displayText)
+                        .font(.caption.monospaced())
+                    Text(model.buildIdentity.bundleDisplayText)
+                        .font(.caption.monospaced())
+                    Text("Force-quit CangJie and reopen it. If the two identities still differ, respring userspace. Agent and canonical mutations are blocked; your unsent draft is preserved.")
+                        .font(.footnote)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(12)
+                .foregroundStyle(.red)
+                .background(Color.red.opacity(0.10), in: RoundedRectangle(cornerRadius: 12))
+                .padding(.horizontal)
+                .padding(.top, 8)
+                .accessibilityIdentifier("build-activation-blocker")
+            }
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 14) {
                     if model.conversationMessages.isEmpty {
@@ -197,7 +220,7 @@ struct ContentView: View {
                 } label: {
                     Image(systemName: "arrow.up.circle.fill").font(.system(size: 32))
                 }
-                .disabled(model.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                .disabled(model.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !model.isAgentExecutionAllowed)
                 .accessibilityIdentifier("agent-send-button")
             }
             .padding()
@@ -258,7 +281,7 @@ struct ContentView: View {
             )
         }
         .buttonStyle(.borderedProminent)
-        .disabled(model.isAgentWorking)
+        .disabled(model.isAgentWorking || !model.isAgentExecutionAllowed)
         .accessibilityIdentifier("opening-plan-review-button")
     }
 

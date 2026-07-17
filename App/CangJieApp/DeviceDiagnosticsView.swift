@@ -9,16 +9,69 @@ struct DeviceDiagnosticsView: View {
                 Text("Device Diagnostics")
                     .font(.headline)
                     .accessibilityIdentifier("device-diagnostics-heading")
-                Text("This secondary surface verifies the exact installed candidate and local security primitives. It does not replace the Agent control plane.")
+                Text("This secondary surface verifies the exact running candidate and local security primitives. It does not replace the Agent control plane.")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
             }
 
-            Section("Candidate identity") {
-                Text(model.buildIdentity.displayText)
-                    .font(.body.monospaced())
-                    .textSelection(.enabled)
-                    .accessibilityIdentifier("diagnostics-build-identity")
+            Section("Runtime activation") {
+                diagnosticRow("Running executable", model.buildIdentity.displayText, "diagnostics-build-identity")
+                diagnosticRow("Installed bundle", model.buildIdentity.bundleDisplayText, "diagnostics-bundle-identity")
+                diagnosticRow("Candidate Set", model.buildIdentity.candidateSetDisplayText, "diagnostics-candidate-set")
+                Label(
+                    model.isAgentExecutionAllowed ? "Runtime and installed bundle match" : "Agent execution blocked",
+                    systemImage: model.isAgentExecutionAllowed ? "checkmark.shield.fill" : "xmark.shield.fill"
+                )
+                .foregroundStyle(model.isAgentExecutionAllowed ? Color.green : Color.red)
+                .accessibilityIdentifier("diagnostics-build-activation-status")
+                Text(model.buildActivationMessage)
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .accessibilityIdentifier("diagnostics-build-activation-message")
+            }
+
+            Section("Cross-App Keychain Isolation") {
+                HStack {
+                    Text("Canary status")
+                    Spacer()
+                    Text(model.isolationCanaryPresent ? "Prepared" : "Absent")
+                        .foregroundStyle(model.isolationCanaryPresent ? Color.green : Color.secondary)
+                        .accessibilityIdentifier("isolation-canary-status")
+                }
+                if let digest = model.isolationCanaryDigest {
+                    HStack {
+                        Text("Canary digest")
+                        Spacer()
+                        Text(digest)
+                            .font(.body.monospaced())
+                            .textSelection(.enabled)
+                            .accessibilityIdentifier("isolation-canary-digest")
+                    }
+                }
+                Text("Prepare a random ThisDeviceOnly canary, run the paired CangJie Isolation Probe app, then return here and verify the digest is unchanged. The plaintext canary is never displayed.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+
+                Button(model.isolationCanaryPresent ? "Canary already prepared" : "Prepare isolation canary") {
+                    model.prepareIsolationCanary()
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(model.isolationCanaryPresent)
+                .accessibilityIdentifier("isolation-canary-prepare")
+
+                Button("Verify canary is unchanged") {
+                    model.verifyIsolationCanary()
+                }
+                .buttonStyle(.bordered)
+                .disabled(!model.isolationCanaryPresent)
+                .accessibilityIdentifier("isolation-canary-verify")
+
+                Button("Delete isolation canary", role: .destructive) {
+                    model.deleteIsolationCanary()
+                }
+                .buttonStyle(.bordered)
+                .disabled(!model.isolationCanaryPresent)
+                .accessibilityIdentifier("isolation-canary-delete")
             }
 
             Section("ThisDeviceOnly Keychain probe") {
@@ -74,9 +127,7 @@ struct DeviceDiagnosticsView: View {
                     } label: {
                         Label(
                             model.hasStoredKey ? "Update and verify" : "Create and verify",
-                            systemImage: model.hasStoredKey
-                                ? "arrow.triangle.2.circlepath"
-                                : "plus.circle"
+                            systemImage: model.hasStoredKey ? "arrow.triangle.2.circlepath" : "plus.circle"
                         )
                         .frame(maxWidth: .infinity, alignment: .center)
                     }
@@ -91,18 +142,14 @@ struct DeviceDiagnosticsView: View {
                         .font(.subheadline.weight(.semibold))
                         .accessibilityIdentifier("keychain-probe-secondary-heading")
 
-                    Button("Read and verify") {
-                        model.readProbeKey()
-                    }
-                    .buttonStyle(.bordered)
-                    .accessibilityIdentifier("keychain-probe-read")
+                    Button("Read and verify") { model.readProbeKey() }
+                        .buttonStyle(.bordered)
+                        .accessibilityIdentifier("keychain-probe-read")
 
-                    Button("Delete and verify", role: .destructive) {
-                        model.deleteProbeKey()
-                    }
-                    .buttonStyle(.bordered)
-                    .disabled(!model.hasStoredKey)
-                    .accessibilityIdentifier("keychain-probe-delete")
+                    Button("Delete and verify", role: .destructive) { model.deleteProbeKey() }
+                        .buttonStyle(.bordered)
+                        .disabled(!model.hasStoredKey)
+                        .accessibilityIdentifier("keychain-probe-delete")
                 }
 
                 Text("Use a disposable value, never a real API key. The screen exposes only a 12-character SHA-256 digest; plaintext is never displayed or logged.")
@@ -114,9 +161,19 @@ struct DeviceDiagnosticsView: View {
         .scrollDismissesKeyboard(.interactively)
     }
 
+    private func diagnosticRow(_ title: String, _ value: String, _ identifier: String) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(title).font(.subheadline.weight(.semibold))
+            Text(value)
+                .font(.caption.monospaced())
+                .textSelection(.enabled)
+                .accessibilityIdentifier(identifier)
+        }
+    }
+
     private var keychainGuidance: String {
         if model.hasStoredKey {
-            return "A test value already exists. Enter a different value in the same secure field below, then tap Update and verify."
+            return "A test value already exists. Enter a different value in the secure field below, then tap Update and verify."
         }
         return "No test value exists. Enter a disposable value in the secure field below, then tap Create and verify."
     }

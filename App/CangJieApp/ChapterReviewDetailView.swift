@@ -100,7 +100,7 @@ struct ChapterReviewDetailView: View {
                                 )
                             }
                             .buttonStyle(.bordered)
-                            .disabled(model.isAgentWorking)
+                            .disabled(model.isAgentWorking || !model.isAgentExecutionAllowed)
                             .accessibilityIdentifier("chapter-paragraph-lock-\(index)")
                         } else if isLocked {
                             Label("Locked", systemImage: "lock.fill")
@@ -150,7 +150,7 @@ struct ChapterReviewDetailView: View {
                     }
                 }
                 .buttonStyle(.borderedProminent)
-                .disabled(model.isAgentWorking)
+                .disabled(model.isAgentWorking || !model.isAgentExecutionAllowed)
                 .accessibilityIdentifier("chapter-rewrite-confirm-button")
             }
         }
@@ -197,7 +197,7 @@ struct ChapterReviewDetailView: View {
                 }
             }
             .buttonStyle(.borderedProminent)
-            .disabled(model.isAgentWorking)
+            .disabled(model.isAgentWorking || !model.isAgentExecutionAllowed)
             .accessibilityIdentifier("chapter-accept-freeze-button")
 
             if chapter.stage == .reviewingV1 {
@@ -220,7 +220,7 @@ struct ChapterReviewDetailView: View {
                 }
                 .buttonStyle(.bordered)
                 .tint(.red)
-                .disabled(rejectionReason.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || model.isAgentWorking)
+                .disabled(rejectionReason.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || model.isAgentWorking || !model.isAgentExecutionAllowed)
                 .accessibilityIdentifier("chapter-reject-diagnose-button")
             } else {
                 Text("Revision 2 is the final calibration candidate. Accept and freeze it, or close this review without changing the persisted chapter.")

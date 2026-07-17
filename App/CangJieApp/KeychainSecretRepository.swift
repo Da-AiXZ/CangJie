@@ -68,7 +68,8 @@ struct KeychainSecretRepository: SecretRepository {
         [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
-            kSecAttrAccount as String: account
+            kSecAttrAccount as String: account,
+            kSecAttrAccessGroup as String: KeychainIsolationContract.mainAccessGroup
         ]
     }
 }

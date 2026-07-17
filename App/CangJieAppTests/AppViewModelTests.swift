@@ -2,6 +2,191 @@ import XCTest
 @testable import CangJie
 
 final class AppViewModelTests: XCTestCase {
+    private final class InMemoryBuildActivationStore: BuildActivationStore {
+        var activatedToken: String?
+
+        func loadActivatedToken() -> String? { activatedToken }
+        func saveActivatedToken(_ token: String) { activatedToken = token }
+    }
+
+    private final class MutableBundleBuildIdentityLoader: BundleBuildIdentityLoading {
+        var infoDictionary: [String: Any]?
+
+        init(infoDictionary: [String: Any]?) {
+            self.infoDictionary = infoDictionary
+        }
+
+        func loadInfoDictionary() -> [String: Any]? { infoDictionary }
+    }
+
+    private final class InMemoryIsolationCanaryRepository: IsolationCanaryRepository {
+        var digest: String?
+        var prepareCalls = 0
+        var deleteCalls = 0
+
+        func prepare() throws -> String {
+            prepareCalls += 1
+            if let digest { return digest }
+            let created = "012345abcdef"
+            digest = created
+            return created
+        }
+
+        func currentDigest() throws -> String? { digest }
+
+        func delete() throws {
+            deleteCalls += 1
+            digest = nil
+        }
+    }
+
+    @MainActor
+    func testCompiledExecutableIdentityIsThePrimaryVisibleIdentity() throws {
+        try withDatabase { database in
+            let stamp = BuildIdentityStamp(version: "1.0", build: "28", commit: "0123456789ab", fingerprint: "abc123def4567890")
+            let store = InMemoryBuildActivationStore()
+            let viewModel = AppViewModel(
+                database: database,
+                keychain: StubSecretRepository(),
+                bundleInfo: stamp.infoDictionary,
+                compiledBuildStamp: stamp,
+                buildActivationStore: store
+            )
+
+            XCTAssertEqual(viewModel.buildIdentity.activationStatus, .active)
+            XCTAssertTrue(viewModel.isAgentExecutionAllowed)
+            XCTAssertEqual(store.activatedToken, stamp.activationToken)
+            XCTAssertEqual(
+                viewModel.buildIdentity.displayText,
+                "Executable Version 1.0 | Build 28 | Commit 0123456789ab | Active"
+            )
+        }
+    }
+
+    @MainActor
+    func testBundleAndExecutableIdentityMismatchFailsClosedWithoutAgentMutation() throws {
+        try withDatabase { database in
+            let compiled = BuildIdentityStamp(version: "1.0", build: "28", commit: "0123456789ab", fingerprint: "abc123def4567890")
+            let bundle = BuildIdentityStamp(version: "1.0", build: "29", commit: "fedcba987654", fingerprint: "fed456abc1237890")
+            let store = InMemoryBuildActivationStore()
+            let viewModel = AppViewModel(
+                database: database,
+                keychain: StubSecretRepository(),
+                bundleInfo: bundle.infoDictionary,
+                compiledBuildStamp: compiled,
+                buildActivationStore: store
+            )
+
+            XCTAssertEqual(viewModel.buildIdentity.activationStatus, .mismatch)
+            XCTAssertFalse(viewModel.isAgentExecutionAllowed)
+            XCTAssertNil(store.activatedToken)
+            viewModel.draft = "create a cultivation novel"
+            viewModel.sendAgentMessage()
+
+            XCTAssertEqual(viewModel.draft, "create a cultivation novel")
+            XCTAssertTrue(viewModel.conversationMessages.isEmpty)
+            XCTAssertTrue(viewModel.errorMessage?.contains("BUILD-ACTIVATION") == true)
+            XCTAssertEqual(try database.listProjects(), [])
+        }
+    }
+
+    @MainActor
+    func testMismatchSkipsDatabaseFactoryEntirely() {
+        let compiled = BuildIdentityStamp(version: "1.0", build: "28", commit: "0123456789ab", fingerprint: "abc123def4567890")
+        let bundle = BuildIdentityStamp(version: "1.0", build: "29", commit: "fedcba987654", fingerprint: "fed456abc1237890")
+        var factoryCalls = 0
+
+        let viewModel = AppViewModel(
+            databaseFactory: {
+                factoryCalls += 1
+                throw StubDatabaseError.openFailed
+            },
+            keychain: StubSecretRepository(),
+            bundleInfo: bundle.infoDictionary,
+            compiledBuildStamp: compiled,
+            buildActivationStore: InMemoryBuildActivationStore()
+        )
+
+        XCTAssertEqual(factoryCalls, 0)
+        XCTAssertFalse(viewModel.isAgentExecutionAllowed)
+        XCTAssertNil(viewModel.errorMessage)
+    }
+
+    @MainActor
+    func testLifecycleMismatchCancelsWorkPreservesDraftAndDoesNotCheckpoint() throws {
+        try withDatabase { database in
+            let compiled = BuildIdentityStamp(version: "1.0", build: "28", commit: "0123456789ab", fingerprint: "abc123def4567890")
+            let installed = BuildIdentityStamp(version: "1.0", build: "29", commit: "fedcba987654", fingerprint: "fed456abc1237890")
+            let loader = MutableBundleBuildIdentityLoader(infoDictionary: compiled.infoDictionary)
+            let viewModel = AppViewModel(
+                database: database,
+                keychain: StubSecretRepository(),
+                compiledBuildStamp: compiled,
+                buildActivationStore: InMemoryBuildActivationStore(),
+                bundleIdentityLoader: loader
+            )
+            viewModel.draft = "unsaved user draft"
+            viewModel.isStreaming = true
+
+            loader.infoDictionary = installed.infoDictionary
+            viewModel.handleScenePhase(.inactive)
+
+            XCTAssertEqual(viewModel.buildIdentity.activationStatus, .mismatch)
+            XCTAssertFalse(viewModel.isAgentExecutionAllowed)
+            XCTAssertFalse(viewModel.isStreaming)
+            XCTAssertEqual(viewModel.draft, "unsaved user draft")
+            let storedTaskID = try XCTUnwrap(UserDefaults.standard.string(forKey: "m0TaskID"))
+            let taskID = try XCTUnwrap(UUID(uuidString: storedTaskID))
+            XCTAssertNil(try database.latestCheckpoint(taskID: taskID))
+
+            viewModel.sendAgentMessage()
+            XCTAssertTrue(try database.listProjects().isEmpty)
+            XCTAssertEqual(viewModel.draft, "unsaved user draft")
+        }
+    }
+
+    @MainActor
+    func testIsolationCanaryPrepareVerifyAndDeleteUseRepositoryWithoutPlaintext() throws {
+        try withDatabase { database in
+            let repository = InMemoryIsolationCanaryRepository()
+            let viewModel = AppViewModel(
+                database: database,
+                keychain: StubSecretRepository(),
+                isolationCanaryRepository: repository
+            )
+
+            viewModel.prepareIsolationCanary()
+            XCTAssertEqual(repository.prepareCalls, 1)
+            XCTAssertEqual(viewModel.isolationCanaryDigest, "012345abcdef")
+            XCTAssertTrue(viewModel.isolationCanaryPresent)
+
+            viewModel.verifyIsolationCanary()
+            XCTAssertEqual(viewModel.isolationCanaryDigest, "012345abcdef")
+            XCTAssertFalse(viewModel.transientNotice?.message.contains("plaintext") == true)
+
+            viewModel.deleteIsolationCanary()
+            XCTAssertEqual(repository.deleteCalls, 1)
+            XCTAssertNil(viewModel.isolationCanaryDigest)
+            XCTAssertFalse(viewModel.isolationCanaryPresent)
+        }
+    }
+
+    @MainActor
+    func testMissingExecutableIdentityFailsClosed() throws {
+        try withDatabase { database in
+            let unavailable = BuildIdentityStamp(version: "unavailable", build: "unavailable", commit: "unavailable", fingerprint: "unavailable")
+            let viewModel = AppViewModel(
+                database: database,
+                keychain: StubSecretRepository(),
+                bundleInfo: nil,
+                compiledBuildStamp: unavailable,
+                buildActivationStore: InMemoryBuildActivationStore()
+            )
+
+            XCTAssertEqual(viewModel.buildIdentity.activationStatus, .unavailable)
+            XCTAssertFalse(viewModel.isAgentExecutionAllowed)
+        }
+    }
     private enum StubDatabaseError: Error {
         case openFailed
     }
@@ -566,16 +751,20 @@ final class AppViewModelTests: XCTestCase {
     }
 
     @MainActor
-    func testBuildIdentityReadsBundleInfoWithSafeFallbacks() throws {
+    func testBuildIdentityReadsBundleAndCompiledIdentityWithSafeFallbacks() throws {
         try withDatabase { database in
+            let stamp = BuildIdentityStamp(
+                version: "1.2.3",
+                build: "456",
+                commit: "0123456789ab",
+                fingerprint: "abcdef0123456789"
+            )
             let identified = AppViewModel(
                 database: database,
                 keychain: StubSecretRepository(),
-                bundleInfo: [
-                    "CFBundleShortVersionString": "1.2.3",
-                    "CFBundleVersion": "456",
-                    "CangJieGitCommit": "0123456789abcdef"
-                ]
+                bundleInfo: stamp.infoDictionary,
+                compiledBuildStamp: stamp,
+                buildActivationStore: InMemoryBuildActivationStore()
             )
 
             XCTAssertEqual(identified.buildIdentity.version, "1.2.3")
@@ -583,18 +772,32 @@ final class AppViewModelTests: XCTestCase {
             XCTAssertEqual(identified.buildIdentity.commit, "0123456789ab")
             XCTAssertEqual(
                 identified.buildIdentity.displayText,
-                "Version 1.2.3 | Build 456 | Commit 0123456789ab"
+                "Executable Version 1.2.3 | Build 456 | Commit 0123456789ab | Active"
             )
 
             let fallback = AppViewModel(
                 database: database,
                 keychain: StubSecretRepository(),
-                bundleInfo: nil
+                bundleInfo: nil,
+                compiledBuildStamp: stamp,
+                buildActivationStore: InMemoryBuildActivationStore()
             )
-            XCTAssertEqual(
-                fallback.buildIdentity.displayText,
-                "Version unavailable | Build unavailable | Commit unavailable"
-            )
+            XCTAssertEqual(fallback.buildIdentity.activationStatus, .unavailable)
+            XCTAssertFalse(fallback.isAgentExecutionAllowed)
+        }
+    }
+
+    func testAgentRuntimeAuthorizerRejectsBeforeAnyDurableMessageOrRun() throws {
+        try withDatabase { database in
+            let authorizer = BuildActivationAgentAuthorizer(allowed: false)
+            let runtime = try AgentRuntime(database: database, authorizer: authorizer)
+
+            XCTAssertThrowsError(try runtime.handleUserMessage("create a cultivation novel")) { error in
+                XCTAssertEqual(error as? AgentExecutionAuthorizationError, .buildNotActive)
+            }
+            XCTAssertTrue(try database.listAgentMessages(conversationID: runtime.conversation.id).isEmpty)
+            XCTAssertNil(try database.latestAgentRun(conversationID: runtime.conversation.id))
+            XCTAssertTrue(try database.listProjects().isEmpty)
         }
     }
 
@@ -711,7 +914,7 @@ final class AppViewModelTests: XCTestCase {
                 viewModel.sendAgentMessage()
             }
             let displayed = try XCTUnwrap(viewModel.openingPlanApproval)
-            let runtime = try AgentRuntime(database: database)
+            let runtime = try AgentRuntime(database: database, authorizer: AllowingAgentExecutionAuthorizer())
 
             _ = try runtime.approveOpeningPlan(
                 approvalRequestID: displayed.id,
@@ -962,7 +1165,7 @@ final class AppViewModelTests: XCTestCase {
     @MainActor
     func testAgentTurnFailureAfterRunCreationPersistsFailedRunStage() throws {
         try withDatabase { database in
-            let runtime = try AgentRuntime(database: database)
+            let runtime = try AgentRuntime(database: database, authorizer: AllowingAgentExecutionAuthorizer())
             let project = try database.createProject(title: "Broken session", premise: "P")
             let now = Date(timeIntervalSince1970: 3_000)
             try database.queue.write { db in

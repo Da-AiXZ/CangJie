@@ -1,4 +1,4 @@
-name: Build TrollStore IPA
+name: Build TrollStore Candidate Set
 
 on:
   workflow_dispatch:
@@ -6,7 +6,7 @@ on:
       reason:
         description: "Build purpose or device-validation note"
         required: false
-        default: "M0 device verification"
+        default: "Keychain isolation device verification"
 
 permissions:
   contents: read
@@ -15,21 +15,26 @@ env:
   XCODE_VERSION: "16.4"
 
 jobs:
-  build-ipa:
+  build-candidate-set:
     if: github.ref == 'refs/heads/main'
     runs-on: macos-15
-    timeout-minutes: 60
+    timeout-minutes: 75
     steps:
       - name: Check out source
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           persist-credentials: false
-      - name: Verify visible build identity contract
-        run: python3 scripts/tests/test-build-identity-contract.py
+      - name: Run hermetic build-contract tests
+        run: |
+          set -euo pipefail
+          python3 scripts/tests/test-generate-build-identity.py
+          python3 scripts/tests/test-verify-build-artifacts.py
+          python3 scripts/tests/test-candidate-set-contract.py
+          python3 scripts/tests/test-build-identity-contract.py
       - name: Static validation
-        run: bash -n scripts/build-ipa.sh scripts/install-ldid.sh scripts/find-ipad-simulator.sh scripts/tests/test-install-ldid.sh scripts/tests/test-build-ipa-entitlements.sh
-      - name: Test artifact manifest contract
-        run: python3 scripts/tests/test-verify-build-artifacts.py
+        run: |
+          bash -n scripts/build-ipa.sh scripts/build-candidate-set.sh scripts/install-ldid.sh \
+            scripts/tests/test-install-ldid.sh scripts/tests/test-build-ipa-entitlements.sh
       - name: Test pinned ldid installer contract
         run: bash scripts/tests/test-install-ldid.sh
       - name: Select pinned Xcode
@@ -38,46 +43,53 @@ jobs:
         run: |
           set -euo pipefail
           ldid_path="$(bash scripts/install-ldid.sh)"
-          [[ -x "${ldid_path}" && ! -L "${ldid_path}" ]] || { echo "Unsafe ldid installation result" >&2; exit 1; }
-          # Bash variables cannot contain NUL bytes; reject the representable line-breaking controls.
-          [[ "${ldid_path}" != *$'\r'* && "${ldid_path}" != *$'\n'* ]] || { echo "Unsafe line break in ldid path" >&2; exit 1; }
-          [[ "${ldid_path}" == /* ]] || { echo "ldid path is not absolute" >&2; exit 1; }
+          [[ -x "${ldid_path}" && -f "${ldid_path}" && ! -L "${ldid_path}" ]] || { echo "Unsafe ldid installation result" >&2; exit 1; }
+          [[ "${ldid_path}" == /* && "${ldid_path}" != *$'\r'* && "${ldid_path}" != *$'\n'* ]] || { echo "Unsafe ldid path" >&2; exit 1; }
           printf 'LDID_PATH=%s\n' "${ldid_path}" >> "${GITHUB_ENV}"
       - name: Test codesign and ldid entitlement contracts
         run: bash scripts/tests/test-build-ipa-entitlements.sh
       - name: Install pinned XcodeGen
         run: bash scripts/install-xcodegen.sh
-      - name: Build, validate, ad-hoc sign and package candidate IPA
+      - name: Build, independently sign and verify paired IPA candidate set
         env:
           BUILD_REASON: ${{ inputs.reason }}
           LDID_DIAGNOSTICS: "1"
-        run: bash scripts/build-ipa.sh
-      - name: Verify candidate artifact manifest
-        run: python3 scripts/verify-build-artifacts.py .build-ipa App/Config/CangJie.entitlements
-      - name: Enforce fail-closed device acceptance gate
+        run: bash scripts/build-candidate-set.sh
+      - name: Re-verify complete candidate set
+        run: python3 scripts/verify-build-artifacts.py .build-ipa
+      - name: Enforce fail-closed real-device acceptance
         run: |
           set -euo pipefail
           python3 - <<'PY'
           import json
           from pathlib import Path
-
-          manifest = json.loads(Path(".build-ipa/build-manifest.json").read_text(encoding="utf-8"))
-          expected = "blocked-pending-trollstore-device-keychain-validation"
-          actual = manifest.get("acceptance", {}).get("status")
-          if actual != expected or manifest.get("acceptance", {}).get("failClosed") is not True:
-              raise SystemExit(f"Artifact acceptance gate is not fail-closed: {actual!r}")
+          manifest=json.loads(Path('.build-ipa/candidate-set-manifest.json').read_text(encoding='utf-8'))
+          expected='blocked-pending-trollstore-device-keychain-isolation-validation'
+          acceptance=manifest.get('acceptance',{})
+          if acceptance.get('status') != expected or acceptance.get('failClosed') is not True:
+              raise SystemExit(f"Candidate set acceptance gate is not fail-closed: {acceptance!r}")
+          if {item.get('role') for item in manifest.get('artifacts',[])} != {'main','keychainIsolationProbe'}:
+              raise SystemExit('Candidate set does not contain both required roles')
           PY
           {
-            echo "### TrollStore device acceptance required"
-            echo "This candidate is not accepted until the manifest's real-device keychain checks pass on the target device."
+            echo "### TrollStore paired-device acceptance required"
+            echo "Install both exact-SHA IPA files from the same candidate set."
+            echo "Acceptance remains blocked until the companion returns errSecMissingEntitlement for the main access group."
           } >> "$GITHUB_STEP_SUMMARY"
-      - name: Upload candidate IPA, checksum and manifest
+      - name: Upload complete paired candidate set
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: CangJie-M0-device-validation-required-${{ github.run_number }}-${{ github.sha }}
+          name: CangJie-paired-device-validation-required-${{ github.run_number }}-${{ github.run_attempt }}-${{ github.sha }}
           path: |
             .build-ipa/CangJie-M0.ipa
             .build-ipa/CangJie-M0.sha256
-            .build-ipa/build-manifest.json
+            .build-ipa/CangJie-M0.entitlements
+            .build-ipa/CangJie-M0.signed-entitlements.plist
+            .build-ipa/CangJie-Keychain-Isolation-Probe.ipa
+            .build-ipa/CangJie-Keychain-Isolation-Probe.sha256
+            .build-ipa/CangJie-Keychain-Isolation-Probe.entitlements
+            .build-ipa/CangJie-Keychain-Isolation-Probe.signed-entitlements.plist
+            .build-ipa/candidate-set-manifest.json
+            .build-ipa/DEVICE-VALIDATION.md
           if-no-files-found: error
           retention-days: 14

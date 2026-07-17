@@ -345,3 +345,27 @@ A new binary does not automatically invalidate every previously accepted behavio
 For a differential check, state both sides explicitly: what has already passed and does not need repetition, and what new observation is required. If the changed UI is state-dependent, include how to reset it to the starting state. Never interpret a terminal state preserved by overwrite installation as a failure to display an earlier pending action; durable state should not regress merely to make a test convenient.
 
 Differential evidence cannot override an artifact-bound fail-closed security contract. If a candidate manifest requires complete CRUD, reinstall persistence, or isolation on that exact SHA-256 binary, earlier-build evidence is regression context only. Either execute the complete contract with a user-operable probe, or deliberately revise the contract and rebuild; never clear the gate by documentation alone.
+
+## P-084 Installed bundle metadata does not prove which executable is running
+
+After an overwrite install, an older process can remain alive while its on-disk bundle has already been replaced. That process may read the new `Info.plist`, so a visible new build number can coexist with old SwiftUI and business code. Treat build metadata loaded only from the bundle as packaging evidence, not runtime-executable evidence. Embed an immutable compile-time executable identity, load the installed bundle identity independently, compare version/build/commit/fingerprint strictly, and fail closed when they differ or cannot be read.
+
+## P-085 Never normalize a second overwrite into the update procedure
+
+"Overwrite twice" is not a fix, acceptance criterion, or user instruction. It masks an activation race, produces ambiguous evidence, and cannot guarantee which executable is alive. The first upgrade from an unguarded Build 27 must explicitly terminate the old App before installation. From guarded Build 28 onward, identity mismatch must block governed operations and instruct the user to terminate and relaunch or respring; it must not continue Agent, approval, chapter, canon, or paid work.
+
+## P-086 Runtime activation failure must be fail-closed across governed boundaries
+
+A warning banner alone is insufficient. When executable and disk identities disagree, cancel streaming, revoke runtime authorization, refuse new Agent turns, and block approval, chapter mutation, canon writes, and paid generation before durable writes or provider calls. Preserve local draft text and expose both identities for diagnosis. Do not write a misleading checkpoint after authorization has been revoked, and do not let restore or reconciliation paths bypass the same gate.
+
+## P-087 A companion Keychain probe proves only its exact audited candidate
+
+A companion with a different Bundle ID and Keychain access group can demonstrate that its exact binary lacks the main App entitlement only when all of the following remain bound together: candidate-set ID, source commit, build, IPA SHA-256, executable SHA-256, and final entitlements. Its own-group CRUD is a required positive control. The explicit main-group request must return `errSecMissingEntitlement`; success is critical failure, while item-not-found or any unexpected status is inconclusive and therefore rejected. Never request, display, log, or persist the main canary value in the Probe.
+
+## P-088 TrollStore entitlement capability remains a platform trust boundary
+
+An isolated companion does not establish universal protection against every TrollStore-installed application. TrollStore can install software carrying entitlements outside ordinary App Store provisioning constraints, so a separately crafted application may claim permissions that the audited Probe does not have. State this boundary honestly: the Probe validates the exact companion artifact and packaging contract, not the security of arbitrary sideloaded software or the device platform as a whole.
+
+## P-089 Syntax parsing does not prove XCTest discovery
+
+`swiftc -parse` can accept a function named like a test even when it is accidentally nested inside a helper type instead of an `XCTestCase`. That produces false confidence: syntax is valid, but Xcode will not discover or run the intended test. After moving or generating tests, inspect class boundaries and confirm the method belongs to the expected test case; then rely on the Xcode test report, not parse success alone, as the authoritative discovery evidence.

@@ -25,8 +25,12 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           persist-credentials: false
-      - name: Verify visible build identity contract
-        run: python3 scripts/tests/test-build-identity-contract.py
+      - name: Verify build identity and candidate-set contracts
+        run: |
+          python3 scripts/tests/test-generate-build-identity.py
+          python3 scripts/tests/test-verify-build-artifacts.py
+          python3 scripts/tests/test-candidate-set-contract.py
+          python3 scripts/tests/test-build-identity-contract.py
       - name: Static validation
         run: bash -n scripts/build-ipa.sh scripts/install-ldid.sh scripts/find-ipad-simulator.sh scripts/tests/test-install-ldid.sh scripts/tests/test-find-ipad-simulator.sh scripts/tests/test-build-ipa-contracts.sh scripts/tests/test-build-ipa-entitlements.sh
       - name: Test pinned ldid installer contract
@@ -39,6 +43,45 @@ jobs:
         run: bash scripts/tests/test-build-ipa-entitlements.sh
       - name: Install pinned XcodeGen
         run: bash scripts/install-xcodegen.sh
+      - name: Generate candidate-set identities before project generation
+        id: identity
+        run: |
+          set -euo pipefail
+          readonly marketing_version="1.0"
+          readonly build_number="${GITHUB_RUN_NUMBER}"
+          readonly visible_commit="${GITHUB_SHA:0:12}"
+          candidate_set_id="$(python3 - <<'PY'
+          import hashlib, os
+          values=[os.environ['GITHUB_SHA'],os.environ['GITHUB_RUN_ID'],os.environ.get('GITHUB_RUN_ATTEMPT','1'),os.environ['GITHUB_RUN_NUMBER'],'com.juyang.CangJie','com.juyang.CangJie.KeychainIsolationProbe']
+          print(hashlib.sha256('|'.join(values).encode()).hexdigest())
+          PY
+          )"
+          python3 scripts/generate-build-identity.py \
+            --role main \
+            --bundle-id com.juyang.CangJie \
+            --version "${marketing_version}" \
+            --build "${build_number}" \
+            --commit "${GITHUB_SHA}" \
+            --candidate-set-id "${candidate_set_id}" \
+            --swift-output App/CangJieApp/GeneratedBuildIdentity.swift \
+            --metadata-output "$RUNNER_TEMP/CangJie-main-identity.json"
+          python3 scripts/generate-build-identity.py \
+            --role keychainIsolationProbe \
+            --bundle-id com.juyang.CangJie.KeychainIsolationProbe \
+            --version "${marketing_version}" \
+            --build "${build_number}" \
+            --commit "${GITHUB_SHA}" \
+            --candidate-set-id "${candidate_set_id}" \
+            --swift-output App/CangJieIsolationProbe/GeneratedBuildIdentity.swift \
+            --metadata-output "$RUNNER_TEMP/CangJie-probe-identity.json"
+          main_fingerprint="$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["fingerprint"])' "$RUNNER_TEMP/CangJie-main-identity.json")"
+          probe_fingerprint="$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["fingerprint"])' "$RUNNER_TEMP/CangJie-probe-identity.json")"
+          echo "marketing_version=${marketing_version}" >> "$GITHUB_OUTPUT"
+          echo "build_number=${build_number}" >> "$GITHUB_OUTPUT"
+          echo "visible_commit=${visible_commit}" >> "$GITHUB_OUTPUT"
+          echo "candidate_set_id=${candidate_set_id}" >> "$GITHUB_OUTPUT"
+          echo "main_fingerprint=${main_fingerprint}" >> "$GITHUB_OUTPUT"
+          echo "probe_fingerprint=${probe_fingerprint}" >> "$GITHUB_OUTPUT"
       - name: Verify dependency contract and generate project
         run: |
           set -euo pipefail
@@ -67,7 +110,7 @@ jobs:
           udid="$(bash scripts/find-ipad-simulator.sh)"
           [[ "${udid}" =~ ^[0-9A-Fa-f]{8}-([0-9A-Fa-f]{4}-){3}[0-9A-Fa-f]{12}$ ]] || { echo "Simulator selection returned an invalid UDID" >&2; exit 1; }
           printf 'udid=%s\n' "${udid}" >> "$GITHUB_OUTPUT"
-      - name: Unit, integration and UI smoke tests
+      - name: Test CangJie on iPad Simulator
         run: |
           set -euo pipefail
           set -o pipefail
@@ -81,13 +124,47 @@ jobs:
             -disableAutomaticPackageResolution \
             CODE_SIGNING_ALLOWED=YES \
             CODE_SIGNING_REQUIRED=YES \
-            CODE_SIGN_IDENTITY="-"
-      - name: Upload test result
+            CODE_SIGN_IDENTITY="-" \
+            MARKETING_VERSION="${{ steps.identity.outputs.marketing_version }}" \
+            CURRENT_PROJECT_VERSION="${{ steps.identity.outputs.build_number }}" \
+            CANGJIE_GIT_COMMIT="${{ steps.identity.outputs.visible_commit }}" \
+            CANGJIE_EXECUTABLE_FINGERPRINT="${{ steps.identity.outputs.main_fingerprint }}" \
+            CANGJIE_CANDIDATE_SET_ID="${{ steps.identity.outputs.candidate_set_id }}"
+      - name: Test Keychain Isolation Probe on iPad Simulator
+        if: ${{ !cancelled() && steps.simulator.outputs.udid != '' }}
+        run: |
+          set -euo pipefail
+          set -o pipefail
+          mkdir -p TestResults
+          xcodebuild test \
+            -project CangJie.xcodeproj \
+            -scheme CangJieKeychainIsolationProbe \
+            -destination "platform=iOS Simulator,id=${{ steps.simulator.outputs.udid }}" \
+            -resultBundlePath TestResults/CangJieIsolationProbe.xcresult \
+            -clonedSourcePackagesDirPath "$RUNNER_TEMP/CangJie-SourcePackages" \
+            -disableAutomaticPackageResolution \
+            CODE_SIGNING_ALLOWED=YES \
+            CODE_SIGNING_REQUIRED=YES \
+            CODE_SIGN_IDENTITY="-" \
+            MARKETING_VERSION="${{ steps.identity.outputs.marketing_version }}" \
+            CURRENT_PROJECT_VERSION="${{ steps.identity.outputs.build_number }}" \
+            CANGJIE_GIT_COMMIT="${{ steps.identity.outputs.visible_commit }}" \
+            CANGJIE_EXECUTABLE_FINGERPRINT="${{ steps.identity.outputs.probe_fingerprint }}" \
+            CANGJIE_CANDIDATE_SET_ID="${{ steps.identity.outputs.candidate_set_id }}"
+      - name: Upload CangJie test result
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: CangJie-iOS-TestResults
           path: TestResults/CangJie.xcresult
+          if-no-files-found: warn
+          retention-days: 7
+      - name: Upload Keychain Isolation Probe test result
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: CangJie-Keychain-Isolation-Probe-TestResults
+          path: TestResults/CangJieIsolationProbe.xcresult
           if-no-files-found: warn
           retention-days: 7
       - name: Delete selected Simulator

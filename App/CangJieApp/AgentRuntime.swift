@@ -10,14 +10,17 @@ final class AgentRuntime {
     ]
 
     private let database: AppDatabase
+    private let authorizer: any AgentExecutionAuthorizing
     let conversation: AgentConversation
 
-    init(database: AppDatabase) throws {
+    init(database: AppDatabase, authorizer: any AgentExecutionAuthorizing) throws {
         self.database = database
+        self.authorizer = authorizer
         conversation = try database.ensureDefaultConversation()
     }
 
     func restore(now: Date = Date()) throws -> AgentRuntimeSnapshot {
+        try authorizer.authorize(.runtimeReconciliation)
         let session = try database.loadAgentSession(conversationID: conversation.id) ?? .empty(now: now)
         let approvalState = try database.ensureOpeningPlanApprovalState(
             conversationID: conversation.id,
@@ -67,6 +70,7 @@ final class AgentRuntime {
         }
         let text = rawText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return AgentTurnResult(snapshot: try restore(now: now), status: "Ready") }
+        try authorizer.authorize(.agentTurn)
 
         let userMessage = try database.appendAgentMessage(
             conversationID: conversation.id,
@@ -232,6 +236,7 @@ final class AgentRuntime {
         displayedBindingHash: String,
         now: Date = Date()
     ) throws -> AgentTurnResult {
+        try authorizer.authorize(.openingPlanApproval)
         guard !displayedBindingHash.isEmpty else { throw AppDatabaseError.invalidApprovalRequest }
         let approvalKey = Self.approvalIdempotencyKey(requestID: approvalRequestID, bindingHash: displayedBindingHash)
         let existingRun = try database.agentRun(idempotencyKey: approvalKey)
