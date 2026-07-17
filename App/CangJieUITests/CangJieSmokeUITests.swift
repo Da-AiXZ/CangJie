@@ -29,47 +29,79 @@ final class CangJieSmokeUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["device-diagnostics-heading"].waitForExistence(timeout: 10))
         XCTAssertTrue(app.staticTexts["diagnostics-build-identity"].exists)
 
+        let inputHeading = app.staticTexts["keychain-probe-input-heading"]
         let input = app.secureTextFields["keychain-probe-input"]
+        let actionHeading = app.staticTexts["keychain-probe-action-heading"]
+        let actionHelp = app.staticTexts["keychain-probe-action-help"]
         let save = app.buttons["keychain-probe-save"]
         let read = app.buttons["keychain-probe-read"]
         let delete = app.buttons["keychain-probe-delete"]
         let status = app.staticTexts["keychain-probe-status"]
+        let guidance = app.staticTexts["keychain-probe-guidance"]
+        XCTAssertTrue(inputHeading.exists)
+        XCTAssertEqual(inputHeading.label, "1. Disposable value input")
         XCTAssertTrue(input.exists)
+        XCTAssertEqual(input.placeholderValue, "Type disposable value here")
+        XCTAssertTrue(actionHeading.exists)
+        XCTAssertEqual(actionHeading.label, "2. Create or update and verify")
+        XCTAssertTrue(actionHelp.exists)
+        XCTAssertTrue(actionHelp.label.contains("secure field above"))
         XCTAssertTrue(save.exists)
-        XCTAssertTrue(read.exists)
-        XCTAssertTrue(delete.exists)
         XCTAssertTrue(status.exists)
+        XCTAssertTrue(guidance.exists)
 
-        if delete.isEnabled {
+        if status.label == "Stored" {
+            scrollUpToHittable(delete, in: app)
+            XCTAssertTrue(delete.isEnabled)
             delete.tap()
         }
+        assertEventually(status, hasLabel: "Absent")
+        assertEventually(save, hasLabel: "Create and verify")
+        XCTAssertFalse(save.isEnabled)
+        XCTAssertTrue(guidance.label.contains("tap Create and verify"))
 
         let firstValue = "ui-keychain-probe-one"
+        scrollDownToHittable(input, in: app)
         input.tap()
         input.typeText(firstValue)
+        scrollUpToHittable(save, in: app)
+        XCTAssertTrue(save.isEnabled)
         save.tap()
-        XCTAssertTrue(status.label.contains("Stored"))
+        assertEventually(status, hasLabel: "Stored")
+        assertEventually(save, hasLabel: "Update and verify")
+        XCTAssertFalse(save.isEnabled)
+        XCTAssertTrue(guidance.label.contains("same secure field below"))
+        XCTAssertTrue(guidance.label.contains("tap Update and verify"))
         let firstDigest = app.staticTexts["keychain-probe-digest"]
         XCTAssertTrue(firstDigest.waitForExistence(timeout: 5))
         let firstDigestLabel = firstDigest.label
         XCTAssertEqual(firstDigestLabel.count, 12)
-        XCTAssertFalse(app.staticTexts[firstValue].exists)
+        assertNoAccessiblePlaintext(firstValue, in: app)
 
+        scrollUpToHittable(read, in: app)
         read.tap()
         XCTAssertTrue(firstDigest.exists)
 
         let updatedValue = "ui-keychain-probe-two"
+        scrollDownToHittable(input, in: app)
         input.tap()
         input.typeText(updatedValue)
+        scrollUpToHittable(save, in: app)
+        XCTAssertTrue(save.isEnabled)
         save.tap()
+        assertEventually(save, hasLabel: "Update and verify")
         let updatedDigest = app.staticTexts["keychain-probe-digest"]
-        XCTAssertTrue(updatedDigest.waitForExistence(timeout: 5))
-        XCTAssertNotEqual(updatedDigest.label, firstDigestLabel)
-        XCTAssertFalse(app.staticTexts[updatedValue].exists)
+        assertEventually(updatedDigest, changesFromLabel: firstDigestLabel)
+        XCTAssertEqual(updatedDigest.label.count, 12)
+        assertNoAccessiblePlaintext(updatedValue, in: app)
 
+        scrollUpToHittable(delete, in: app)
         delete.tap()
-        XCTAssertTrue(status.label.contains("Absent"))
-        XCTAssertFalse(app.staticTexts["keychain-probe-digest"].exists)
+        assertEventually(status, hasLabel: "Absent")
+        assertEventually(save, hasLabel: "Create and verify")
+        XCTAssertTrue(guidance.label.contains("tap Create and verify"))
+        assertEventuallyDisappears(app.staticTexts["keychain-probe-digest"])
+        XCTAssertFalse(delete.isEnabled)
     }
 
     func testProjectRefreshShowsVisibleAcknowledgement() {
@@ -194,6 +226,105 @@ final class CangJieSmokeUITests: XCTestCase {
         XCTAssertEqual(historyStatus.label, "Status: approved")
         XCTAssertTrue(app.staticTexts["opening-plan-history-binding-hash"].exists)
         XCTAssertTrue(app.staticTexts["last-tool-receipt"].exists)
+    }
+
+    private func assertEventually(
+        _ element: XCUIElement,
+        hasLabel expectedLabel: String,
+        timeout: TimeInterval = 5,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        let expectation = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "label == %@", expectedLabel),
+            object: element
+        )
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [expectation], timeout: timeout),
+            .completed,
+            "Expected label \(expectedLabel), got \(element.label)",
+            file: file,
+            line: line
+        )
+    }
+
+    private func assertEventually(
+        _ element: XCUIElement,
+        changesFromLabel previousLabel: String,
+        timeout: TimeInterval = 5,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        let expectation = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "exists == true AND label != %@", previousLabel),
+            object: element
+        )
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [expectation], timeout: timeout),
+            .completed,
+            "Expected label to change from \(previousLabel)",
+            file: file,
+            line: line
+        )
+    }
+
+    private func assertEventuallyDisappears(
+        _ element: XCUIElement,
+        timeout: TimeInterval = 5,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        let expectation = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "exists == false"),
+            object: element
+        )
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [expectation], timeout: timeout),
+            .completed,
+            "Expected element to disappear",
+            file: file,
+            line: line
+        )
+    }
+
+    private func scrollUpToHittable(
+        _ element: XCUIElement,
+        in app: XCUIApplication,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        for _ in 0..<6 where !element.isHittable {
+            app.swipeUp()
+        }
+        XCTAssertTrue(element.isHittable, "Expected element to become hittable", file: file, line: line)
+    }
+
+    private func scrollDownToHittable(
+        _ element: XCUIElement,
+        in app: XCUIApplication,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        for _ in 0..<6 where !element.isHittable {
+            app.swipeDown()
+        }
+        XCTAssertTrue(element.isHittable, "Expected element to become hittable", file: file, line: line)
+    }
+
+    private func assertNoAccessiblePlaintext(
+        _ plaintext: String,
+        in app: XCUIApplication,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        let leakedElements = app.descendants(matching: .any).matching(
+            NSPredicate(
+                format: "label CONTAINS %@ OR value CONTAINS %@",
+                plaintext,
+                plaintext
+            )
+        )
+        XCTAssertEqual(leakedElements.count, 0, "Plaintext leaked through accessibility", file: file, line: line)
     }
 
 }

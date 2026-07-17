@@ -323,3 +323,11 @@ A declared `application-identifier` and `keychain-access-groups` file is not eno
 ## P-080 Tool timeouts do not prove the child operation failed
 
 A desktop shell wrapper can time out while a native child process continues and completes the download. Before retrying an artifact transfer, inspect the exact target directory, file sizes, timestamps, and surviving processes; otherwise a second downloader can race with or overwrite a valid first result. Use a unique per-run audit directory, stop only the confirmed stuck child, reject zero-byte temporary files, and independently validate manifest and SHA-256 before trusting the bytes.
+
+## P-081 A testable control is not necessarily a discoverable control
+
+A passing UI automation path proves that XCTest can locate and operate a control; it does not prove that a person can identify the control type, understand its state-dependent label, or know where the result will appear. In build 26, one secure input was followed by a dynamic `Create and verify` / `Update and verify` button. After creation the input cleared and the button disabled until a new value was entered, so a user reasonably mistook the update action for a second non-editable field.
+
+State-dependent actions must expose the current state and the next required action in visible language. Give the input a heading and input-like styling, give the primary action button-like styling, explain that update reuses the same field, and test the visible label plus enabled/disabled transition rather than only a stable accessibility identifier. Never write a device script that merely says "tap Create" when Create exists only in the `Absent` state; explain how to reach that state.
+
+Every device acceptance step must specify the entry path, exact control position, control type, operation, expected-result location, failure signal, and reset/recovery path. This is part of the product acceptance contract, not optional prose. Requiring the user to ask where a control is or what success looks like wastes time, context, and evidence quality.

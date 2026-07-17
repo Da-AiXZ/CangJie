@@ -19,7 +19,9 @@ M1 First-Chapter Agent Vertical Slice. M1-B exact opening-plan approval remains 
 
 The same worktree implements the first governed Chapter 1 calibration loop: approved opening-plan validation through the canonical approval validator, immutable V1 generation, paragraph locks, accept-and-freeze or reject-and-diagnose, exactly three ordered one-question diagnosis turns, exact rewrite-scope confirmation, immutable V2 with parent lineage, byte-exact locked-paragraph and separator validation, V1/V2 diff review, exact-version acceptance, scope-bound receipts, receipt-bound historical snapshot replay, and restart recovery. The opening-plan approval review closes only after the exact operation succeeds and the reapplied projection confirms the same request ID and binding hash as `approved`; chapter actions separately remain bound to the exact displayed version ID and content hash.
 
-Commit `9a8a9eb` has passed authoritative Core and Xcode/iPadOS CI and produced the final independently audited M1-C TrollStore device candidate. Automated evidence covers the governed Chapter 1 rejection, three-answer diagnosis, exact rewrite scope, immutable V2, freeze, restart, Agent-first UI smoke paths, exact final `Info.plist` commit/build stamping, arm64 packaging, prefixless entitlements, and a signed-Simulator Keychain create/read/update/delete path. The left secondary navigation now exposes `Device Diagnostics`, which shows the installed build identity and performs a `kSecAttrAccessibleWhenUnlockedThisDeviceOnly` probe without displaying or logging plaintext. M1-C remains unaccepted only until this exact candidate passes physical-device behavior, reinstall persistence, and Keychain isolation validation on the target iPad.
+Commit `9a8a9eb` passed authoritative Core and Xcode/iPadOS CI and produced the independently audited build-26 M1-C device candidate. The target-iPad run accepted build identity, Refresh separators, the opening-plan review/detail surface after a clean install, the Chapter 1 path at the observed level, Keychain read verification, force-quit persistence, overwrite-install persistence, delete verification, and the post-delete `Absent` result. Overwrite installation correctly retained the already-approved opening-plan state and therefore did not recreate a pending approval card; deleting the App cleared the database, and rerunning the flow correctly produced the card again.
+
+Build 26 is not the final M1-C acceptance artifact. The user could not reliably distinguish the single secure input from the dynamic `Create and verify` / `Update and verify` action, so create-versus-update was not validly observed even though automated Simulator CRUD passed. This is a real diagnostic UX defect: a testable control is not necessarily a discoverable control. Build 26 is partially device-accepted but superseded by the clarified diagnostic candidate now being implemented. The governed novel workflow is not weakened or removed.
 
 ```text
 open -> restore conversation/session/run/messages -> center conversation
@@ -48,7 +50,7 @@ SHA-256 2092cfb5fe94b463c453ca25e6107a12de1d77e8be8309c85ee027f8863d62ef
 
 User confirmed TrollStore install, launch, immediate restart persistence, and no immediate crash for that M0 artifact.
 
-Latest committed software evidence:
+Latest independently audited device evidence (partially accepted, superseded for final M1-C acceptance):
 
 ```text
 commit 9a8a9eb45bfc41c5c32e1b78f9f9027d7f61ed92
@@ -59,6 +61,7 @@ Artifact CangJie-M0-device-validation-required-26-9a8a9eb45bfc41c5c32e1b78f9f902
 SHA-256 3aeb88fae96cd3a2ad8a6f74fc4ac629df54a027e9bd0a7fd0c6447511139d27
 Bundle ID com.juyang.CangJie | arm64 | deployment target 16.6 | build 26 | commit 9a8a9eb45bfc
 Local audit F:\project\CangJie\artifacts\CangJie-M1C-run-29560810381-verified\independent-audit.json
+Device result: workflow and persistence checks substantially passed; Keychain create/update distinction was not validly observed because the diagnostic UI was ambiguous.
 ```
 
 The preceding device-accepted recoverable-runtime candidate remains:
@@ -94,13 +97,26 @@ The downloaded checksum matches the manifest and local SHA-256; the archive cont
 
 Novel package concepts are recorded in the plan. `cc.zip` is clean-room abstract reference only. Private audit evidence stays outside Git at `F:\NVA-AUDIT-0716\` and the workspace `_cc_cleanroom_audit` directory.
 
+## Device acceptance instruction contract
+
+Every physical-device test request must be self-contained and state all of the following. Do not name an action without explaining how the user reaches the state in which that action exists.
+
+```text
+Entry path: exact navigation route from App launch
+Control location: page region and nearby heading
+Control type: text field, secure field, button, card, drawer, or status label
+Action: exact tap/type/scroll sequence
+Expected result location: where the result appears, not only what it says
+Failure signal: visible text, missing state change, crash, or disabled control
+Reset/recovery: how to return to the required starting state
+```
+
 ## Immediate queue
 
-1. Install the exact run-26 candidate on the target iPad with TrollStore and confirm `Device Diagnostics` reads build `26` and commit `9a8a9eb45bfc` before testing any behavior.
-2. Run the differential UI gate: Refresh displays two literal `|` separators and no `?`; exact opening-plan approval closes the review sheet and removes the central pending card; the right drawer retains the approved binding and `artifact.openingPlan.approve`; landscape review scrolls to the full plan.
-3. Run the complete Chapter 1 device gate: generate V1, lock a paragraph, reject, answer the three ordered questions one at a time, inspect and confirm the exact rewrite scope, generate V2, verify the lock and V1/V2 history/diff, accept and freeze the exact version, then force-quit/restart and inspect receipts/history.
-4. In `Device Diagnostics`, create and verify a disposable value, update it and confirm the 12-character digest changes, read it, force-quit/restart, overwrite-install the exact same IPA and verify persistence, then delete and verify `Absent`. Never use a real API key.
-5. Record the exact observed result against build run `29560810381`; keep M1-C unaccepted until the physical-device behavioral, reinstall-persistence, and Keychain-isolation gates pass.
+1. Clarify the Keychain diagnostic UI without changing the underlying `kSecAttrAccessibleWhenUnlockedThisDeviceOnly` repository: show `Stored`/`Absent`, state-specific next-step guidance, a clearly titled single secure input, and a visually primary dynamic Create/Update button.
+2. Extend the iPad UI regression test to assert the visible Create/Update labels, disabled/enabled transitions, same-field update guidance, digest change, plaintext absence, and return to Create after delete.
+3. Push directly to `main`, require Core and iPadOS CI to pass, then build and independently audit a new TrollStore IPA. Build 26 remains evidence but is not reused for final acceptance.
+4. Request only the focused create/update differential device test with exact entry path, control type and position, result location, failure signal, and reset steps. Previously accepted read, force-quit, overwrite-install, delete, workflow, and persistence evidence does not need to be repeated unless the new binary changes those surfaces.
 
 ## Change log
 
@@ -303,3 +319,9 @@ Acceptance blocked-pending-trollstore-device-keychain-validation (expected fail-
 ```
 
 Next gate: install this exact SHA-256 candidate on the target iPad, confirm the visible build identity first, then execute the UI, Chapter 1 calibration, restart/replay, and Keychain acceptance checklist above.
+
+## 2026-07-17 Build-26 physical-device feedback and diagnostic UX correction
+
+The target-iPad report confirmed that overwrite installation preserves the database and approved opening-plan state. A pending approval card must not reappear merely because the same App is overwritten; after deleting the App, reinstalling, and rerunning the workflow, the card correctly appears and its full review content scrolls. This is accepted persistence behavior, not a failed presentation fix.
+
+The Keychain screen exposed one secure field followed by a dynamic action button. After a successful write the field was cleared and the button changed from `Create and verify` to `Update and verify`, becoming disabled until a new value was entered. Because neither the page nor the prior test instructions explicitly identified the control types and state transition, the user reasonably interpreted `Update and verify` as a second input that could not be edited. Read, force-quit persistence, overwrite-install persistence, delete, and post-delete absence were observed; create-versus-update was not validly distinguished. The replacement candidate must make that distinction self-evident and must not ask the user to retest the ambiguous build.
