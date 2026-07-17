@@ -645,21 +645,59 @@ extension AppDatabase {
               let projectID = receipt.projectID,
               let inputHash = receipt.inputHash,
               let idempotencyKey = receipt.idempotencyKey,
-              !idempotencyKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-              let replay = try replayChapterTool(
-                toolID: receipt.toolID,
-                inputSummary: receipt.inputSummary,
-                inputHash: inputHash,
-                conversationID: conversationID,
-                projectID: projectID,
-                idempotencyKey: idempotencyKey,
-                originRunID: receipt.originRunID,
-                in: db
-              ),
-              replay.receipt.id == receipt.id,
-              replay.version.logicalID == chapterLogicalID,
-              replay.calibration.chapterLogicalID == chapterLogicalID,
-              receipt.inputSummary == expectedChapterInputSummary(for: replay) else {
+              !idempotencyKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            #if DEBUG
+            print(
+                "Chapter receipt validation mismatch [metadata] id=\(receipt.id.uuidString) "
+                    + "tool=\(receipt.toolID) version=\(receipt.toolVersion ?? "nil") "
+                    + "outcome=\(receipt.outcome)"
+            )
+            #endif
+            throw AppDatabaseError.invalidToolReceiptReference
+        }
+        guard let replay = try replayChapterTool(
+            toolID: receipt.toolID,
+            inputSummary: receipt.inputSummary,
+            inputHash: inputHash,
+            conversationID: conversationID,
+            projectID: projectID,
+            idempotencyKey: idempotencyKey,
+            originRunID: receipt.originRunID,
+            in: db
+        ) else {
+            #if DEBUG
+            print("Chapter receipt validation mismatch [missing replay] id=\(receipt.id.uuidString)")
+            #endif
+            throw AppDatabaseError.invalidToolReceiptReference
+        }
+        guard replay.receipt.id == receipt.id else {
+            #if DEBUG
+            print(
+                "Chapter receipt validation mismatch [receipt id] expected=\(receipt.id.uuidString) "
+                    + "actual=\(replay.receipt.id.uuidString)"
+            )
+            #endif
+            throw AppDatabaseError.invalidToolReceiptReference
+        }
+        guard replay.version.logicalID == chapterLogicalID,
+              replay.calibration.chapterLogicalID == chapterLogicalID else {
+            #if DEBUG
+            print(
+                "Chapter receipt validation mismatch [logical id] expected=\(chapterLogicalID.uuidString) "
+                    + "version=\(replay.version.logicalID.uuidString) "
+                    + "calibration=\(replay.calibration.chapterLogicalID.uuidString)"
+            )
+            #endif
+            throw AppDatabaseError.invalidToolReceiptReference
+        }
+        let expectedInputSummary = expectedChapterInputSummary(for: replay)
+        guard receipt.inputSummary == expectedInputSummary else {
+            #if DEBUG
+            print(
+                "Chapter receipt validation mismatch [input summary] tool=\(receipt.toolID) "
+                    + "actual=\(receipt.inputSummary) expected=\(expectedInputSummary ?? "nil")"
+            )
+            #endif
             throw AppDatabaseError.invalidToolReceiptReference
         }
         return replay

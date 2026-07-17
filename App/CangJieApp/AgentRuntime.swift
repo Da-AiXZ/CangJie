@@ -718,9 +718,37 @@ final class AgentRuntime {
             projectID: projectID,
             chapterLogicalID: calibration.chapterLogicalID
         )
-        guard validatedResult.receipt == chapterReceipt,
-              validatedResult.calibration == calibration,
-              validatedResult.version == active else {
+        guard validatedResult.receipt == chapterReceipt else {
+            #if DEBUG
+            print(
+                "Chapter snapshot mismatch [receipt] expected=\(chapterReceipt.id.uuidString) "
+                    + "actual=\(validatedResult.receipt.id.uuidString) tool=\(chapterReceipt.toolID)"
+            )
+            #endif
+            throw AppDatabaseError.invalidToolReceiptReference
+        }
+        guard validatedResult.calibration == calibration else {
+            #if DEBUG
+            print(
+                "Chapter snapshot mismatch [calibration] tool=\(chapterReceipt.toolID) "
+                    + "liveStage=\(calibration.stage.rawValue) snapshotStage=\(validatedResult.calibration.stage.rawValue) "
+                    + "liveVersion=\(calibration.activeVersionID.uuidString) "
+                    + "snapshotVersion=\(validatedResult.calibration.activeVersionID.uuidString) "
+                    + "liveUpdatedAt=\(calibration.updatedAt.timeIntervalSinceReferenceDate.bitPattern) "
+                    + "snapshotUpdatedAt=\(validatedResult.calibration.updatedAt.timeIntervalSinceReferenceDate.bitPattern)"
+            )
+            #endif
+            throw AppDatabaseError.invalidToolReceiptReference
+        }
+        guard validatedResult.version == active else {
+            #if DEBUG
+            print(
+                "Chapter snapshot mismatch [version] tool=\(chapterReceipt.toolID) "
+                    + "live=\(active.id.uuidString):\(active.revision):\(active.createdAt.timeIntervalSinceReferenceDate.bitPattern) "
+                    + "snapshot=\(validatedResult.version.id.uuidString):\(validatedResult.version.revision):"
+                    + "\(validatedResult.version.createdAt.timeIntervalSinceReferenceDate.bitPattern)"
+            )
+            #endif
             throw AppDatabaseError.invalidToolReceiptReference
         }
         if calibration.stage == .approvedFrozen {
