@@ -307,3 +307,7 @@ Xcode processes and merges the source plist during the build. A custom placehold
 ## P-076 Declaration builtins can mask command-substitution failure
 
 In Bash, `readonly NAME="$(command)"` or `local NAME="$(command)"` can report the declaration builtin's success instead of the command substitution's failure. For security-critical discovery and verification, assign inside an explicit checked branch, fail immediately, and apply `readonly` only after a valid value exists. Otherwise one root error can be followed by misleading cascade errors such as a missing executable path.
+
+## P-077 A green packaging job is not post-download artifact acceptance
+
+Workflow success proves that the runner's checks passed, not that the bytes later offered to the user are the expected candidate. After download, independently bind the artifact name, full commit, Actions run number, manifest, IPA SHA-256, final processed `Info.plist`, Mach-O architecture, code-signature slots, entitlements, absence of `embedded.mobileprovision`, and fail-closed device gate. Device instructions must start by checking the app's visible build and commit identity; otherwise an overwrite-install mix-up can make valid behavior appear missing or make stale behavior appear fixed.
