@@ -19,7 +19,7 @@ M1 First-Chapter Agent Vertical Slice. M1-B exact opening-plan approval remains 
 
 The same worktree implements the first governed Chapter 1 calibration loop: approved opening-plan validation through the canonical approval validator, immutable V1 generation, paragraph locks, accept-and-freeze or reject-and-diagnose, exactly three ordered one-question diagnosis turns, exact rewrite-scope confirmation, immutable V2 with parent lineage, byte-exact locked-paragraph and separator validation, V1/V2 diff review, exact-version acceptance, scope-bound receipts, receipt-bound historical snapshot replay, and restart recovery. The opening-plan approval review closes only after the exact operation succeeds and the reapplied projection confirms the same request ID and binding hash as `approved`; chapter actions separately remain bound to the exact displayed version ID and content hash.
 
-Commit `bb9cc55` has passed authoritative Core and Xcode/iPadOS CI and produced an independently audited identity-verified TrollStore candidate. Automated evidence covers the governed Chapter 1 rejection, three-answer diagnosis, exact rewrite scope, immutable V2, freeze, restart, Agent-first UI smoke paths, exact final `Info.plist` commit/build stamping, arm64 packaging, prefixless entitlements, and fail-closed device acceptance metadata. M1-C remains unaccepted only until this exact candidate passes physical-device validation on the target iPad.
+Commit `9a8a9eb` has passed authoritative Core and Xcode/iPadOS CI and produced the final independently audited M1-C TrollStore device candidate. Automated evidence covers the governed Chapter 1 rejection, three-answer diagnosis, exact rewrite scope, immutable V2, freeze, restart, Agent-first UI smoke paths, exact final `Info.plist` commit/build stamping, arm64 packaging, prefixless entitlements, and a signed-Simulator Keychain create/read/update/delete path. The left secondary navigation now exposes `Device Diagnostics`, which shows the installed build identity and performs a `kSecAttrAccessibleWhenUnlockedThisDeviceOnly` probe without displaying or logging plaintext. M1-C remains unaccepted only until this exact candidate passes physical-device behavior, reinstall persistence, and Keychain isolation validation on the target iPad.
 
 ```text
 open -> restore conversation/session/run/messages -> center conversation
@@ -51,13 +51,14 @@ User confirmed TrollStore install, launch, immediate restart persistence, and no
 Latest committed software evidence:
 
 ```text
-commit bb9cc55fa060b8e7098acb51e23f7eec89eda0b1
-Core CI 29557784425: success (strict tests and 90 percent line coverage gate)
-iPadOS CI 29557784433: success (87 App/integration tests plus Agent-first UI smoke tests)
-Build TrollStore IPA 29558102714: success | run number 25
-Artifact CangJie-M0-device-validation-required-25-bb9cc55fa060b8e7098acb51e23f7eec89eda0b1
-SHA-256 ba75a069c3b727b64c179ebf3bbd9e4e7e8cf6442b1934f12664ff9ee52ec641
-Bundle ID com.juyang.CangJie | arm64 | deployment target 16.6 | build 25 | commit bb9cc55fa060
+commit 9a8a9eb45bfc41c5c32e1b78f9f9027d7f61ed92
+Core CI 29560398690: success (strict tests and 90 percent line coverage gate)
+iPadOS CI 29560398699: success (88 App/integration tests plus Agent-first and real Simulator Keychain UI tests)
+Build TrollStore IPA 29560810381: success | run number 26
+Artifact CangJie-M0-device-validation-required-26-9a8a9eb45bfc41c5c32e1b78f9f9027d7f61ed92
+SHA-256 3aeb88fae96cd3a2ad8a6f74fc4ac629df54a027e9bd0a7fd0c6447511139d27
+Bundle ID com.juyang.CangJie | arm64 | deployment target 16.6 | build 26 | commit 9a8a9eb45bfc
+Local audit F:\project\CangJie\artifacts\CangJie-M1C-run-29560810381-verified\independent-audit.json
 ```
 
 The preceding device-accepted recoverable-runtime candidate remains:
@@ -95,13 +96,19 @@ Novel package concepts are recorded in the plan. `cc.zip` is clean-room abstract
 
 ## Immediate queue
 
-1. Install the exact run-25 candidate on the target iPad with TrollStore and confirm the left-drawer identity reads build `25` and commit `bb9cc55fa060` before testing any behavior.
+1. Install the exact run-26 candidate on the target iPad with TrollStore and confirm `Device Diagnostics` reads build `26` and commit `9a8a9eb45bfc` before testing any behavior.
 2. Run the differential UI gate: Refresh displays two literal `|` separators and no `?`; exact opening-plan approval closes the review sheet and removes the central pending card; the right drawer retains the approved binding and `artifact.openingPlan.approve`; landscape review scrolls to the full plan.
 3. Run the complete Chapter 1 device gate: generate V1, lock a paragraph, reject, answer the three ordered questions one at a time, inspect and confirm the exact rewrite scope, generate V2, verify the lock and V1/V2 history/diff, accept and freeze the exact version, then force-quit/restart and inspect receipts/history.
-4. Exercise the separate Keychain fail-closed gate: create, read, update, delete, reinstall persistence, and isolation under the prefixless `com.juyang.CangJie` access group.
-5. Record the exact observed result against run `29558102714`; keep M1-C unaccepted until the physical-device behavioral and Keychain gates pass.
+4. In `Device Diagnostics`, create and verify a disposable value, update it and confirm the 12-character digest changes, read it, force-quit/restart, overwrite-install the exact same IPA and verify persistence, then delete and verify `Absent`. Never use a real API key.
+5. Record the exact observed result against build run `29560810381`; keep M1-C unaccepted until the physical-device behavioral, reinstall-persistence, and Keychain-isolation gates pass.
 
 ## Change log
+
+### 2026-07-17 M1-C final device candidate
+
+Commit `d27de88` added the previously missing user-operable `Device Diagnostics` secondary page, exact installed build identity, and a ThisDeviceOnly Keychain create/read/update/delete probe whose UI exposes only a 12-character SHA-256 digest. Its first iPadOS CI run `29559288088` failed only in the real UI Keychain test: the workflow had explicitly set `CODE_SIGNING_ALLOWED=NO`, so `SecItemCopyMatching` and `SecItemAdd` could not use the declared access group. Commit `9a8a9eb` retained the production entitlement contract and changed only the Simulator test invocation to ad-hoc signing with `CODE_SIGN_IDENTITY="-"`; Core CI `29560398690` and iPadOS CI `29560398699` then passed, including the real Simulator Keychain CRUD flow.
+
+Build run `29560810381` produced run number `26` and artifact `CangJie-M0-device-validation-required-26-9a8a9eb45bfc41c5c32e1b78f9f9027d7f61ed92`. The downloaded IPA independently matched manifest and checksum SHA-256 `3aeb88fae96cd3a2ad8a6f74fc4ac629df54a027e9bd0a7fd0c6447511139d27`; final `Info.plist` contains bundle `com.juyang.CangJie`, deployment target `16.6`, build `26`, visible commit `9a8a9eb45bfc`, and iPad-only family `[2]`. Independent Mach-O inspection confirms arm64, an ad-hoc CodeDirectory, XML and DER entitlement slots, prefixless `application-identifier` and Keychain group `com.juyang.CangJie`, no CMS/Apple Developer signature slot, no `embedded.mobileprovision`, and executable hash equality with the manifest. The manifest remains deliberately fail-closed at `blocked-pending-trollstore-device-keychain-validation`. Run-25 is superseded and must not be used for M1-C acceptance because it has no user-operable Keychain diagnostic surface.
 
 ### 2026-07-17 M1-C governed Chapter 1 pre-CI checkpoint
 

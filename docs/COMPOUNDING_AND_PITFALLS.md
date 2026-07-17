@@ -311,3 +311,15 @@ In Bash, `readonly NAME="$(command)"` or `local NAME="$(command)"` can report th
 ## P-077 A green packaging job is not post-download artifact acceptance
 
 Workflow success proves that the runner's checks passed, not that the bytes later offered to the user are the expected candidate. After download, independently bind the artifact name, full commit, Actions run number, manifest, IPA SHA-256, final processed `Info.plist`, Mach-O architecture, code-signature slots, entitlements, absence of `embedded.mobileprovision`, and fail-closed device gate. Device instructions must start by checking the app's visible build and commit identity; otherwise an overwrite-install mix-up can make valid behavior appear missing or make stale behavior appear fixed.
+
+## P-078 Device acceptance requires a user-operable diagnostic surface
+
+Internal repository methods and unit tests do not make a physical-device gate executable. The run-25 binary contained Keychain helper methods but the Agent-first UI exposed no route to invoke them, so asking the user to validate create/read/update/delete/reinstall behavior would have produced unverifiable evidence. Before declaring a candidate ready, walk every requested device step from the installed UI. If a security primitive needs device proof, expose a narrowly scoped diagnostic surface that shows exact build identity, uses disposable data, redacts plaintext and credentials, reports deterministic state, and can be removed or retained as an explicit secondary tool without displacing the Agent control plane.
+
+## P-079 Keychain integration tests require a signed Simulator application
+
+A declared `application-identifier` and `keychain-access-groups` file is not enough when the test command sets `CODE_SIGNING_ALLOWED=NO`; the running Simulator app has no signed entitlement claim, and real `SecItem` operations can fail even though repository fakes and unit tests pass. Do not weaken the Keychain test or replace it with an in-memory fake. Sign the Simulator target ad hoc (`CODE_SIGNING_ALLOWED=YES`, `CODE_SIGNING_REQUIRED=YES`, `CODE_SIGN_IDENTITY="-"`) while keeping the device IPA's separate ldid/prefixless entitlement verification unchanged. Diagnose from the first runtime error and preserve the real CRUD UI test as the regression gate.
+
+## P-080 Tool timeouts do not prove the child operation failed
+
+A desktop shell wrapper can time out while a native child process continues and completes the download. Before retrying an artifact transfer, inspect the exact target directory, file sizes, timestamps, and surviving processes; otherwise a second downloader can race with or overwrite a valid first result. Use a unique per-run audit directory, stop only the confirmed stuck child, reject zero-byte temporary files, and independently validate manifest and SHA-256 before trusting the bytes.
