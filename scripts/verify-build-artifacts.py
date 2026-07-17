@@ -1,22 +1,48 @@
 #!/usr/bin/env python3
 import argparse
+import base64
+import binascii
 import hashlib
 import json
-import os
 import plistlib
 import re
 import stat
 import subprocess
 import tempfile
+import unicodedata
 import zipfile
 from pathlib import Path, PurePosixPath
 
+from candidate_set_identity import (
+    CandidateIdentityError,
+    derive_build_version,
+    derive_candidate_set_id,
+    validate_compiled_identity,
+)
+
 MAIN_BUNDLE = "com.juyang.CangJie"
 PROBE_BUNDLE = "com.juyang.CangJie.KeychainIsolationProbe"
-EXPECTED_ROLES = {"main", "keychainIsolationProbe"}
+ARTIFACT_SPECS = {
+    "main": {"bundleIdentifier": MAIN_BUNDLE, "productName": "CangJie", "executable": "CangJie"},
+    "keychainIsolationProbe": {
+        "bundleIdentifier": PROBE_BUNDLE,
+        "productName": "CangJieKeychainIsolationProbe",
+        "executable": "CangJieKeychainIsolationProbe",
+    },
+}
+EXPECTED_ROLES = set(ARTIFACT_SPECS)
 ACCEPTANCE = "blocked-pending-trollstore-device-keychain-isolation-validation"
 HEX40 = re.compile(r"^[0-9a-f]{40}$")
 HEX64 = re.compile(r"^[0-9a-f]{64}$")
+BASE64URL = re.compile(br"^[A-Za-z0-9_-]+$")
+IDENTITY_MARKER_PREFIX = b"CANGJIE_IDENTITY_V1:"
+MAX_IDENTITY_MARKER_PAYLOAD_BYTES = 4096
+MAX_IPA_BYTES = 512 * 1024 * 1024
+MAX_IPA_ENTRIES = 16384
+MAX_IPA_ENTRY_BYTES = 256 * 1024 * 1024
+MAX_IPA_UNCOMPRESSED_BYTES = 1024 * 1024 * 1024
+MAX_IPA_COMPRESSION_RATIO = 200.0
+MIN_RATIO_CHECK_BYTES = 64 * 1024
 LDID_VARIANTS = {
     "arm64": ("ldid_macosx_arm64", "5dff8e6b8d9dc3ff7226276c81e09930865f15381f54cb55b98b196a94c5ca50"),
     "x86_64": ("ldid_macosx_x86_64", "9d46e0feedf96e399edfca09872802ba21e729f79c01927ad25ea2b0a35bca23"),
@@ -50,8 +76,11 @@ def safe_file(root: Path, name: object, label: str) -> Path:
 
 def load_json(path: Path):
     try:
-        return json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, UnicodeError, json.JSONDecodeError) as error:
+        return json.loads(
+            path.read_text(encoding="utf-8"),
+            object_pairs_hook=_reject_duplicate_json_keys,
+        )
+    except (OSError, UnicodeError, json.JSONDecodeError, ValueError) as error:
         fail(f"invalid candidate set manifest: {error}")
 
 
@@ -66,50 +95,176 @@ def load_plist(path: Path, label: str):
     return value
 
 
-def inspect_ipa(path: Path):
+def _archive_equivalence_keys(name: str):
+    nfc = unicodedata.normalize("NFC", name)
+    nfd = unicodedata.normalize("NFD", name)
+    return {name.casefold(), nfc, nfd, nfc.casefold(), nfd.casefold()}
+
+
+def _contains_unreviewed_nested_code(pure: PurePosixPath, expected_product: str) -> bool:
+    app_parts = ("Payload", f"{expected_product}.app")
+    if pure.parts[:2] != app_parts:
+        return False
+    relative = pure.parts[2:]
+    if not relative:
+        return False
+    if relative[0] in {"PlugIns", "Watch", "XPCServices"}:
+        return True
+    if relative[0] == "Frameworks":
+        return any(part.endswith(".framework") for part in relative[1:]) or relative[-1].endswith(".dylib")
+    return False
+
+
+def validate_archive_limits(path: Path, entries) -> None:
+    try:
+        archive_size = path.stat().st_size
+    except OSError:
+        fail("IPA size could not be read")
+    if archive_size <= 0 or archive_size > MAX_IPA_BYTES:
+        fail("IPA compressed size limit exceeded")
+    if len(entries) > MAX_IPA_ENTRIES:
+        fail("IPA contains too many entries")
+
+    total_uncompressed = 0
+    for entry in entries:
+        if entry.flag_bits & 0x1:
+            fail("encrypted IPA entries are forbidden")
+        if entry.file_size < 0 or entry.compress_size < 0:
+            fail("IPA entry size is invalid")
+        if entry.file_size > MAX_IPA_ENTRY_BYTES:
+            fail("IPA entry size limit exceeded")
+        total_uncompressed += entry.file_size
+        if total_uncompressed > MAX_IPA_UNCOMPRESSED_BYTES:
+            fail("IPA uncompressed size limit exceeded")
+
+    for entry in entries:
+        if entry.file_size < MIN_RATIO_CHECK_BYTES:
+            continue
+        if entry.compress_size == 0 or entry.file_size / entry.compress_size > MAX_IPA_COMPRESSION_RATIO:
+            fail("IPA compression ratio limit exceeded")
+
+
+def _marker_occurrences(data: bytes):
+    offsets = []
+    start = 0
+    while True:
+        offset = data.find(IDENTITY_MARKER_PREFIX, start)
+        if offset < 0:
+            return offsets
+        offsets.append(offset)
+        start = offset + len(IDENTITY_MARKER_PREFIX)
+
+
+def _reject_duplicate_json_keys(pairs):
+    result = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError(f"duplicate JSON key: {key}")
+        result[key] = value
+    return result
+
+
+def extract_identity_marker(executable_data: bytes):
+    offsets = _marker_occurrences(executable_data)
+    if len(offsets) != 1:
+        fail("executable identity marker count mismatch")
+    payload_start = offsets[0] + len(IDENTITY_MARKER_PREFIX)
+    payload_end = executable_data.find(b"\0", payload_start)
+    if payload_end < 0:
+        fail("executable identity marker is not NUL terminated")
+    payload = executable_data[payload_start:payload_end]
+    if not payload or len(payload) > MAX_IDENTITY_MARKER_PAYLOAD_BYTES or not BASE64URL.fullmatch(payload):
+        fail("executable identity marker payload is invalid")
+    padding = b"=" * ((4 - len(payload) % 4) % 4)
+    try:
+        decoded = base64.b64decode(payload + padding, altchars=b"-_", validate=True)
+    except (ValueError, binascii.Error):
+        fail("executable identity marker payload is invalid")
+    try:
+        identity = json.loads(decoded.decode("utf-8"), object_pairs_hook=_reject_duplicate_json_keys)
+    except (UnicodeError, json.JSONDecodeError, ValueError):
+        fail("executable identity marker JSON is invalid")
+    if not isinstance(identity, dict):
+        fail("executable identity marker JSON root is invalid")
+    canonical = json.dumps(identity, ensure_ascii=False, separators=(",", ":"), sort_keys=True).encode("utf-8")
+    if canonical != decoded:
+        fail("executable identity marker JSON is not canonical")
+    return identity
+
+
+def inspect_ipa(path: Path, expected_product: str):
+    expected_app_root = f"Payload/{expected_product}.app"
+    expected_prefix = expected_app_root + "/"
     try:
         with zipfile.ZipFile(path) as package:
             entries = package.infolist()
             if not entries:
                 fail("IPA is empty")
-            app_roots = set()
-            info_entry = None
-            executable_entry = None
+            validate_archive_limits(path, entries)
+            names = [entry.filename for entry in entries]
+            if len(names) != len(set(names)):
+                fail("duplicate IPA entry")
+            equivalence_owners = {}
+            for name in names:
+                for key in _archive_equivalence_keys(name):
+                    owner = equivalence_owners.get(key)
+                    if owner is not None and owner != name:
+                        fail("filesystem-equivalent IPA entry collision")
+                    equivalence_owners[key] = name
+
             for entry in entries:
                 name = entry.filename
-                pure = PurePosixPath(name)
-                mode = (entry.external_attr >> 16) & 0xFFFF
-                if "\\" in name or pure.is_absolute() or any(part in ("", ".", "..") for part in pure.parts):
+                if not isinstance(name, str) or not name or "\0" in name or "\\" in name:
                     fail(f"unsafe IPA entry: {name!r}")
-                if stat.S_IFMT(mode) == stat.S_IFLNK:
+                pure = PurePosixPath(name)
+                raw_parts = name.split("/")
+                if raw_parts[-1] == "":
+                    raw_parts = raw_parts[:-1]
+                if (
+                    pure.is_absolute()
+                    or not raw_parts
+                    or any(part in ("", ".", "..") for part in raw_parts)
+                ):
+                    fail(f"unsafe IPA entry: {name!r}")
+                mode = (entry.external_attr >> 16) & 0xFFFF
+                file_type = stat.S_IFMT(mode)
+                if file_type == stat.S_IFLNK:
                     fail("IPA contains a symbolic link")
+                if file_type not in (0, stat.S_IFREG, stat.S_IFDIR):
+                    fail("IPA contains an unsupported filesystem entry")
                 if "embedded.mobileprovision" in pure.parts:
                     fail("embedded provisioning profile is forbidden")
+                if _contains_unreviewed_nested_code(pure, expected_product):
+                    fail("IPA contains unreviewed nested code")
+                if name in ("Payload", "Payload/", expected_app_root, expected_app_root + "/"):
+                    continue
+                if name.startswith(expected_prefix):
+                    continue
                 if len(pure.parts) >= 2 and pure.parts[0] == "Payload" and pure.parts[1].endswith(".app"):
-                    app_roots.add("/".join(pure.parts[:2]))
-            if len(app_roots) != 1:
-                fail("IPA must contain exactly one root app")
-            app_root = next(iter(app_roots))
-            expected_prefix = app_root + "/"
-            for entry in entries:
-                if entry.filename == expected_prefix + "Info.plist":
-                    info_entry = entry
-            if info_entry is None:
+                    fail("IPA app root mismatch")
+                fail("unexpected IPA entry root")
+
+            info_matches = [entry for entry in entries if entry.filename == expected_prefix + "Info.plist"]
+            if len(info_matches) != 1:
                 fail("IPA Info.plist is missing")
-            info = plistlib.loads(package.read(info_entry))
+            try:
+                info = plistlib.loads(package.read(info_matches[0]))
+            except (KeyError, ValueError, TypeError, plistlib.InvalidFileException):
+                fail("IPA Info.plist is invalid")
             if not isinstance(info, dict):
                 fail("IPA Info.plist root is invalid")
             executable = info.get("CFBundleExecutable")
-            if not isinstance(executable, str) or not executable or "/" in executable or "\\" in executable:
-                fail("IPA executable name is unsafe")
-            executable_name = expected_prefix + executable
-            for entry in entries:
-                if entry.filename == executable_name:
-                    executable_entry = entry
-            if executable_entry is None:
+            if executable != expected_product:
+                fail("IPA executable name mismatch")
+            executable_matches = [entry for entry in entries if entry.filename == expected_prefix + expected_product]
+            if len(executable_matches) != 1:
                 fail("IPA executable is missing")
+            executable_entry = executable_matches[0]
+            executable_mode = (executable_entry.external_attr >> 16) & 0xFFFF
+            if stat.S_IFMT(executable_mode) != stat.S_IFREG or not (executable_mode & 0o111):
+                fail("IPA executable mode is invalid")
             executable_data = package.read(executable_entry)
-            return info, app_root, executable, executable_data
+            return info, expected_app_root, expected_product, executable_data
     except zipfile.BadZipFile:
         fail("invalid IPA archive")
 
@@ -145,14 +300,18 @@ def extract_and_read_codesign_entitlements(ipa: Path, app_root: str, executable:
         return entitlements
 
 
-def expected_fingerprint(role: str, bundle: str, version: str, build: str, commit: str, candidate: str) -> str:
-    canonical = "|".join(["cangjie-executable-v1", role, bundle, version, build, commit, candidate])
-    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
-
-
 def verify_artifact(root: Path, artifact: dict, manifest: dict, metadata_only: bool):
     role = artifact.get("role")
-    expected_bundle = MAIN_BUNDLE if role == "main" else PROBE_BUNDLE
+    spec = ARTIFACT_SPECS[role]
+    expected_bundle = spec["bundleIdentifier"]
+    expected_product = spec["productName"]
+    if artifact.get("bundleIdentifier") != expected_bundle:
+        fail(f"{role} bundle identifier mismatch")
+    if artifact.get("productName") != expected_product:
+        fail(f"{role} product name mismatch")
+    if artifact.get("executable") != spec["executable"]:
+        fail(f"{role} executable binding mismatch")
+
     ipa = safe_file(root, artifact.get("file"), f"{role} IPA")
     checksum = safe_file(root, artifact.get("checksumFile"), f"{role} checksum")
     actual_ipa_sha = sha256(ipa)
@@ -160,32 +319,40 @@ def verify_artifact(root: Path, artifact: dict, manifest: dict, metadata_only: b
         fail(f"{role} manifest IPA SHA-256 mismatch")
     if checksum.read_text(encoding="utf-8").strip() != f"{actual_ipa_sha}  {ipa.name}":
         fail(f"{role} checksum file mismatch")
-    if artifact.get("bundleIdentifier") != expected_bundle:
-        fail(f"{role} bundle identifier mismatch")
 
-    info, app_root, executable, executable_data = inspect_ipa(ipa)
-    if artifact.get("executable") != executable:
-        fail(f"{role} executable binding mismatch")
+    info, app_root, executable, executable_data = inspect_ipa(ipa, expected_product)
     if info.get("CFBundleIdentifier") != expected_bundle:
         fail(f"{role} IPA bundle identifier mismatch")
 
     identity = artifact.get("compiledIdentity")
-    if not isinstance(identity, dict):
-        fail(f"{role} compiled identity is missing")
+    try:
+        validate_compiled_identity(
+            identity,
+            role=role,
+            bundle_identifier=expected_bundle,
+            version=manifest["version"],
+            build=manifest["build"],
+            commit=manifest["commit"],
+            candidate_set_id=manifest["candidateSetID"],
+        )
+    except CandidateIdentityError as error:
+        fail(str(error))
+    if extract_identity_marker(executable_data) != identity:
+        fail("executable identity marker mismatch")
+
     candidate = manifest["candidateSetID"]
     commit = manifest["commit"]
     build = manifest["build"]
-    version = identity.get("version")
-    if identity.get("candidateSetID") != candidate or info.get("CangJieCandidateSetID") != candidate:
+    version = identity["version"]
+    if info.get("CangJieCandidateSetID") != candidate:
         fail("candidate set binding mismatch")
-    if identity.get("commit") != commit or info.get("CangJieGitCommit") != commit[:12]:
+    if info.get("CangJieGitCommit") != commit[:12]:
         fail("commit binding mismatch")
-    if identity.get("build") != build or info.get("CFBundleVersion") != build:
+    if info.get("CFBundleVersion") != build:
         fail("build binding mismatch")
     if info.get("CFBundleShortVersionString") != version:
         fail("version binding mismatch")
-    fingerprint = expected_fingerprint(role, expected_bundle, version, build, commit, candidate)
-    if identity.get("fingerprint") != fingerprint or info.get("CangJieExecutableFingerprint") != fingerprint:
+    if info.get("CangJieExecutableFingerprint") != identity["fingerprint"]:
         fail("compiled identity fingerprint mismatch")
 
     signing = artifact.get("signing")
@@ -243,35 +410,64 @@ def main() -> None:
     parser.add_argument("artifact_directory")
     parser.add_argument("--metadata-only", action="store_true", help="skip macOS codesign extraction; for hermetic script tests only")
     args = parser.parse_args()
-    root = Path(args.artifact_directory).resolve()
-    if not root.is_dir() or root.is_symlink():
+    supplied_root = Path(args.artifact_directory)
+    if supplied_root.is_symlink():
+        fail("artifact directory is missing or unsafe")
+    try:
+        root = supplied_root.resolve(strict=True)
+    except OSError:
+        fail("artifact directory is missing or unsafe")
+    if not root.is_dir():
         fail("artifact directory is missing or unsafe")
     manifest_path = root / "candidate-set-manifest.json"
     if not manifest_path.is_file() or manifest_path.is_symlink():
         fail("manifest file is missing or unsafe")
     manifest = load_json(manifest_path)
-    if manifest.get("schemaVersion") != 5:
+    if not isinstance(manifest, dict) or manifest.get("schemaVersion") != 5:
         fail("manifest schema mismatch")
     candidate = manifest.get("candidateSetID")
     commit = manifest.get("commit")
+    version = manifest.get("version")
     build = manifest.get("build")
     if not isinstance(candidate, str) or not HEX64.fullmatch(candidate):
         fail("candidate set ID mismatch")
     if not isinstance(commit, str) or not HEX40.fullmatch(commit):
         fail("commit binding mismatch")
-    if not isinstance(build, str) or not build.isdigit() or int(build) < 1:
-        fail("build binding mismatch")
     for field in ("runId", "runAttempt", "runNumber"):
         value = manifest.get(field)
-        if not isinstance(value, str) or not value.isdigit() or int(value) < 1:
+        if not isinstance(value, str) or not value.isdigit() or int(value) < 1 or str(int(value)) != value:
             fail(f"{field} binding mismatch")
-    if manifest["runNumber"] != build:
+    try:
+        expected_build = derive_build_version(manifest["runNumber"], manifest["runAttempt"])
+    except CandidateIdentityError:
+        fail("runAttempt binding mismatch")
+    if build != expected_build:
         fail("run/build binding mismatch")
+    try:
+        expected_candidate = derive_candidate_set_id(
+            commit=commit,
+            run_id=manifest["runId"],
+            run_attempt=manifest["runAttempt"],
+            run_number=manifest["runNumber"],
+            version=version,
+            build=build,
+            main_bundle_id=MAIN_BUNDLE,
+            probe_bundle_id=PROBE_BUNDLE,
+        )
+    except CandidateIdentityError as error:
+        fail(str(error))
+    if candidate != expected_candidate:
+        fail("candidate set derivation mismatch")
 
     artifacts = manifest.get("artifacts")
-    if not isinstance(artifacts, list) or len(artifacts) != 2:
+    if not isinstance(artifacts, list) or len(artifacts) != 2 or not all(isinstance(item, dict) for item in artifacts):
         fail("artifact roles mismatch")
-    by_role = {artifact.get("role"): artifact for artifact in artifacts if isinstance(artifact, dict)}
+    by_role = {}
+    for artifact in artifacts:
+        role = artifact.get("role")
+        if role in by_role or role not in EXPECTED_ROLES:
+            fail("artifact roles mismatch")
+        by_role[role] = artifact
     if set(by_role) != EXPECTED_ROLES:
         fail("artifact roles mismatch")
     groups = [verify_artifact(root, by_role[role], manifest, args.metadata_only) for role in sorted(EXPECTED_ROLES)]

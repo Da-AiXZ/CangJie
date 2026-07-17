@@ -33,6 +33,7 @@ with tempfile.TemporaryDirectory() as directory:
         sys.executable, str(GENERATOR), "--role", "main", "--bundle-id", "com.juyang.CangJie",
         "--version", "1.0", "--build", "23", "--commit", COMMIT,
         "--candidate-set-id", CANDIDATE, "--swift-output", str(swift),
+        "--c-output", str(root / "GeneratedBuildIdentityMarker.c"),
         "--metadata-output", str(identity),
     ], check=True)
     plist_path = root / "Info.plist"
@@ -65,4 +66,12 @@ assert build.index("generate-build-identity.py") < build.index("xcodegen generat
 assert build.index("generate-build-identity.py") < build.index("xcodebuild")
 assert "CANGJIE_EXECUTABLE_FINGERPRINT" in build
 assert "CANGJIE_CANDIDATE_SET_ID" in build
+
+workflow = (ROOT / ".github/workflows/ios-ci.yml").read_text(encoding="utf-8")
+main_stamp = 'python3 scripts/stamp-build-identity.py --identity-json "$RUNNER_TEMP/CangJie-main-identity.json" --unstamped-build 1 App/Config/Info.plist'
+probe_stamp = 'python3 scripts/stamp-build-identity.py --identity-json "$RUNNER_TEMP/CangJie-probe-identity.json" --unstamped-build 1 App/Config/IsolationProbeInfo.plist'
+assert main_stamp in workflow, "iPadOS CI must stamp the main app source plist from the generated executable identity"
+assert probe_stamp in workflow, "iPadOS CI must stamp the Probe source plist from the generated executable identity"
+assert workflow.index(main_stamp) < workflow.index("xcodegen generate")
+assert workflow.index(probe_stamp) < workflow.index("xcodegen generate")
 print("build identity contract: ok")

@@ -77,7 +77,7 @@ final class AppViewModel: ObservableObject {
     private static let maximumProbeSecretBytes = 4_096
     private static let probeAccount = "m0-probe"
     private let database: AppDatabase?
-    private let runtime: AgentRuntime?
+    private var runtime: AgentRuntime?
     private let keychain: any SecretRepository
     private let isolationCanaryRepository: any IsolationCanaryRepository
     private let buildActivationStore: any BuildActivationStore
@@ -89,6 +89,7 @@ final class AppViewModel: ObservableObject {
     private var streamGeneration: UUID?
     private var noticeDismissTask: Task<Void, Never>?
     private var projectedBusinessMilestone: AgentBusinessMilestone?
+    private var lifecyclePermitsMutations = true
 
     init(
         database: AppDatabase? = nil,
@@ -112,7 +113,11 @@ final class AppViewModel: ObservableObject {
             compiled: compiledBuildStamp
         )
         buildIdentity = initialIdentity
-        let authorizer = BuildActivationAgentAuthorizer(allowed: initialIdentity.isAgentExecutionAllowed)
+        let authorizer = BuildActivationAgentAuthorizer(
+            compiledBuildStamp: compiledBuildStamp,
+            bundleIdentityLoader: resolvedLoader,
+            allowed: initialIdentity.isAgentExecutionAllowed
+        )
         executionAuthorizer = authorizer
 
         let defaultsKey = "m0TaskID"
@@ -147,15 +152,26 @@ final class AppViewModel: ObservableObject {
         }
 
         self.database = databaseState.database
+        var runtimeInitializationError: Error?
         if let resolvedDatabase = databaseState.database {
-            runtime = try? AgentRuntime(database: resolvedDatabase, authorizer: authorizer)
+            do {
+                runtime = try AgentRuntime(database: resolvedDatabase, authorizer: authorizer)
+            } catch {
+                runtime = nil
+                runtimeInitializationError = error
+                authorizer.update(allowed: false)
+                buildIdentity = BuildIdentity(
+                    infoDictionary: resolvedLoader.loadInfoDictionary(),
+                    compiled: compiledBuildStamp
+                )
+            }
         } else {
             runtime = nil
         }
         draft = databaseState.draft
         errorMessage = databaseState.error
 
-        if initialIdentity.isAgentExecutionAllowed {
+        if buildIdentity.isAgentExecutionAllowed {
             let token = compiledBuildStamp.activationToken
             let wasAlreadyActivated = buildActivationStore.loadActivatedToken() == token
             buildActivationStore.saveActivatedToken(token)
@@ -163,7 +179,7 @@ final class AppViewModel: ObservableObject {
                 ? "Executable identity verified."
                 : "New executable activated: Build \(compiledBuildStamp.build), commit \(compiledBuildStamp.commit)."
         } else {
-            buildActivationMessage = initialIdentity.diagnosticText
+            buildActivationMessage = buildIdentity.diagnosticText
         }
 
         if let runtime {
@@ -175,8 +191,13 @@ final class AppViewModel: ObservableObject {
                 businessStatus = "Agent unavailable"
                 publishError("Agent restore failed (AGENT-RESTORE)")
             }
+        } else if runtimeInitializationError != nil {
+            businessStatus = buildIdentity.isAgentExecutionAllowed
+                ? "Agent unavailable; retry after returning to the App"
+                : "Update activation required; Agent mutations are paused"
+            publishError("Agent runtime initialization was blocked (AGENT-INIT)")
         } else {
-            businessStatus = initialIdentity.isAgentExecutionAllowed
+            businessStatus = buildIdentity.isAgentExecutionAllowed
                 ? "Agent unavailable"
                 : "Update activation required; Agent mutations are paused"
         }
@@ -185,8 +206,10 @@ final class AppViewModel: ObservableObject {
             publishTransientNotice(kind: .storage, message: notice)
         }
 
-        refreshProbeState(publishSuccess: false)
-        refreshIsolationCanary(publishSuccess: false)
+        if buildIdentity.isAgentExecutionAllowed {
+            refreshProbeState(publishSuccess: false)
+            refreshIsolationCanary(publishSuccess: false)
+        }
     }
 
     func reloadProjects() {
@@ -418,13 +441,7 @@ final class AppViewModel: ObservableObject {
         let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
         guard requireActiveBuildForAgentMutation() else { return }
-        guard let runtime else {
-            conversationMessages.append("You: " + text)
-            conversationMessages.append("Agent: Database unavailable; no tool was executed.")
-            draft = ""
-            publishError("Agent runtime unavailable")
-            return
-        }
+        guard ensureRuntimeAvailable(), let runtime else { return }
 
         draft = ""
         isAgentWorking = true
@@ -438,8 +455,22 @@ final class AppViewModel: ObservableObject {
         }
     }
 
+    private func requireActiveBuildForMutation(
+        _ operation: GovernedAgentOperation = .durableMutation
+    ) -> Bool {
+        guard lifecyclePermitsMutations else { return false }
+        guard revalidateBuildActivation() else { return false }
+        do {
+            try executionAuthorizer.authorize(operation)
+            return true
+        } catch {
+            _ = revalidateBuildActivation()
+            return false
+        }
+    }
+
     private func requireActiveBuildForAgentMutation() -> Bool {
-        revalidateBuildActivation()
+        requireActiveBuildForMutation(.agentTurn)
     }
 
     private func apply(runtimeSnapshot snapshot: AgentRuntimeSnapshot) {
@@ -459,6 +490,7 @@ final class AppViewModel: ObservableObject {
     }
 
     func saveDraft() {
+        guard requireActiveBuildForMutation(.durableMutation) else { return }
         guard let database else {
             publishError("Draft save failed (DB-WRITE)")
             return
@@ -475,6 +507,7 @@ final class AppViewModel: ObservableObject {
     }
 
     func createCheckpoint(reason: String) {
+        guard requireActiveBuildForMutation(.durableMutation) else { return }
         guard let database else {
             publishError("Checkpoint write failed (DB-CHECKPOINT)")
             return
@@ -496,17 +529,43 @@ final class AppViewModel: ObservableObject {
     }
 
     func handleScenePhase(_ phase: ScenePhase) {
-        guard revalidateBuildActivation() else { return }
         switch phase {
         case .inactive:
-            createCheckpoint(reason: "sceneInactive")
+            suspendGovernedWork(reason: "sceneInactive")
         case .background:
-            createCheckpoint(reason: "sceneBackground")
+            suspendGovernedWork(reason: "sceneBackground")
         case .active:
+            lifecyclePermitsMutations = true
+            guard revalidateBuildActivation() else { return }
+            guard ensureRuntimeAvailable() else { return }
             restoreRuntimeProjection()
+            refreshProbeState(publishSuccess: false)
+            refreshIsolationCanary(publishSuccess: false)
         @unknown default:
-            createCheckpoint(reason: "sceneUnknown")
+            suspendGovernedWork(reason: "sceneUnknown")
         }
+    }
+
+    private func suspendGovernedWork(reason: String) {
+        pauseGovernedWork()
+        guard lifecyclePermitsMutations else {
+            executionAuthorizer.update(allowed: false)
+            return
+        }
+        defer {
+            lifecyclePermitsMutations = false
+            executionAuthorizer.update(allowed: false)
+        }
+        guard revalidateBuildActivation() else { return }
+        createCheckpoint(reason: reason)
+    }
+
+    private func pauseGovernedWork() {
+        streamGeneration = nil
+        streamTask?.cancel()
+        streamTask = nil
+        isStreaming = false
+        isAgentWorking = false
     }
 
     @discardableResult
@@ -516,13 +575,12 @@ final class AppViewModel: ObservableObject {
             compiled: compiledBuildStamp
         )
         buildIdentity = refreshed
-        executionAuthorizer.update(allowed: refreshed.isAgentExecutionAllowed)
+        executionAuthorizer.update(
+            allowed: refreshed.isAgentExecutionAllowed && lifecyclePermitsMutations
+        )
         guard refreshed.isAgentExecutionAllowed else {
-            streamGeneration = nil
-            streamTask?.cancel()
-            streamTask = nil
-            isStreaming = false
-            isAgentWorking = false
+            pauseGovernedWork()
+            clearCachedSecurityEvidence()
             buildActivationMessage = refreshed.diagnosticText
             businessStatus = "Update activation required; Agent mutations are paused"
             publishError("Running executable identity does not match the installed bundle (BUILD-ACTIVATION)")
@@ -537,6 +595,24 @@ final class AppViewModel: ObservableObject {
             buildActivationMessage = "Executable identity verified."
         }
         return true
+    }
+
+
+    private func ensureRuntimeAvailable() -> Bool {
+        if runtime != nil { return true }
+        guard let database else {
+            publishError("Agent runtime unavailable (AGENT-INIT)")
+            return false
+        }
+        do {
+            runtime = try AgentRuntime(database: database, authorizer: executionAuthorizer)
+            return true
+        } catch {
+            runtime = nil
+            _ = revalidateBuildActivation()
+            publishError("Agent runtime initialization failed (AGENT-INIT)")
+            return false
+        }
     }
 
     private func restoreRuntimeProjection() {
@@ -558,6 +634,7 @@ final class AppViewModel: ObservableObject {
     }
 
     func saveProbeKey() {
+        guard requireActiveBuildForMutation(.diagnosticsKeychainMutation) else { return }
         let candidate = apiKeyInput
         guard !candidate.isEmpty else {
             publishError("Keychain test value cannot be empty")
@@ -586,10 +663,12 @@ final class AppViewModel: ObservableObject {
     }
 
     func readProbeKey() {
+        guard requireActiveBuildForMutation(.diagnosticsKeychainMutation) else { return }
         refreshProbeState(publishSuccess: true)
     }
 
     func deleteProbeKey() {
+        guard requireActiveBuildForMutation(.diagnosticsKeychainMutation) else { return }
         do {
             try keychain.delete(account: Self.probeAccount)
             guard try keychain.read(account: Self.probeAccount) == nil else {
@@ -605,6 +684,12 @@ final class AppViewModel: ObservableObject {
         }
     }
 
+    private func clearCachedSecurityEvidence() {
+        hasStoredKey = false
+        keychainProbeDigest = nil
+        isolationCanaryPresent = false
+        isolationCanaryDigest = nil
+    }
     private func refreshProbeState(publishSuccess: Bool) {
         do {
             let value = try keychain.read(account: Self.probeAccount)
@@ -625,6 +710,7 @@ final class AppViewModel: ObservableObject {
 
 
     func prepareIsolationCanary() {
+        guard requireActiveBuildForMutation(.diagnosticsCanaryPrepare) else { return }
         do {
             isolationCanaryDigest = try isolationCanaryRepository.prepare()
             isolationCanaryPresent = true
@@ -635,10 +721,12 @@ final class AppViewModel: ObservableObject {
     }
 
     func verifyIsolationCanary() {
+        guard requireActiveBuildForMutation(.diagnosticsCanaryVerify) else { return }
         refreshIsolationCanary(publishSuccess: true)
     }
 
     func deleteIsolationCanary() {
+        guard requireActiveBuildForMutation(.diagnosticsCanaryDelete) else { return }
         do {
             try isolationCanaryRepository.delete()
             isolationCanaryDigest = nil

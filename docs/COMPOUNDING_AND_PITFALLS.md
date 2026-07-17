@@ -369,3 +369,43 @@ An isolated companion does not establish universal protection against every Trol
 ## P-089 Syntax parsing does not prove XCTest discovery
 
 `swiftc -parse` can accept a function named like a test even when it is accidentally nested inside a helper type instead of an `XCTestCase`. That produces false confidence: syntax is valid, but Xcode will not discover or run the intended test. After moving or generating tests, inspect class boundaries and confirm the method belongs to the expected test case; then rely on the Xcode test report, not parse success alone, as the authoritative discovery evidence.
+
+## P-090 Simulator build settings cannot replace installed plist stamping
+
+Passing `MARKETING_VERSION`, `CURRENT_PROJECT_VERSION`, or custom identity values to `xcodebuild` does not prove that the built or installed `Info.plist` contains those values. Generate the executable identity before project generation, stamp the exact same identity into the source plist before XcodeGen for Simulator CI, and inspect the processed plist again during device packaging. The executable constants and installed bundle must be compared independently at runtime.
+
+## P-091 Sidecar JSON does not prove executable compiled identity
+
+A generated metadata JSON file can be correct while the shipped Mach-O contains stale code. Embed a canonical, bounded identity marker in the executable, extract it from the packaged binary, and require an exact match with manifest metadata, plist identity, commit, version, build, fingerprint, and Candidate Set ID. Treat sidecar files only as declared metadata, never as proof of the running executable.
+
+## P-092 Candidate Set ID must be recomputed
+
+A manifest-supplied Candidate Set ID is untrusted input. Recompute it from the full canonical binding and reject any mismatch. The binding includes commit, marketing version, GitHub run ID, run attempt, run number, derived build number, and both fixed Bundle IDs. A retry or marketing-version change must therefore produce a different Candidate Set ID even if every other input is unchanged.
+
+## P-093 Cached authorization creates a mutation TOCTOU window
+
+A separate `authorize()` call followed later by a database or Keychain mutation leaves a revocation window. Authorization must cover the protected side effect under one synchronization boundary, with identity and authorization epoch checked immediately before the body executes. Revocation must not interleave with a mutation already admitted under that boundary, and every later operation must observe the revoked state.
+
+## P-094 Canary evidence must be build-activation gated
+
+Keychain isolation evidence belongs to one exact active candidate, not to the installation in general. When runtime identity becomes unavailable or mismatched, clear cached key-presence, canary-presence, and digest displays without touching the repositories. Do not let stale evidence appear to validate a different executable, and do not read or mutate canaries until runtime activation is active.
+
+## P-095 ZIP paths require filesystem-equivalent collision checks
+
+Rejecting only byte-identical ZIP entry names is insufficient on case-insensitive or Unicode-normalizing filesystems. Before extraction or audit, compare archive paths under raw case folding plus NFC and NFD normalization, reject equivalent collisions, reject symlinks and special files, and reject unreviewed nested executable locations such as PlugIns, Watch, XPCServices, frameworks, and dylibs.
+
+## P-096 Candidate Set must bind one shared marketing version
+
+The main App and companion Probe must not share a Candidate Set while carrying different `CFBundleShortVersionString` values. Store one manifest-level version, include it in Candidate Set derivation, and require both compiled identities and both packaged plists to match it exactly. Mixed-version paired IPA artifacts are invalid even when commit, build number, signatures, and entitlements otherwise agree.
+
+## P-097 Authorization must cover the protected side effect
+
+Checking permission before entering a long method is not enough if the actual write occurs after the guard can change. Use a governed transaction-style API whose authorized closure encloses the current synchronous side effect. For future long-running model calls, do not hold the authorization lock across the network: authorize and journal the task, perform the remote call outside the lock, then reauthorize and commit atomically.
+
+## P-098 Fail-closed errors must preserve unsent user input
+
+Runtime activation failure is a security state, not a successful chat turn. Do not clear the draft, append a fake user message, or manufacture an Agent reply when the runtime is unavailable. Preserve the user's unsent text, show the activation error separately, and allow retry only after the candidate becomes active.
+
+## P-099 Dynamic revocation must clear cached security evidence
+
+When a previously active executable becomes mismatched at runtime, immediately revoke the runtime, cancel governed work, and clear UI-cached security evidence. Clearing the display must not itself trigger Keychain or canary repository access, because even a read would cross the newly closed authorization boundary.

@@ -28,6 +28,12 @@ struct DeviceDiagnosticsView: View {
                     .font(.callout)
                     .foregroundStyle(.secondary)
                     .accessibilityIdentifier("diagnostics-build-activation-message")
+                if !model.isAgentExecutionAllowed {
+                    Text("Diagnostic Keychain and canary controls are disabled until the running executable and installed bundle match.")
+                        .font(.footnote)
+                        .foregroundStyle(.red)
+                        .accessibilityIdentifier("diagnostics-build-activation-blocked-guidance")
+                }
             }
 
             Section("Cross-App Keychain Isolation") {
@@ -56,21 +62,21 @@ struct DeviceDiagnosticsView: View {
                     model.prepareIsolationCanary()
                 }
                 .buttonStyle(.borderedProminent)
-                .disabled(model.isolationCanaryPresent)
+                .disabled(!model.isAgentExecutionAllowed || model.isolationCanaryPresent)
                 .accessibilityIdentifier("isolation-canary-prepare")
 
                 Button("Verify canary is unchanged") {
                     model.verifyIsolationCanary()
                 }
                 .buttonStyle(.bordered)
-                .disabled(!model.isolationCanaryPresent)
+                .disabled(!model.isAgentExecutionAllowed || !model.isolationCanaryPresent)
                 .accessibilityIdentifier("isolation-canary-verify")
 
                 Button("Delete isolation canary", role: .destructive) {
                     model.deleteIsolationCanary()
                 }
                 .buttonStyle(.bordered)
-                .disabled(!model.isolationCanaryPresent)
+                .disabled(!model.isAgentExecutionAllowed || !model.isolationCanaryPresent)
                 .accessibilityIdentifier("isolation-canary-delete")
             }
 
@@ -105,6 +111,7 @@ struct DeviceDiagnosticsView: View {
                         .accessibilityIdentifier("keychain-probe-input-heading")
 
                     SecureField("Type disposable value here", text: $model.apiKeyInput)
+                        .disabled(!model.isAgentExecutionAllowed)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
                         .textFieldStyle(.roundedBorder)
@@ -133,7 +140,7 @@ struct DeviceDiagnosticsView: View {
                     }
                     .buttonStyle(.borderedProminent)
                     .controlSize(.large)
-                    .disabled(model.apiKeyInput.isEmpty)
+                    .disabled(!model.isAgentExecutionAllowed || model.apiKeyInput.isEmpty)
                     .accessibilityIdentifier("keychain-probe-save")
                 }
 
@@ -144,11 +151,12 @@ struct DeviceDiagnosticsView: View {
 
                     Button("Read and verify") { model.readProbeKey() }
                         .buttonStyle(.bordered)
+                        .disabled(!model.isAgentExecutionAllowed)
                         .accessibilityIdentifier("keychain-probe-read")
 
                     Button("Delete and verify", role: .destructive) { model.deleteProbeKey() }
                         .buttonStyle(.bordered)
-                        .disabled(!model.hasStoredKey)
+                        .disabled(!model.isAgentExecutionAllowed || !model.hasStoredKey)
                         .accessibilityIdentifier("keychain-probe-delete")
                 }
 

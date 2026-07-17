@@ -16,11 +16,13 @@ final class AgentRuntime {
     init(database: AppDatabase, authorizer: any AgentExecutionAuthorizing) throws {
         self.database = database
         self.authorizer = authorizer
-        conversation = try database.ensureDefaultConversation()
+        conversation = try authorizer.performAuthorized(.runtimeInitialization) {
+            try database.ensureDefaultConversation()
+        }
     }
 
     func restore(now: Date = Date()) throws -> AgentRuntimeSnapshot {
-        try authorizer.authorize(.runtimeReconciliation)
+        try authorizer.performAuthorized(.runtimeReconciliation) {
         let session = try database.loadAgentSession(conversationID: conversation.id) ?? .empty(now: now)
         let approvalState = try database.ensureOpeningPlanApprovalState(
             conversationID: conversation.id,
@@ -62,6 +64,7 @@ final class AgentRuntime {
             lastReceipt: lastReceipt,
             latestRun: try database.latestAgentRun(conversationID: conversation.id)
         )
+        }
     }
 
     func handleUserMessage(_ rawText: String, now: Date = Date()) throws -> AgentTurnResult {
@@ -70,7 +73,8 @@ final class AgentRuntime {
         }
         let text = rawText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return AgentTurnResult(snapshot: try restore(now: now), status: "Ready") }
-        try authorizer.authorize(.agentTurn)
+        return try authorizer.performAuthorized(.agentTurn) {
+        try authorizer.authorize(.durableMutation)
 
         let userMessage = try database.appendAgentMessage(
             conversationID: conversation.id,
@@ -90,11 +94,13 @@ final class AgentRuntime {
             startedAt: now,
             updatedAt: now
         )
+        try authorizer.authorize(.durableMutation)
         try database.saveAgentRun(run, conversationID: conversation.id)
 
         do {
         let storedSession = try database.loadAgentSession(conversationID: conversation.id)
         if projects.isEmpty && Self.isProjectCreationIntent(text) {
+            try authorizer.authorize(.durableMutation)
             let tool = try database.executeProjectCreateTool(
                 conversationID: conversation.id,
                 title: "Untitled Novel",
@@ -104,6 +110,7 @@ final class AgentRuntime {
             )
             try appendAssistant("Project created: " + tool.project.title, now: now)
             try appendAssistant(Self.interviewQuestions[0], now: now)
+            try authorizer.authorize(.durableMutation)
             try database.saveAgentSession(
                 AgentSessionState(
                     focusedProjectID: tool.project.id,
@@ -131,6 +138,7 @@ final class AgentRuntime {
             interviewAnswers: [],
             updatedAt: now
         )
+        try authorizer.authorize(.durableMutation)
         if let approvalState = try database.ensureOpeningPlanApprovalState(
             conversationID: conversation.id,
             focusedProjectID: current.focusedProjectID,
@@ -165,6 +173,7 @@ final class AgentRuntime {
 
         if step < Self.interviewQuestions.count {
             let question = Self.interviewQuestions[step]
+            try authorizer.authorize(.durableMutation)
             try database.saveAgentSession(
                 AgentSessionState(
                     focusedProjectID: current.focusedProjectID ?? projects.first?.id,
@@ -185,6 +194,7 @@ final class AgentRuntime {
             throw AppDatabaseError.invalidApprovalRequest
         }
         let planBody = Self.makeOpeningPlan(answers: answers)
+        try authorizer.authorize(.durableMutation)
         _ = try database.executeOpeningPlanSaveTool(
             conversationID: conversation.id,
             projectID: projectID,
@@ -193,6 +203,7 @@ final class AgentRuntime {
             idempotencyKey: "artifact.openingPlan.save." + userMessage.id.uuidString,
             now: now
         )
+        try authorizer.authorize(.durableMutation)
         try database.saveAgentSession(
             AgentSessionState(
                 focusedProjectID: projectID,
@@ -229,6 +240,7 @@ final class AgentRuntime {
             try? finish(run: run, status: .failed, stage: "agentTurn.failed", now: now)
             throw error
         }
+        }
     }
 
     func approveOpeningPlan(
@@ -236,7 +248,7 @@ final class AgentRuntime {
         displayedBindingHash: String,
         now: Date = Date()
     ) throws -> AgentTurnResult {
-        try authorizer.authorize(.openingPlanApproval)
+        return try authorizer.performAuthorized(.openingPlanApproval) {
         guard !displayedBindingHash.isEmpty else { throw AppDatabaseError.invalidApprovalRequest }
         let approvalKey = Self.approvalIdempotencyKey(requestID: approvalRequestID, bindingHash: displayedBindingHash)
         let existingRun = try database.agentRun(idempotencyKey: approvalKey)
@@ -251,6 +263,7 @@ final class AgentRuntime {
                 currentStage: "openingPlan.approve", startedAt: now, updatedAt: now
             )
         }
+        try authorizer.authorize(.durableMutation)
         try database.saveAgentRun(
             AgentRunSnapshot(
                 id: run.id, projectID: run.projectID,
@@ -261,6 +274,7 @@ final class AgentRuntime {
         )
 
         do {
+            try authorizer.authorize(.openingPlanApproval)
             let result = try database.executeOpeningPlanApprovalTool(
                 conversationID: conversation.id,
                 approvalRequestID: approvalRequestID,
@@ -290,6 +304,7 @@ final class AgentRuntime {
         } catch {
             try? finish(run: run, status: .failed, stage: "openingPlan.approvalFailed", now: now)
             throw error
+        }
         }
     }
 
@@ -384,6 +399,7 @@ final class AgentRuntime {
         run: AgentRunSnapshot,
         now: Date
     ) throws -> AgentTurnResult {
+        try authorizer.authorize(.chapterGenerate)
         let body = ChapterAgentTemplates.initialChapterBody(project: project, openingPlan: approvalState.artifact)
         let evidence = ChapterAgentTemplates.initialEvidenceReview(openingPlan: approvalState.artifact)
         let key = [
@@ -420,6 +436,7 @@ final class AgentRuntime {
         run: AgentRunSnapshot,
         now: Date
     ) throws -> AgentTurnResult {
+        try authorizer.authorize(.chapterReject)
         let version = snapshot.activeVersion
         let reasonHash = ChapterAgentTemplates.fingerprint([reason])
         let result = try database.executeChapterRejectTool(
@@ -451,6 +468,7 @@ final class AgentRuntime {
         run: AgentRunSnapshot,
         now: Date
     ) throws -> AgentTurnResult {
+        try authorizer.authorize(.chapterDiagnosis)
         let currentAnswers = snapshot.diagnosisAnswers
         let questionIndex = min(currentAnswers.count, ChapterDiagnosisProtocol.orderedQuestions.count - 1)
         let question = ChapterDiagnosisProtocol.orderedQuestions[questionIndex]
@@ -530,6 +548,7 @@ final class AgentRuntime {
         run: AgentRunSnapshot,
         now: Date
     ) throws -> AgentTurnResult {
+        try authorizer.authorize(.chapterRewrite)
         guard !snapshot.calibration.diagnosisHash.isEmpty,
               let rewriteScopeHash = snapshot.calibration.rewriteScopeHash,
               !rewriteScopeHash.isEmpty else {
@@ -577,6 +596,7 @@ final class AgentRuntime {
         run: AgentRunSnapshot,
         now: Date
     ) throws -> AgentTurnResult {
+        try authorizer.authorize(.chapterAccept)
         let version = snapshot.activeVersion
         let key = ["chapter.accept", version.id.uuidString, version.contentHash].joined(separator: ".")
         let result = try database.executeChapterAcceptTool(
@@ -602,6 +622,7 @@ final class AgentRuntime {
 
     @discardableResult
     private func reconcileCommittedChapterTool(_ result: ChapterToolResult, now: Date) throws -> Bool {
+        try authorizer.authorize(.runtimeReconciliation)
         guard let originRunID = result.receipt.originRunID,
               let run = try database.agentRun(id: originRunID, conversationID: conversation.id),
               run.kind == "agentTurn" else { return false }
@@ -813,6 +834,7 @@ final class AgentRuntime {
     }
 
     private func appendAssistant(_ content: String, idempotencyKey: String? = nil, now: Date) throws {
+        try authorizer.authorize(.durableMutation)
         _ = try database.appendAgentMessage(
             conversationID: conversation.id,
             role: .assistant,
@@ -844,6 +866,7 @@ final class AgentRuntime {
     }
 
     private func finish(run: AgentRunSnapshot, status: AgentRunStatus, stage: String, now: Date) throws {
+        try authorizer.authorize(.durableMutation)
         try database.saveAgentRun(
             AgentRunSnapshot(
                 id: run.id, projectID: run.projectID,

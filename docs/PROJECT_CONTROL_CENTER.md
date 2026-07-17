@@ -396,3 +396,50 @@ iPadOS CI now generates both identities, runs both schemes, and uploads two xcre
 ```
 
 Authoritative Xcode compilation and simulator execution are still pending on `macos-15` with Xcode 16.4. No device acceptance may be requested until Core CI and iPadOS CI are green and the exact paired IPA artifact has been independently audited.
+
+## 2026-07-17 Build 28 candidate-set and runtime authorization hardening
+
+Status: implementation and local static/script validation complete; Core CI, iPadOS CI, paired IPA construction, offline artifact audit, and physical-device acceptance are still pending. No Build 28 real-device success is claimed yet.
+
+Purpose: eliminate the recurring ambiguous state where one TrollStore overwrite can leave old UI/code visible while files on disk report the new build. Build 28 does not normalize a second overwrite. It embeds identity into each final Mach-O, compares the running executable identity with the installed bundle identity, and fails closed when they cannot be proven identical.
+
+Implemented candidate and artifact controls:
+
+- The main App and Keychain Isolation Probe are built as one Candidate Set with fixed roles and Bundle IDs.
+- Candidate Set derivation now binds commit, marketing version, run ID, run attempt, run number, derived build number, and both Bundle IDs.
+- The manifest stores one top-level `version`; both compiled identities and both packaged plists must match it.
+- Build retries derive collision-free build numbers from `runNumber * 1000 + runAttempt`.
+- Executable identity is emitted to Swift and C, embedded in each Mach-O, extracted from each IPA, and compared against manifest and plist identity.
+- Artifact verification recomputes Candidate Set ID instead of trusting the manifest value.
+- Manifest and artifact JSON reject duplicate keys.
+- IPA inspection rejects case-folded and NFC/NFD-equivalent path collisions, symlinks, special files, unsafe roots, archive bombs, and unreviewed nested code.
+- The artifact directory itself must be a real directory rather than a symlink.
+
+Implemented runtime controls:
+
+- `BuildActivationAgentAuthorizer.performAuthorized` holds an authorization boundary over the current synchronous governed side effect and prevents revocation from interleaving with an admitted mutation.
+- Runtime initialization, reconciliation, Agent turns, and opening-plan approval are governed; existing finer-grained durable and chapter mutation checks remain nested.
+- Dynamic identity mismatch cancels governed work and clears cached Keychain/canary evidence without repository access.
+- A rejected Agent turn preserves the unsent draft and does not append fictitious conversation messages.
+- Device Diagnostics exposes running executable, installed bundle, Candidate Set, and an explicit active/mismatch diagnostic.
+
+Local validation completed on 2026-07-17:
+
+```text
+Python unittest scripts: 47 passed, 1 platform-dependent symlink test skipped on Windows
+Contract scripts: build identity and candidate-set contracts passed
+Python py_compile: passed
+Swift frontend parse for all modified Swift and XCTest files: passed
+Git Bash syntax check for build-candidate-set.sh: passed
+git diff --check: passed
+```
+
+Current authoritative gate:
+
+1. Review the complete diff and remove temporary logs/caches.
+2. Commit and push the exact Build 28 HEAD.
+3. Require Core CI and iPadOS CI to pass for that HEAD; Xcode type-check and XCTest discovery remain authoritative.
+4. Trigger `build-ipa.yml` only after both CI workflows pass.
+5. Download the main and Probe IPA from the same artifact directory and run the strict offline verifier.
+6. Ask for one-overwrite real-device acceptance only after the paired Candidate Set audit passes.
+7. If the first overwrite does not activate the new executable, terminate/relaunch or respring and collect diagnostics; never instruct a second overwrite as the fix.

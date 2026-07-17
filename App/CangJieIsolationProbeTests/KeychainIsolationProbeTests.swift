@@ -83,7 +83,7 @@ final class KeychainIsolationProbeTests: XCTestCase {
         XCTAssertEqual(report.overallDisposition, .inconclusive)
     }
 
-    func testProbeCreatesReadsAndDeletesOnlyInsideItsOwnAccessGroup() {
+    func testProbeCreatesReadsAndDeletesOnlyInsideItsOwnAccessGroup() throws {
         let client = passingClient()
         let probe = KeychainIsolationProbe(
             securityClient: client,

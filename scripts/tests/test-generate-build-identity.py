@@ -23,6 +23,7 @@ class GenerateBuildIdentityTests(unittest.TestCase):
             "commit": COMMIT,
             "candidate_set_id": CANDIDATE,
             "swift_output": str(root / "GeneratedBuildIdentity.swift"),
+            "c_output": str(root / "GeneratedBuildIdentityMarker.c"),
             "metadata_output": str(root / "identity.json"),
         }
         values.update(overrides)
@@ -37,7 +38,9 @@ class GenerateBuildIdentityTests(unittest.TestCase):
             result = self.run_generator(root)
             self.assertEqual(result.returncode, 0, result.stderr)
             swift = (root / "GeneratedBuildIdentity.swift").read_text(encoding="utf-8")
-            metadata = json.loads((root / "identity.json").read_text(encoding="utf-8"))
+            metadata_bytes = (root / "identity.json").read_bytes()
+            metadata = json.loads(metadata_bytes)
+            c_source = (root / "GeneratedBuildIdentityMarker.c").read_text(encoding="utf-8")
             expected = hashlib.sha256(
                 f"cangjie-executable-v1|main|com.juyang.CangJie|1.0|28|{COMMIT}|{CANDIDATE}".encode()
             ).hexdigest()
@@ -46,10 +49,17 @@ class GenerateBuildIdentityTests(unittest.TestCase):
             self.assertIn(f'static let fingerprint = "{expected}"', swift)
             self.assertIn(f'static let candidateSetID = "{CANDIDATE}"', swift)
             self.assertEqual(metadata["fingerprint"], expected)
+            import base64
+            canonical = json.dumps(metadata, ensure_ascii=False, separators=(",", ":"), sort_keys=True).encode("utf-8")
+            encoded = base64.urlsafe_b64encode(canonical).decode("ascii").rstrip("=")
+            self.assertIn("__TEXT,__cjidentity", c_source)
+            self.assertIn(f"CANGJIE_IDENTITY_V1:{encoded}", c_source)
             before = (root / "GeneratedBuildIdentity.swift").read_bytes()
+            c_before = (root / "GeneratedBuildIdentityMarker.c").read_bytes()
             result = self.run_generator(root)
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertEqual((root / "GeneratedBuildIdentity.swift").read_bytes(), before)
+            self.assertEqual((root / "GeneratedBuildIdentityMarker.c").read_bytes(), c_before)
             self.assertFalse(list(root.glob("*.tmp")))
 
     def test_rejects_invalid_commit_without_touching_output(self):

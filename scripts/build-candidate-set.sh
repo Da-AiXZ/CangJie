@@ -12,6 +12,7 @@ readonly MAIN_PRODUCT="CangJie"
 readonly MAIN_BUNDLE_ID="com.juyang.CangJie"
 readonly MAIN_ENTITLEMENTS="${ROOT}/App/Config/CangJie.entitlements"
 readonly MAIN_SWIFT_IDENTITY="${ROOT}/App/CangJieApp/GeneratedBuildIdentity.swift"
+readonly MAIN_C_IDENTITY="${ROOT}/App/CangJieApp/GeneratedBuildIdentity.c"
 readonly MAIN_IPA="CangJie-M0.ipa"
 readonly PROBE_ROLE="keychainIsolationProbe"
 readonly PROBE_SCHEME="CangJieKeychainIsolationProbe"
@@ -19,6 +20,7 @@ readonly PROBE_PRODUCT="CangJieKeychainIsolationProbe"
 readonly PROBE_BUNDLE_ID="com.juyang.CangJie.KeychainIsolationProbe"
 readonly PROBE_ENTITLEMENTS="${ROOT}/App/Config/CangJieIsolationProbe.entitlements"
 readonly PROBE_SWIFT_IDENTITY="${ROOT}/App/CangJieIsolationProbe/GeneratedBuildIdentity.swift"
+readonly PROBE_C_IDENTITY="${ROOT}/App/CangJieIsolationProbe/GeneratedBuildIdentity.c"
 readonly PROBE_IPA="CangJie-Keychain-Isolation-Probe.ipa"
 readonly VERSION="${CANGJIE_MARKETING_VERSION:-1.0}"
 readonly LDID_TAG="v2.1.5-procursus7"
@@ -30,22 +32,27 @@ regular_file() { [[ -f "$1" && ! -L "$1" ]] || fail "$2 is missing or unsafe: $1
 for tool in python3 git xcodegen xcodebuild xcrun lipo file zip unzip shasum codesign; do require_tool "${tool}"; done
 [[ "${ROOT}" != "/" && "${OUT}" == "${ROOT}/.build-ipa" ]] || fail "Unsafe candidate output path"
 
-readonly COMMIT="${GITHUB_SHA:-$(git -C "${ROOT}" rev-parse HEAD)}"
-[[ "${COMMIT}" =~ ^[0-9a-f]{40}$ ]] || fail "A full lowercase 40-character Git commit is required"
+readonly HEAD_COMMIT="$(git -C "${ROOT}" rev-parse HEAD)"
+[[ "${HEAD_COMMIT}" =~ ^[0-9a-f]{40}$ ]] || fail "Git HEAD is not a full lowercase 40-character commit"
+if [[ -n "${GITHUB_SHA:-}" && "${GITHUB_SHA}" != "${HEAD_COMMIT}" ]]; then
+  fail "GITHUB_SHA must exactly match git HEAD (${HEAD_COMMIT})"
+fi
+readonly COMMIT="${HEAD_COMMIT}"
 readonly RUN_ID="${GITHUB_RUN_ID:-1}"
 readonly RUN_ATTEMPT="${GITHUB_RUN_ATTEMPT:-1}"
 readonly RUN_NUMBER="${GITHUB_RUN_NUMBER:-$(git -C "${ROOT}" rev-list --count HEAD)}"
-readonly BUILD_NUMBER="${RUN_NUMBER}"
-for binding in RUN_ID RUN_ATTEMPT RUN_NUMBER BUILD_NUMBER; do
+for binding in RUN_ID RUN_ATTEMPT RUN_NUMBER; do
   value="${!binding}"
-  [[ "${value}" =~ ^[1-9][0-9]*$ ]] || fail "${binding} must be a positive integer"
+  [[ "${value}" =~ ^[1-9][0-9]*$ ]] || fail "${binding} must be a canonical positive integer"
 done
 
-readonly CANDIDATE_SET_ID="$(python3 - "${COMMIT}" "${RUN_ID}" "${RUN_ATTEMPT}" "${BUILD_NUMBER}" "${MAIN_BUNDLE_ID}" "${PROBE_BUNDLE_ID}" <<'PY'
-import hashlib, sys
-print(hashlib.sha256("|".join(sys.argv[1:]).encode("utf-8")).hexdigest())
-PY
-)"
+readonly BUILD_NUMBER="$(python3 "${ROOT}/scripts/candidate_set_identity.py" build-version \
+  --run-number "${RUN_NUMBER}" --run-attempt "${RUN_ATTEMPT}")"
+[[ "${BUILD_NUMBER}" =~ ^[1-9][0-9]*$ ]] || fail "Build version derivation failed"
+readonly CANDIDATE_SET_ID="$(python3 "${ROOT}/scripts/candidate_set_identity.py" candidate-set-id \
+  --commit "${COMMIT}" --run-id "${RUN_ID}" --run-attempt "${RUN_ATTEMPT}" \
+  --run-number "${RUN_NUMBER}" --version "${VERSION}" --build "${BUILD_NUMBER}" \
+  --main-bundle-id "${MAIN_BUNDLE_ID}" --probe-bundle-id "${PROBE_BUNDLE_ID}")"
 [[ "${CANDIDATE_SET_ID}" =~ ^[0-9a-f]{64}$ ]] || fail "Candidate set ID generation failed"
 
 regular_file "${MAIN_ENTITLEMENTS}" "Main entitlement contract"
@@ -60,11 +67,13 @@ mkdir -p "${OUT}/identity" "${OUT}/metadata" "${OUT}/signing" "${OUT}/packages"
 python3 "${ROOT}/scripts/generate-build-identity.py" \
   --role "${MAIN_ROLE}" --bundle-id "${MAIN_BUNDLE_ID}" --version "${VERSION}" \
   --build "${BUILD_NUMBER}" --commit "${COMMIT}" --candidate-set-id "${CANDIDATE_SET_ID}" \
-  --swift-output "${MAIN_SWIFT_IDENTITY}" --metadata-output "${OUT}/identity/main.json"
+  --swift-output "${MAIN_SWIFT_IDENTITY}" --c-output "${MAIN_C_IDENTITY}" \
+  --metadata-output "${OUT}/identity/main.json"
 python3 "${ROOT}/scripts/generate-build-identity.py" \
   --role "${PROBE_ROLE}" --bundle-id "${PROBE_BUNDLE_ID}" --version "${VERSION}" \
   --build "${BUILD_NUMBER}" --commit "${COMMIT}" --candidate-set-id "${CANDIDATE_SET_ID}" \
-  --swift-output "${PROBE_SWIFT_IDENTITY}" --metadata-output "${OUT}/identity/probe.json"
+  --swift-output "${PROBE_SWIFT_IDENTITY}" --c-output "${PROBE_C_IDENTITY}" \
+  --metadata-output "${OUT}/identity/probe.json"
 
 cd "${ROOT}"
 bash "${ROOT}/scripts/build-ipa.sh" --verify-dependency-contract
@@ -127,6 +136,7 @@ if not isinstance(name,str) or not name or "/" in name or "\\" in name: raise Sy
 print(name)
 PY
 )"
+  [[ "${executable_name}" == "${product}" ]] || fail "${role} executable name must be ${product}"
   local executable="${app}/${executable_name}"
   regular_file "${executable}" "${role} executable"
   [[ "$(lipo -archs "${executable}" | xargs)" == "arm64" ]] || fail "${role} executable is not arm64-only"
@@ -183,7 +193,7 @@ package_candidate "${PROBE_ROLE}" "${PROBE_PRODUCT}" "${PROBE_BUNDLE_ID}" "${PRO
 
 python3 "${ROOT}/scripts/create-candidate-set-manifest.py" \
   --output "${OUT}/candidate-set-manifest.json" --candidate-set-id "${CANDIDATE_SET_ID}" \
-  --commit "${COMMIT}" --build "${BUILD_NUMBER}" --run-id "${RUN_ID}" --run-attempt "${RUN_ATTEMPT}" \
+  --commit "${COMMIT}" --version "${VERSION}" --build "${BUILD_NUMBER}" --run-id "${RUN_ID}" --run-attempt "${RUN_ATTEMPT}" \
   --run-number "${RUN_NUMBER}" --repository "${GITHUB_REPOSITORY:-unknown}" --ref "${GITHUB_REF:-unknown}" \
   --workflow "${GITHUB_WORKFLOW:-unknown}" --reason "${BUILD_REASON:-unspecified}" \
   --artifact "${OUT}/metadata/main.json" --artifact "${OUT}/metadata/keychainIsolationProbe.json"
@@ -193,6 +203,7 @@ cat >"${OUT}/DEVICE-VALIDATION.md" <<EOF
 
 - Candidate Set ID: \`${CANDIDATE_SET_ID}\`
 - Commit: \`${COMMIT}\`
+- Marketing Version: \`${VERSION}\`
 - Build / Run: \`${BUILD_NUMBER}\`
 - Run ID / Attempt: \`${RUN_ID}\` / \`${RUN_ATTEMPT}\`
 

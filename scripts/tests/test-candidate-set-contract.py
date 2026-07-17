@@ -20,6 +20,15 @@ for contract in required_build:
 assert build.index('generate-build-identity.py') < build.index('xcodegen generate')
 assert build.index('generate-build-identity.py') < build.index('xcodebuild')
 
+assert 'GITHUB_SHA must exactly match git HEAD' in build
+assert 'candidate_set_identity.py" build-version' in build
+assert 'candidate_set_identity.py" candidate-set-id' in build
+assert '--version "${VERSION}"' in build
+assert '--version "${marketing_version}"' in ios
+assert '--c-output "${MAIN_C_IDENTITY}"' in build
+assert '--c-output "${PROBE_C_IDENTITY}"' in build
+assert 'executable name must be ${product}' in build
+
 for contract in [
     'scripts/tests/test-generate-build-identity.py',
     'scripts/build-candidate-set.sh',

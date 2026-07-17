@@ -19,9 +19,38 @@ final class AppViewModelTests: XCTestCase {
         func loadInfoDictionary() -> [String: Any]? { infoDictionary }
     }
 
+    private final class CountingSecretRepository: SecretRepository {
+        var storedValue: String?
+        var saveCalls = 0
+        var readCalls = 0
+        var deleteCalls = 0
+
+        init(storedValue: String? = nil) {
+            self.storedValue = storedValue
+        }
+
+        func save(_ secret: String, account: String) throws {
+            saveCalls += 1
+            storedValue = secret
+        }
+
+        func read(account: String) throws -> String? {
+            readCalls += 1
+            return storedValue
+        }
+
+        func contains(account: String) throws -> Bool { storedValue != nil }
+
+        func delete(account: String) throws {
+            deleteCalls += 1
+            storedValue = nil
+        }
+    }
+
     private final class InMemoryIsolationCanaryRepository: IsolationCanaryRepository {
         var digest: String?
         var prepareCalls = 0
+        var currentDigestCalls = 0
         var deleteCalls = 0
 
         func prepare() throws -> String {
@@ -32,7 +61,10 @@ final class AppViewModelTests: XCTestCase {
             return created
         }
 
-        func currentDigest() throws -> String? { digest }
+        func currentDigest() throws -> String? {
+            currentDigestCalls += 1
+            return digest
+        }
 
         func delete() throws {
             deleteCalls += 1
@@ -142,6 +174,142 @@ final class AppViewModelTests: XCTestCase {
             viewModel.sendAgentMessage()
             XCTAssertTrue(try database.listProjects().isEmpty)
             XCTAssertEqual(viewModel.draft, "unsaved user draft")
+        }
+    }
+
+    @MainActor
+    func testActiveLifecycleAlwaysPausesStreamingBeforeCheckpoint() throws {
+        try withDatabase { database in
+            let viewModel = AppViewModel(database: database, keychain: StubSecretRepository())
+            viewModel.draft = "checkpoint this draft"
+            viewModel.isStreaming = true
+
+            viewModel.handleScenePhase(.inactive)
+
+            XCTAssertFalse(viewModel.isStreaming)
+            let storedTaskID = try XCTUnwrap(UserDefaults.standard.string(forKey: "m0TaskID"))
+            let taskID = try XCTUnwrap(UUID(uuidString: storedTaskID))
+            XCTAssertEqual(try database.latestCheckpoint(taskID: taskID)?.reason, "sceneInactive")
+
+            viewModel.draft = "must not persist after suspension"
+            viewModel.saveDraft()
+            XCTAssertNil(try database.loadDraft())
+        }
+    }
+
+    @MainActor
+    func testInitialIdentityMismatchDoesNotReadKeychainOrCanaryEvidence() {
+        let compiled = BuildIdentityStamp(
+            version: "1.0", build: "28", commit: "0123456789ab",
+            fingerprint: "abc123def4567890", candidateSetID: "candidate-a"
+        )
+        let installed = BuildIdentityStamp(
+            version: "1.0", build: "29", commit: "fedcba987654",
+            fingerprint: "fed456abc1237890", candidateSetID: "candidate-b"
+        )
+        let secrets = CountingSecretRepository()
+        let canary = InMemoryIsolationCanaryRepository()
+
+        let viewModel = AppViewModel(
+            keychain: secrets,
+            isolationCanaryRepository: canary,
+            bundleInfo: installed.infoDictionary,
+            compiledBuildStamp: compiled,
+            buildActivationStore: InMemoryBuildActivationStore()
+        )
+
+        XCTAssertFalse(viewModel.isAgentExecutionAllowed)
+        XCTAssertEqual(secrets.readCalls, 0)
+        XCTAssertEqual(canary.currentDigestCalls, 0)
+        XCTAssertNil(viewModel.keychainProbeDigest)
+        XCTAssertNil(viewModel.isolationCanaryDigest)
+    }
+
+    @MainActor
+    func testDynamicIdentityMismatchClearsCachedSecurityEvidenceWithoutRepositoryAccess() throws {
+        try withDatabase { database in
+            let compiled = BuildIdentityStamp(
+                version: "1.0", build: "28", commit: "0123456789ab",
+                fingerprint: "abc123def4567890", candidateSetID: "candidate-a"
+            )
+            let installed = BuildIdentityStamp(
+                version: "1.0", build: "29", commit: "fedcba987654",
+                fingerprint: "fed456abc1237890", candidateSetID: "candidate-b"
+            )
+            let loader = MutableBundleBuildIdentityLoader(infoDictionary: compiled.infoDictionary)
+            let secrets = CountingSecretRepository(storedValue: "disposable test value")
+            let canary = InMemoryIsolationCanaryRepository()
+            canary.digest = "012345abcdef"
+            let viewModel = AppViewModel(
+                database: database,
+                keychain: secrets,
+                isolationCanaryRepository: canary,
+                compiledBuildStamp: compiled,
+                buildActivationStore: InMemoryBuildActivationStore(),
+                bundleIdentityLoader: loader
+            )
+
+            XCTAssertTrue(viewModel.hasStoredKey)
+            XCTAssertNotNil(viewModel.keychainProbeDigest)
+            XCTAssertTrue(viewModel.isolationCanaryPresent)
+            XCTAssertEqual(viewModel.isolationCanaryDigest, "012345abcdef")
+            let secretReadsBeforeMismatch = secrets.readCalls
+            let secretWritesBeforeMismatch = secrets.saveCalls
+            let secretDeletesBeforeMismatch = secrets.deleteCalls
+            let canaryReadsBeforeMismatch = canary.currentDigestCalls
+            let canaryWritesBeforeMismatch = canary.prepareCalls
+            let canaryDeletesBeforeMismatch = canary.deleteCalls
+            loader.infoDictionary = installed.infoDictionary
+
+            viewModel.readProbeKey()
+
+            XCTAssertFalse(viewModel.hasStoredKey)
+            XCTAssertNil(viewModel.keychainProbeDigest)
+            XCTAssertFalse(viewModel.isolationCanaryPresent)
+            XCTAssertNil(viewModel.isolationCanaryDigest)
+            XCTAssertEqual(secrets.readCalls, secretReadsBeforeMismatch)
+            XCTAssertEqual(secrets.saveCalls, secretWritesBeforeMismatch)
+            XCTAssertEqual(secrets.deleteCalls, secretDeletesBeforeMismatch)
+            XCTAssertEqual(canary.currentDigestCalls, canaryReadsBeforeMismatch)
+            XCTAssertEqual(canary.prepareCalls, canaryWritesBeforeMismatch)
+            XCTAssertEqual(canary.deleteCalls, canaryDeletesBeforeMismatch)
+            XCTAssertFalse(viewModel.isAgentExecutionAllowed)
+            XCTAssertTrue(viewModel.errorMessage?.contains("BUILD-ACTIVATION") == true)
+        }
+    }
+    @MainActor
+    func testIdentityMismatchBlocksAllIsolationCanaryRepositoryCalls() throws {
+        try withDatabase { database in
+            let compiled = BuildIdentityStamp(
+                version: "1.0", build: "28", commit: "0123456789ab",
+                fingerprint: "abc123def4567890", candidateSetID: "candidate-a"
+            )
+            let installed = BuildIdentityStamp(
+                version: "1.0", build: "29", commit: "fedcba987654",
+                fingerprint: "fed456abc1237890", candidateSetID: "candidate-b"
+            )
+            let loader = MutableBundleBuildIdentityLoader(infoDictionary: compiled.infoDictionary)
+            let repository = InMemoryIsolationCanaryRepository()
+            let viewModel = AppViewModel(
+                database: database,
+                keychain: StubSecretRepository(),
+                isolationCanaryRepository: repository,
+                compiledBuildStamp: compiled,
+                buildActivationStore: InMemoryBuildActivationStore(),
+                bundleIdentityLoader: loader
+            )
+            let readsBeforeMismatch = repository.currentDigestCalls
+            loader.infoDictionary = installed.infoDictionary
+
+            viewModel.prepareIsolationCanary()
+            viewModel.verifyIsolationCanary()
+            viewModel.deleteIsolationCanary()
+
+            XCTAssertEqual(repository.prepareCalls, 0)
+            XCTAssertEqual(repository.currentDigestCalls, readsBeforeMismatch)
+            XCTAssertEqual(repository.deleteCalls, 0)
+            XCTAssertFalse(viewModel.isAgentExecutionAllowed)
+            XCTAssertTrue(viewModel.errorMessage?.contains("BUILD-ACTIVATION") == true)
         }
     }
 
@@ -330,6 +498,21 @@ final class AppViewModelTests: XCTestCase {
     }
 
 
+    @MainActor
+    func testSendAgentMessagePreservesDraftAndConversationWhenRuntimeIsUnavailable() {
+        let viewModel = AppViewModel(
+            databaseFactory: { throw StubDatabaseError.openFailed },
+            keychain: StubSecretRepository()
+        )
+        viewModel.draft = "do not lose this command"
+        let messagesBeforeSend = viewModel.conversationMessages
+
+        viewModel.sendAgentMessage()
+
+        XCTAssertEqual(viewModel.draft, "do not lose this command")
+        XCTAssertEqual(viewModel.conversationMessages, messagesBeforeSend)
+        XCTAssertTrue(viewModel.errorMessage?.contains("Agent runtime unavailable") == true)
+    }
     @MainActor
     func testAgentCreationMessageExecutesProjectToolAndClearsComposer() throws {
         try withDatabase { database in
@@ -790,8 +973,18 @@ final class AppViewModelTests: XCTestCase {
     @MainActor
     func testAgentRuntimeAuthorizerRejectsBeforeAnyDurableMessageOrRun() throws {
         try withDatabase { database in
-            let authorizer = BuildActivationAgentAuthorizer(allowed: false)
+            let stamp = BuildIdentityStamp(
+                version: "1.0", build: "28", commit: "0123456789ab",
+                fingerprint: "abc123def4567890", candidateSetID: "candidate-a"
+            )
+            let loader = MutableBundleBuildIdentityLoader(infoDictionary: stamp.infoDictionary)
+            let authorizer = BuildActivationAgentAuthorizer(
+                compiledBuildStamp: stamp,
+                bundleIdentityLoader: loader,
+                allowed: true
+            )
             let runtime = try AgentRuntime(database: database, authorizer: authorizer)
+            authorizer.update(allowed: false)
 
             XCTAssertThrowsError(try runtime.handleUserMessage("create a cultivation novel")) { error in
                 XCTAssertEqual(error as? AgentExecutionAuthorizationError, .buildNotActive)

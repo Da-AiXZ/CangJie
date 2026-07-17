@@ -28,6 +28,8 @@ jobs:
         run: |
           set -euo pipefail
           python3 scripts/tests/test-generate-build-identity.py
+          python3 scripts/tests/test-candidate-set-identity.py
+          python3 scripts/tests/test-create-candidate-set-manifest.py
           python3 scripts/tests/test-verify-build-artifacts.py
           python3 scripts/tests/test-candidate-set-contract.py
           python3 scripts/tests/test-build-identity-contract.py

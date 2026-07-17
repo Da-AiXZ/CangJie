@@ -59,3 +59,6 @@ fixtures/private/
 *.zip
 AI写小说开发资料包.zip
 cc.zip
+# Python tooling caches
+__pycache__/
+*.py[cod]

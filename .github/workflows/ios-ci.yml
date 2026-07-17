@@ -28,6 +28,8 @@ jobs:
       - name: Verify build identity and candidate-set contracts
         run: |
           python3 scripts/tests/test-generate-build-identity.py
+          python3 scripts/tests/test-candidate-set-identity.py
+          python3 scripts/tests/test-create-candidate-set-manifest.py
           python3 scripts/tests/test-verify-build-artifacts.py
           python3 scripts/tests/test-candidate-set-contract.py
           python3 scripts/tests/test-build-identity-contract.py
@@ -48,14 +50,14 @@ jobs:
         run: |
           set -euo pipefail
           readonly marketing_version="1.0"
-          readonly build_number="${GITHUB_RUN_NUMBER}"
+          readonly build_number="$(python3 scripts/candidate_set_identity.py build-version \
+            --run-number "${GITHUB_RUN_NUMBER}" --run-attempt "${GITHUB_RUN_ATTEMPT:-1}")"
           readonly visible_commit="${GITHUB_SHA:0:12}"
-          candidate_set_id="$(python3 - <<'PY'
-          import hashlib, os
-          values=[os.environ['GITHUB_SHA'],os.environ['GITHUB_RUN_ID'],os.environ.get('GITHUB_RUN_ATTEMPT','1'),os.environ['GITHUB_RUN_NUMBER'],'com.juyang.CangJie','com.juyang.CangJie.KeychainIsolationProbe']
-          print(hashlib.sha256('|'.join(values).encode()).hexdigest())
-          PY
-          )"
+          candidate_set_id="$(python3 scripts/candidate_set_identity.py candidate-set-id \
+            --commit "${GITHUB_SHA}" --run-id "${GITHUB_RUN_ID}" \
+            --run-attempt "${GITHUB_RUN_ATTEMPT:-1}" --run-number "${GITHUB_RUN_NUMBER}" \
+            --version "${marketing_version}" --build "${build_number}" --main-bundle-id com.juyang.CangJie \
+            --probe-bundle-id com.juyang.CangJie.KeychainIsolationProbe)"
           python3 scripts/generate-build-identity.py \
             --role main \
             --bundle-id com.juyang.CangJie \
@@ -64,6 +66,7 @@ jobs:
             --commit "${GITHUB_SHA}" \
             --candidate-set-id "${candidate_set_id}" \
             --swift-output App/CangJieApp/GeneratedBuildIdentity.swift \
+            --c-output App/CangJieApp/GeneratedBuildIdentity.c \
             --metadata-output "$RUNNER_TEMP/CangJie-main-identity.json"
           python3 scripts/generate-build-identity.py \
             --role keychainIsolationProbe \
@@ -73,7 +76,13 @@ jobs:
             --commit "${GITHUB_SHA}" \
             --candidate-set-id "${candidate_set_id}" \
             --swift-output App/CangJieIsolationProbe/GeneratedBuildIdentity.swift \
+            --c-output App/CangJieIsolationProbe/GeneratedBuildIdentity.c \
             --metadata-output "$RUNNER_TEMP/CangJie-probe-identity.json"
+          # Stamp the exact same identities into the source plists before XcodeGen.
+          # The Simulator test action must compare executable constants against
+          # the installed bundle instead of silently falling back to project.yml defaults.
+          python3 scripts/stamp-build-identity.py --identity-json "$RUNNER_TEMP/CangJie-main-identity.json" --unstamped-build 1 App/Config/Info.plist
+          python3 scripts/stamp-build-identity.py --identity-json "$RUNNER_TEMP/CangJie-probe-identity.json" --unstamped-build 1 App/Config/IsolationProbeInfo.plist
           main_fingerprint="$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["fingerprint"])' "$RUNNER_TEMP/CangJie-main-identity.json")"
           probe_fingerprint="$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["fingerprint"])' "$RUNNER_TEMP/CangJie-probe-identity.json")"
           echo "marketing_version=${marketing_version}" >> "$GITHUB_OUTPUT"
