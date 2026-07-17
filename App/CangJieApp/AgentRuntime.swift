@@ -487,9 +487,10 @@ final class AgentRuntime {
 
         if isFinalQuestion {
             let confirmedScope = result.calibration.rewriteScope ?? scope ?? ""
-            try appendAssistant(
-                "Diagnosis complete. Review the exact rewrite scope before revision 2 is created.\n\n\(summary ?? "")\n\nRewrite scope:\n\(confirmedScope)\n\nSay ‘确认重写’ to authorize only this scope.",
-                idempotencyKey: "chapter-message.rewrite-scope." + (result.calibration.rewriteScopeHash ?? result.calibration.diagnosisHash),
+            try appendDiagnosisCompleteMessage(
+                summary: summary ?? "",
+                scope: confirmedScope,
+                scopeHash: result.calibration.rewriteScopeHash ?? result.calibration.diagnosisHash,
                 now: now
             )
             try finish(run: run, status: .waitingUser, stage: "chapter.1.awaitingRewriteConfirmation", now: now)
@@ -504,6 +505,19 @@ final class AgentRuntime {
         )
         try finish(run: run, status: .waitingUser, stage: "chapter.1.diagnosing.question.\(nextIndex + 1)", now: now)
         return AgentTurnResult(snapshot: try restore(now: now), status: "Chapter 1 diagnosis in progress")
+    }
+
+    private func appendDiagnosisCompleteMessage(
+        summary: String,
+        scope: String,
+        scopeHash: String,
+        now: Date
+    ) throws {
+        try appendAssistant(
+            "Diagnosis complete. Review the exact rewrite scope before revision 2 is created.\n\n\(summary)\n\nRewrite scope:\n\(scope)\n\nSay \u{2018}\u{786e}\u{8ba4}\u{91cd}\u{5199}\u{2019} to authorize only this scope.",
+            idempotencyKey: "chapter-message.rewrite-scope." + scopeHash,
+            now: now
+        )
     }
 
     private func rewriteChapter(
@@ -625,9 +639,10 @@ final class AgentRuntime {
                     answers: result.calibration.diagnosisEntries.map(\.answer),
                     lockedParagraphIndexes: result.calibration.lockedParagraphIndexes
                 )
-                try appendAssistant(
-                    "Diagnosis complete. Review the exact rewrite scope before revision 2 is created.\n\n\(summary)\n\nRewrite scope:\n\(scope)\n\nSay '确认重写' to authorize only this scope.",
-                    idempotencyKey: "chapter-message.rewrite-scope." + scopeHash,
+                try appendDiagnosisCompleteMessage(
+                    summary: summary,
+                    scope: scope,
+                    scopeHash: scopeHash,
                     now: now
                 )
                 settlement = (.waitingUser, "chapter.1.awaitingRewriteConfirmation")
