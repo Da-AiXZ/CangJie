@@ -337,3 +337,11 @@ Every device acceptance step must specify the entry path, exact control position
 An XCTest helper can create a false failure when it asserts `isHittable` after manual whole-App swipes even though `XCUIElement.tap()` can identify the same control, scroll it into view, compute a hit point, and activate it successfully. In iPadOS CI run `29589924300`, the custom helper failed after six swipes, then the immediately following native Save-button tap auto-scrolled and completed the Keychain write.
 
 Use stable identifiers and let native XCTest actions perform their built-in scroll-to-visible behavior unless evidence shows they cannot. Add predicate waits for the resulting state rather than inventing a stronger pre-action gate. When CI fails, read the chronological action trace: a helper assertion followed by a successful native action proves the helper is wrong, not the product control.
+
+## P-083 Physical-device retesting should be differential and identity-bound
+
+A new binary does not automatically invalidate every previously accepted behavior, and asking the user to repeat a long suite increases fatigue, ambiguity, and accidental deviations. First bind the installed App to the exact visible build number and commit. Then retest the changed surface plus any behavior whose dependency graph was touched; carry forward prior evidence for untouched flows.
+
+For a differential check, state both sides explicitly: what has already passed and does not need repetition, and what new observation is required. If the changed UI is state-dependent, include how to reset it to the starting state. Never interpret a terminal state preserved by overwrite installation as a failure to display an earlier pending action; durable state should not regress merely to make a test convenient.
+
+Differential evidence cannot override an artifact-bound fail-closed security contract. If a candidate manifest requires complete CRUD, reinstall persistence, or isolation on that exact SHA-256 binary, earlier-build evidence is regression context only. Either execute the complete contract with a user-operable probe, or deliberately revise the contract and rebuild; never clear the gate by documentation alone.

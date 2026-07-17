@@ -19,9 +19,9 @@ M1 First-Chapter Agent Vertical Slice. M1-B exact opening-plan approval remains 
 
 The same worktree implements the first governed Chapter 1 calibration loop: approved opening-plan validation through the canonical approval validator, immutable V1 generation, paragraph locks, accept-and-freeze or reject-and-diagnose, exactly three ordered one-question diagnosis turns, exact rewrite-scope confirmation, immutable V2 with parent lineage, byte-exact locked-paragraph and separator validation, V1/V2 diff review, exact-version acceptance, scope-bound receipts, receipt-bound historical snapshot replay, and restart recovery. The opening-plan approval review closes only after the exact operation succeeds and the reapplied projection confirms the same request ID and binding hash as `approved`; chapter actions separately remain bound to the exact displayed version ID and content hash.
 
-Commit `9a8a9eb` passed authoritative Core and Xcode/iPadOS CI and produced the independently audited build-26 M1-C device candidate. The target-iPad run accepted build identity, Refresh separators, the opening-plan review/detail surface after a clean install, the Chapter 1 path at the observed level, Keychain read verification, force-quit persistence, overwrite-install persistence, delete verification, and the post-delete `Absent` result. Overwrite installation correctly retained the already-approved opening-plan state and therefore did not recreate a pending approval card; deleting the App cleared the database, and rerunning the flow correctly produced the card again.
+Build 26 established the physical-device baseline: build identity, Refresh separators, the clean-install opening-plan review/detail surface, the observed Chapter 1 path, Keychain read, force-quit persistence, overwrite-install persistence, delete, and post-delete `Absent` all passed. Overwrite installation correctly retained the already-approved opening-plan state and therefore did not recreate a pending approval card; deleting the App cleared the database, and rerunning the flow correctly produced the card again.
 
-Build 26 is not the final M1-C acceptance artifact. The user could not reliably distinguish the single secure input from the dynamic `Create and verify` / `Update and verify` action, so create-versus-update was not validly observed even though automated Simulator CRUD passed. This is a real diagnostic UX defect: a testable control is not necessarily a discoverable control. Build 26 is partially device-accepted but superseded by the clarified diagnostic candidate now being implemented. The governed novel workflow is not weakened or removed.
+Build 27 is the current independently audited M1-C candidate. Commit `2c61bc2` clarifies that the page has one secure input reused by both create and update, separates numbered input/action/read-delete sections, exposes `Stored` or `Absent` plus next-step guidance, and gives the state-dependent primary action an unmistakable button style. Core CI `29592373178`, iPadOS CI `29592385850`, and TrollStore build `29593245829` are green. The first physical-device pass is a focused discoverability check, but it does not clear the artifact manifest's fail-closed contract. Formal acceptance of this exact SHA-256 still requires its complete create/read/update/delete, reinstall-persistence, and isolation evidence. Previously accepted novel approval and Chapter 1 behavior are not invalidated because those surfaces were untouched. The governed novel workflow is not weakened or removed.
 
 ```text
 open -> restore conversation/session/run/messages -> center conversation
@@ -50,19 +50,23 @@ SHA-256 2092cfb5fe94b463c453ca25e6107a12de1d77e8be8309c85ee027f8863d62ef
 
 User confirmed TrollStore install, launch, immediate restart persistence, and no immediate crash for that M0 artifact.
 
-Latest independently audited device evidence (partially accepted, superseded for final M1-C acceptance):
+Current independently audited device candidate (focused UX check and complete Keychain acceptance pending):
 
 ```text
-commit 9a8a9eb45bfc41c5c32e1b78f9f9027d7f61ed92
-Core CI 29560398690: success (strict tests and 90 percent line coverage gate)
-iPadOS CI 29560398699: success (88 App/integration tests plus Agent-first and real Simulator Keychain UI tests)
-Build TrollStore IPA 29560810381: success | run number 26
-Artifact CangJie-M0-device-validation-required-26-9a8a9eb45bfc41c5c32e1b78f9f9027d7f61ed92
-SHA-256 3aeb88fae96cd3a2ad8a6f74fc4ac629df54a027e9bd0a7fd0c6447511139d27
-Bundle ID com.juyang.CangJie | arm64 | deployment target 16.6 | build 26 | commit 9a8a9eb45bfc
-Local audit F:\project\CangJie\artifacts\CangJie-M1C-run-29560810381-verified\independent-audit.json
-Device result: workflow and persistence checks substantially passed; Keychain create/update distinction was not validly observed because the diagnostic UI was ambiguous.
+commit 2c61bc2d1c38e6844fe9c9d36a32b7ed4a0ec7ca
+Core CI 29592373178: success
+iPadOS CI 29592385850: success, including real Simulator Keychain create/read/update/delete and discoverability assertions
+Build TrollStore IPA 29593245829: success | run number 27
+Artifact CangJie-M0-device-validation-required-27-2c61bc2d1c38e6844fe9c9d36a32b7ed4a0ec7ca
+SHA-256 260478b5cf0b8ab06ea75ce6b231041c9dedf82a6c10d05ba06afb8114e1b8ec
+Bundle ID com.juyang.CangJie | arm64 | deployment target 16.6 | build 27 | commit 2c61bc2d1c38
+No embedded.mobileprovision | no CMS slot | ad-hoc CodeDirectory flags 0x00000002
+XML application-identifier com.juyang.CangJie | keychain-access-groups [com.juyang.CangJie] | DER entitlement slot present
+Acceptance blocked-pending-trollstore-device-keychain-validation (expected fail-closed state)
+Local audit F:\project\CangJie\artifacts\CangJie-M1C-clarified-run-29593245829-verified\independent-audit.json
 ```
+
+Build 26 remains useful physical-device regression evidence, but it cannot satisfy Build 27's artifact-bound Keychain contract. Build 27 must first show visible build `27` and commit `2c61bc2d1c38`. The immediate check focuses on the clarified create/update path; the candidate remains fail-closed until complete CRUD, reinstall persistence, and a user-operable isolation check are also recorded for this exact IPA.
 
 The preceding device-accepted recoverable-runtime candidate remains:
 
@@ -113,10 +117,11 @@ Reset/recovery: how to return to the required starting state
 
 ## Immediate queue
 
-1. Clarify the Keychain diagnostic UI without changing the underlying `kSecAttrAccessibleWhenUnlockedThisDeviceOnly` repository: show `Stored`/`Absent`, state-specific next-step guidance, a clearly titled single secure input, and a visually primary dynamic Create/Update button.
-2. Extend the iPad UI regression test to assert the visible Create/Update labels, disabled/enabled transitions, same-field update guidance, digest change, plaintext absence, and return to Create after delete.
-3. Push directly to `main`, require Core and iPadOS CI to pass, then build and independently audit a new TrollStore IPA. Build 26 remains evidence but is not reused for final acceptance.
-4. Request only the focused create/update differential device test with exact entry path, control type and position, result location, failure signal, and reset steps. Previously accepted read, force-quit, overwrite-install, delete, workflow, and persistence evidence does not need to be repeated unless the new binary changes those surfaces.
+1. Completed: clarified the single-field Create/Update diagnostic UI without changing the ThisDeviceOnly repository.
+2. Completed: added iPad UI regression coverage for labels, enabled states, digest change, plaintext absence, and reset.
+3. Completed: commit `2c61bc2`, Core/iPadOS CI, Build 27, download, checksum, manifest, Info.plist, Mach-O, signing, entitlement, and fail-closed audits are green.
+4. Current device gate: run the self-contained focused UX and CRUD check on exact Build 27; do not repeat untouched opening-plan or Chapter 1 flows.
+5. Before formal Keychain acceptance: repeat overwrite/reinstall persistence on exact Build 27 and provide a user-operable isolation probe. Build 26 evidence may guide regression risk but cannot override the Build 27 manifest.
 
 ## Change log
 
@@ -282,7 +287,7 @@ App test suite: 87 tests, 0 failures
 UI smoke: Agent-first launch and scrollable opening-plan approval review passed
 ```
 
-Next gate: commit this operational documentation, verify the final HEAD remains green, dispatch `build-ipa.yml`, verify Bundle ID `com.juyang.CangJie`, iPadOS 16.6 deployment target, exact commit identity, ad-hoc/fakesign entitlements, SHA-256 and manifest, then request target-iPad acceptance.
+Historical checkpoint: the documentation commit, final-HEAD CI, TrollStore build, identity, entitlement, SHA-256, manifest, and independent audit steps described here were completed by Build 27. The authoritative pending device work is listed in the current Immediate queue.
 
 ## 2026-07-17 M1-C final-HEAD CI assertion repair
 
@@ -318,7 +323,7 @@ Manifest commit, run number, signed executable hash, IPA hash, and acceptance ga
 Acceptance blocked-pending-trollstore-device-keychain-validation (expected fail-closed state)
 ```
 
-Next gate: install this exact SHA-256 candidate on the target iPad, confirm the visible build identity first, then execute the UI, Chapter 1 calibration, restart/replay, and Keychain acceptance checklist above.
+Historical run-25 next-gate note: superseded by the authoritative Build-27 queue and acceptance instructions above. Opening-plan and Chapter 1 do not need repetition for the diagnostics-only change; the exact Build-27 Keychain contract remains fail-closed until its own required evidence is complete.
 
 ## 2026-07-17 Build-26 physical-device feedback and diagnostic UX correction
 
@@ -331,3 +336,25 @@ The Keychain screen exposed one secure field followed by a dynamic action button
 Commit `2125fd6` passed Core CI run `29589924030`. iPadOS CI run `29589924300` compiled and ran all App/unit coverage, but its first and only failing test was `CangJieSmokeUITests.testDeviceDiagnosticsVerifiesKeychainCreateReadUpdateAndDelete` at line 67: the custom helper asserted that the Save button must become `isHittable` after six whole-App upward swipes. The following native `save.tap()` immediately succeeded because XCTest itself scrolled the identified button into view and computed a valid hit point. The failure therefore came from the new test helper, not the Keychain implementation, SwiftUI layout, or security contract.
 
 The correction removes the contradictory pre-tap `isHittable` gate and relies on XCTest's native identifier-bound tap auto-scrolling while retaining exact state, visible-label, digest-change, disappearance, and plaintext-leak assertions. No production Keychain or governed novel workflow code is weakened.
+
+
+## 2026-07-17 Build-27 clarified Keychain diagnostic candidate
+
+Commit `2c61bc2d1c38e6844fe9c9d36a32b7ed4a0ec7ca` passed Core CI `29592373178` and iPadOS CI `29592385850`. The latter retains real Simulator Keychain CRUD, state transition, digest-change, plaintext-redaction, and discoverability assertions. TrollStore workflow `29593245829` produced run number `27` and artifact `CangJie-M0-device-validation-required-27-2c61bc2d1c38e6844fe9c9d36a32b7ed4a0ec7ca`.
+
+The downloaded IPA was independently parsed rather than accepted from workflow status alone. Audit result:
+
+```text
+IPA SHA-256 260478b5cf0b8ab06ea75ce6b231041c9dedf82a6c10d05ba06afb8114e1b8ec
+Info.plist build 27 | commit 2c61bc2d1c38 | Bundle ID com.juyang.CangJie
+MinimumOSVersion 16.6 | UIDeviceFamily [2] | thin arm64 device Mach-O
+No embedded.mobileprovision | no CMS slot or BlobWrapper
+Ad-hoc CodeDirectory slots 0 and 4096, both flags 0x00000002
+XML entitlement application-identifier com.juyang.CangJie
+XML keychain-access-groups [com.juyang.CangJie] | DER entitlement slot present
+Signed executable SHA-256 352354110f047ab3c1564c7ec66e288f51a37eb08cb500fca10e4fdc594ffd70
+Fail-closed acceptance blocked-pending-trollstore-device-keychain-validation
+Audit F:\project\CangJie\artifacts\CangJie-M1C-clarified-run-29593245829-verified\independent-audit.json
+```
+
+This candidate does not ask the user to repeat untouched opening-plan or Chapter 1 checks. The first physical-device pass verifies visible build identity, the single input, create/read/update/delete behavior, a 12-character digest that changes after update, and plaintext absence. Passing that focused pass validates the repaired diagnostic UX but does not by itself clear the fail-closed artifact contract; exact Build-27 reinstall persistence and a user-operable isolation check remain required.
