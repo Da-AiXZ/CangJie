@@ -1,10 +1,11 @@
 import SwiftUI
 
+@MainActor
 struct IsolationProbeView: View {
-    @StateObject private var model: IsolationProbeViewModel
+    @ObservedObject private var model: IsolationProbeViewModel
 
-    init(model: @autoclosure @escaping () -> IsolationProbeViewModel = IsolationProbeViewModel()) {
-        _model = StateObject(wrappedValue: model())
+    init(model: IsolationProbeViewModel) {
+        self.model = model
     }
 
     var body: some View {

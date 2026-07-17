@@ -787,6 +787,7 @@ final class AppViewModelTests: XCTestCase {
         }
     }
 
+    @MainActor
     func testAgentRuntimeAuthorizerRejectsBeforeAnyDurableMessageOrRun() throws {
         try withDatabase { database in
             let authorizer = BuildActivationAgentAuthorizer(allowed: false)
