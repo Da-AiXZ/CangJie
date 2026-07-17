@@ -727,7 +727,7 @@ final class AgentRuntime {
             #endif
             throw AppDatabaseError.invalidToolReceiptReference
         }
-        guard validatedResult.calibration == calibration else {
+        guard validatedResult.calibration.isAuditEquivalent(to: calibration) else {
             #if DEBUG
             print(
                 "Chapter snapshot mismatch [calibration] tool=\(chapterReceipt.toolID) "

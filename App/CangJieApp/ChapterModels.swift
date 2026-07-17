@@ -56,6 +56,31 @@ struct ChapterCalibration: Codable, Equatable {
     let updatedAt: Date
 }
 
+extension ChapterCalibration {
+    func isAuditEquivalent(to other: ChapterCalibration) -> Bool {
+        chapterLogicalID == other.chapterLogicalID
+            && conversationID == other.conversationID
+            && projectID == other.projectID
+            && chapterNumber == other.chapterNumber
+            && activeVersionID == other.activeVersionID
+            && stage == other.stage
+            && diagnosisEntries == other.diagnosisEntries
+            && diagnosisHash == other.diagnosisHash
+            && rejectionHistory == other.rejectionHistory
+            && lockedParagraphIndexes == other.lockedParagraphIndexes
+            && rewriteScope == other.rewriteScope
+            && rewriteScopeHash == other.rewriteScopeHash
+            && acceptedVersionID == other.acceptedVersionID
+            && Self.auditTimestampsMatch(updatedAt, other.updatedAt)
+    }
+
+    private static func auditTimestampsMatch(_ lhs: Date, _ rhs: Date) -> Bool {
+        let left = lhs.timeIntervalSinceReferenceDate
+        let right = rhs.timeIntervalSinceReferenceDate
+        return left == right || left.nextUp == right || left.nextDown == right
+    }
+}
+
 struct ChapterToolResult: Equatable {
     let version: ChapterVersion
     let calibration: ChapterCalibration
