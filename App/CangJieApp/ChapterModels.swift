@@ -221,7 +221,7 @@ enum ChapterFingerprint {
 
 enum ChapterByteExactParagraphs {
     static func split(_ body: String) -> [Data] {
-        ChapterContentIntegrity.protectedParagraphBytes(in: body).map(Data.init)
+        ChapterContentIntegrity.protectedParagraphBytes(in: body).map { Data($0) }
     }
 
     static func validateLockedParagraphs(
