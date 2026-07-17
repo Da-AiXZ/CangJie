@@ -40,62 +40,75 @@ final class CangJieSmokeUITests: XCTestCase {
         let delete = app.buttons["keychain-probe-delete"]
         let status = app.staticTexts["keychain-probe-status"]
         let guidance = app.staticTexts["keychain-probe-guidance"]
-        XCTAssertTrue(inputHeading.exists)
+        reveal(inputHeading, in: app, swiping: .up)
         XCTAssertEqual(inputHeading.label, "1. Disposable value input")
         XCTAssertTrue(input.exists)
         XCTAssertEqual(input.placeholderValue, "Type disposable value here")
-        XCTAssertTrue(actionHeading.exists)
+
+        reveal(actionHeading, in: app, swiping: .up)
         XCTAssertEqual(actionHeading.label, "2. Create or update and verify")
         XCTAssertTrue(actionHelp.exists)
         XCTAssertTrue(actionHelp.label.contains("secure field above"))
         XCTAssertTrue(save.exists)
-        XCTAssertTrue(status.exists)
-        XCTAssertTrue(guidance.exists)
 
+        reveal(status, in: app, swiping: .down)
+        XCTAssertTrue(guidance.exists)
         if status.label == "Stored" {
+            reveal(delete, in: app, swiping: .up)
             delete.tap()
+            reveal(status, in: app, swiping: .down)
         }
         assertEventually(status, hasLabel: "Absent")
-        assertEventually(save, hasLabel: "Create and verify")
-        XCTAssertFalse(save.isEnabled)
         XCTAssertTrue(guidance.label.contains("tap Create and verify"))
 
+        reveal(input, in: app, swiping: .up)
         let firstValue = "ui-keychain-probe-one"
         input.tap()
         input.typeText(firstValue)
+        reveal(save, in: app, swiping: .up)
         XCTAssertTrue(save.isEnabled)
         save.tap()
-        assertEventually(status, hasLabel: "Stored")
         assertEventually(save, hasLabel: "Update and verify")
         XCTAssertFalse(save.isEnabled)
+
+        reveal(status, in: app, swiping: .down)
+        assertEventually(status, hasLabel: "Stored")
         XCTAssertTrue(guidance.label.contains("same secure field below"))
         XCTAssertTrue(guidance.label.contains("tap Update and verify"))
         let firstDigest = app.staticTexts["keychain-probe-digest"]
-        XCTAssertTrue(firstDigest.waitForExistence(timeout: 5))
+        reveal(firstDigest, in: app, swiping: .down)
         let firstDigestLabel = firstDigest.label
         XCTAssertEqual(firstDigestLabel.count, 12)
         assertNoAccessiblePlaintext(firstValue, in: app)
 
+        reveal(read, in: app, swiping: .up)
         read.tap()
-        XCTAssertTrue(firstDigest.exists)
+        reveal(firstDigest, in: app, swiping: .down)
 
+        reveal(input, in: app, swiping: .up)
         let updatedValue = "ui-keychain-probe-two"
         input.tap()
         input.typeText(updatedValue)
+        reveal(save, in: app, swiping: .up)
         XCTAssertTrue(save.isEnabled)
         save.tap()
         assertEventually(save, hasLabel: "Update and verify")
+
         let updatedDigest = app.staticTexts["keychain-probe-digest"]
+        reveal(updatedDigest, in: app, swiping: .down)
         assertEventually(updatedDigest, changesFromLabel: firstDigestLabel)
         XCTAssertEqual(updatedDigest.label.count, 12)
         assertNoAccessiblePlaintext(updatedValue, in: app)
 
+        reveal(delete, in: app, swiping: .up)
         delete.tap()
+        reveal(status, in: app, swiping: .down)
         assertEventually(status, hasLabel: "Absent")
-        assertEventually(save, hasLabel: "Create and verify")
+        XCTAssertFalse(delete.isEnabled)
         XCTAssertTrue(guidance.label.contains("tap Create and verify"))
         assertEventuallyDisappears(app.staticTexts["keychain-probe-digest"])
-        XCTAssertFalse(delete.isEnabled)
+        reveal(save, in: app, swiping: .up)
+        assertEventually(save, hasLabel: "Create and verify")
     }
 
     func testProjectRefreshShowsVisibleAcknowledgement() {
@@ -220,6 +233,42 @@ final class CangJieSmokeUITests: XCTestCase {
         XCTAssertEqual(historyStatus.label, "Status: approved")
         XCTAssertTrue(app.staticTexts["opening-plan-history-binding-hash"].exists)
         XCTAssertTrue(app.staticTexts["last-tool-receipt"].exists)
+    }
+
+    private enum SwipeDirection {
+        case up
+        case down
+    }
+
+    @discardableResult
+    private func reveal(
+        _ element: XCUIElement,
+        in app: XCUIApplication,
+        swiping direction: SwipeDirection,
+        maxSwipes: Int = 10,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) -> Bool {
+        for _ in 0..<maxSwipes {
+            if element.exists && element.isHittable {
+                return true
+            }
+            switch direction {
+            case .up:
+                app.swipeUp()
+            case .down:
+                app.swipeDown()
+            }
+        }
+
+        let isVisible = element.exists && element.isHittable
+        XCTAssertTrue(
+            isVisible,
+            "Expected \(element) to become hittable after scrolling \(direction)",
+            file: file,
+            line: line
+        )
+        return isVisible
     }
 
     private func assertEventually(
