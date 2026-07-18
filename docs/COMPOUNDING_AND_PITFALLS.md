@@ -1,6 +1,6 @@
 # CangJie Compounding and Pitfalls Log
 
-Updated: 2026-07-17. Update after every slice or milestone with evidence.
+Updated: 2026-07-18. Update after every slice or milestone with evidence.
 
 ## P-001 M0 shell was mistaken for product UX
 Feasibility screen is not the Agent product. Label every IPA as feasibility, development slice, candidate, or accepted milestone; report included/excluded/verification/next.
@@ -122,7 +122,7 @@ Reloading an unchanged project list can correctly produce identical data, but a 
 
 ## P-031 Approval must bind the displayed request
 
-Approval is not consent to a category such as ?the opening plan.? It must bind the request ID and canonical hash visible to the user, including exact artifact identity, tool version, parameters, targets, budget, expiration, and expected diff. Never approve by querying whatever record is currently latest.
+Approval is not consent to a category such as `the opening plan` It must bind the request ID and canonical hash visible to the user, including exact artifact identity, tool version, parameters, targets, budget, expiration, and expected diff. Never approve by querying whatever record is currently latest.
 
 ## P-032 Artifact revision and approval decision are separate records
 
@@ -130,7 +130,7 @@ Artifact workflow status cannot represent immutable content identity, a user's h
 
 ## P-033 Recovery must use exact idempotency identity
 
-A successful side effect followed by a crash is reconciled only through the original request, binding hash, tool/version, scopes, output reference, and idempotency key. ?Latest receipt? or ?latest artifact? is not proof and can cross project or lineage boundaries.
+A successful side effect followed by a crash is reconciled only through the original request, binding hash, tool/version, scopes, output reference, and idempotency key. `Latest receipt` or `latest artifact` is not proof and can cross project or lineage boundaries.
 
 ## P-034 Legacy approval cannot be promoted silently
 
@@ -421,3 +421,83 @@ When XcodeGen manages an `Info.plist`, stamping identity before `xcodegen genera
 ## P-102 plistlib acceptance does not guarantee ldid plist compatibility
 
 A plist can be accepted by Python `plistlib` and Apple `plutil` but still be rejected by the pinned `ldid`. Build 28's Probe entitlement carried a UTF-8 BOM; preprocessing passed, while `ldid` failed with `Failed to parse plist`. Every entitlement passed to `ldid` must be a BOM-free UTF-8 XML plist or a separately proven compatible binary plist. Detect forbidden BOM bytes before parsing, fail with a stable user-readable error, and keep a fixture plus checked-in-file regression test.
+
+## P-103 Defining the genre is not the same as defining the user's ability
+
+The previous plan defined long-form male-audience progression novels but did not define whether the user could write, diagnose prose, or understand professional terminology. Product requirements must state the user's knowledge, expression ability, motivation, patience, and desired autonomy. The primary user is a novel reader who may have only a thought or feeling, not a trained author.
+
+## P-104 Do not expose the novel engine as the driving interface
+
+Canon, plans, approvals, knowledge boundaries, receipts, hashes, budgets, and branches are necessary production infrastructure, but ordinary users should not operate them directly to complete the main flow. The center Agent translates natural language into governed tools; workbenches and technical details are optional inspectors.
+
+## P-105 A governed technical prototype is not validated product UX
+
+Fixed interviews, exact approval cards, paragraph locks, diagnosis forms, Keychain CRUD, Candidate Set, and runtime probes can prove persistence, versioning, security, and recovery. They do not prove that a new user understands the product or feels that an Agent is leading. Every candidate must identify whether it validates infrastructure, product interaction, or both.
+
+## P-106 Preference evidence and byte-exact protection are different contracts
+
+“喜欢” means the user wants more of this feeling and becomes positive preference evidence. “原样保留” means the selected bytes cannot change in the authorized rewrite. Never make every liked passage immutable, and never weaken an explicit preserve selection into a soft style hint.
+
+## P-107 Rejection reasons must be optional for ordinary users
+
+A user may know that a chapter is wrong without knowing whether the cause is motivation, pacing, point of view, information order, genre purity, or prose. Record the rejection immediately, collect the exact selection and context, and let the Agent test one likely explanation at a time. A mandatory reason field makes the user do the Agent's work.
+
+## P-108 Fixed question counts are test fixtures, not intelligence
+
+“Exactly three interview questions” and “exactly three diagnosis questions” provided deterministic state-machine coverage, but must not define the final adviser. Production questioning is evidence-driven: keep multiple hypotheses, choose one high-information low-burden question, change method after “不知道”, and stop asking when a reversible sample will teach more.
+
+## P-109 User language is a versioned interface contract
+
+Internal names such as Bible, Canon, Artifact, Frozen, Rewrite Scope, Receipt, Binding, Hash, and Revision must map to stable plain-language labels. First use of a necessary technical term requires an explanation. Tests should assert that ordinary paths do not leak unexplained engineering terminology.
+
+## P-110 Every milestone needs a visible product contract before implementation
+
+Before coding a major stage, document what the user will see, what each region contains, what can and cannot be done, where to tap, what appears next, and how landscape/portrait differ. Device acceptance must include product-direction questions, not only functional pass/fail. This prevents weeks of technically correct work from accumulating on the wrong interface.
+
+## P-111 Simplicity at the surface must not delete production governance
+
+Making the App easy for ordinary users does not justify removing typed tools, exact approval binding, idempotency, receipts, canon states, character knowledge, branches, checkpoints, budgets, or security. Simplify through translation, defaults, automation, progressive disclosure, and Agent orchestration—not by weakening the engine.
+
+## P-112 A real Agent milestone must name its real Provider boundary
+
+Natural-language tool use cannot be accepted from keyword matching, canned replies, or local rules. The milestone must explicitly own Keychain credentials, a real Provider, streaming, cancellation, structured tool calls, tool-result return, usage, standard errors, and at least one recoverable governed task.
+
+## P-113 Do not show an unavailable shortcut as if it works
+
+A welcome-page shortcut creates a product promise. Hide it until the capability is real, or label it honestly as unavailable; never ship a dead import, research, or automation button that only looks finished. Split foundational and enhanced import capabilities across stages without breaking the core journey.
+
+## P-114 Dynamic interviewing requires durable hypothesis state
+
+Prompt prose alone cannot prevent repeated questions or random suggestion resets. Persist user evidence, candidate interpretations, rejected directions, unresolved questions, preference signals, decisions, and autonomy preferences with versions and scope. A denial is evidence, not permission to invent a replacement rule.
+
+## P-115 Navigation contracts include history and presentation mode
+
+“Left-side navigation” is incomplete unless it defines new conversation, history, current selection, timestamps, functional-page push/pop, and the exact presentation mode of reading/editing. Opening a full-screen reader must preserve the underlying conversation, scroll, draft, stream, and task state.
+
+## P-116 Operational truth must record failed gates, not only passed subchecks
+
+When a device test runs, replace “pending” with the observed result. If isolation checks pass only after a second overwrite, record both facts: the subchecks passed after activation, while the single-overwrite activation gate failed. Never let a stale pending label or a list of green checks imply full acceptance.
+
+## P-117 First-run shortcuts are capability- and state-gated
+
+A friendly shortcut is still a dead entry when no history, project, recoverable task, or implemented importer exists behind it. Hide unavailable first-run actions rather than disabling them, showing a placeholder, or routing to an empty page. `Continue last time` appears only when resumable state exists; import appears only after the relevant import slice is real.
+
+## P-118 Milestone exit criteria require one cross-document contract
+
+A stage cannot be defined as supporting only Chapter 1 in one authority and the first three chapters in another. Use one measurable boundary: S3 must make Chapter 1 safe to start and establish enough opening promises and character/world foundation that the first three chapters do not immediately lose their basis; chapter-level design and calibration remain S4.
+
+## P-119 Navigation visibility follows real capability and meaningful state
+
+A final information architecture can name every future destination, but an intermediate build must not expose pages that are empty, fake, or unavailable. Gate each navigation entry by implemented capability and data state, while preserving a useful, actionable empty state only where the page already has a real job.
+
+## P-120 User-facing status labels are a finite vocabulary
+
+Do not invent near-synonyms such as `recently completed` when the drawer contract defines `recently modified`. State names drive projection, dismissal, accessibility, and tests; keep one versioned human-language vocabulary and translate internal states into it.
+
+## P-121 A visual prototype must disclose its response boundary
+
+If S1 accepts text before a real Provider exists, the build must not leave users guessing whether the Agent is broken or intelligent. Persist the user message and show an explicitly labeled interface-preview system receipt; do not emit simulated advice, questions, or execution claims. The real conversational and tool boundary starts only when S2 Provider acceptance passes.
+
+## P-122 The final milestone still needs an explicit non-goal list
+
+A release-candidate stage without visible exclusions invites scope drift into platform publishing, multi-device sync, infinite background work, budget bypass, third-party code execution, and copyrighted corpus ingestion. Keep the first-release exclusions next to S6 acceptance, not only in a distant architecture section.

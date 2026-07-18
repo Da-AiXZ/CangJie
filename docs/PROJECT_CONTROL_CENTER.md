@@ -1,45 +1,58 @@
 # CangJie Project Control Center
 
 - Authority: current operational truth
-- Updated: 2026-07-17
+- Updated: 2026-07-18
 - Repository: `F:\project\CangJie`
 - Remote: `https://github.com/Da-AiXZ/CangJie`, branch `main`
 
 ## Product and UI decision
 
-CangJie is agent-first: persistent center conversation controls a governed novel engine through typed tools. The left region has an independent `NavigationStack`; Novel Projects pushes a dedicated page with back navigation, never an in-place tree and never a center reset. The right artifact/approval drawer is collapsed by default. Workbenches are secondary.
+仓颉已经完成产品重新定调。第一核心用户不是职业作者，而是爱看小说、不会写作、不懂专业术语、只能表达模糊念头或读者感受的普通小说爱好者。
+
+默认产品体验遵循：
+
+```text
+普通用户说人话、看故事、表达感觉、决定重大事项
+→ 统一人格“仓颉”主动理解、追问、建议和执行
+→ Typed Tools 真实操作项目、设定、正文、任务和导出
+→ 多 Agent 小说团队与长篇治理在后台工作
+```
+
+中心对话是唯一必经入口。左侧是独立页面导航，点击“我的小说”等入口后只在左侧区域内部 push 到单独页面，不能变成原地展开树，也不能重建中心对话。右侧默认收起，用户名称为“这次聊出来的内容”，优先显示等你决定、已经确定、正在进行和最近修改。工作台、版本、正典、审批、Receipt、Hash 和诊断能力继续存在，但默认下沉。
+
+固定三问、关键词意图、必填拒绝原因、固定三个诊断问题和段落 Lock/Unlock 仅被视为已经验证底层治理的技术原型，不再代表目标 UX。目标正文交互是连续阅读、任意选字，以及“喜欢 / 不喜欢 / 原样保留 / 方向不对 / 问仓颉”。
 
 ## Authority order
 
-`IMPLEMENTATION_PLAN.md` -> this file -> `COMPOUNDING_AND_PITFALLS.md` -> ADRs -> `M0_VALIDATION.md`. `ROADMAP.md` is retired.
+- 产品与架构规范权威：`IMPLEMENTATION_PLAN.md` -> `PRODUCT_EXPERIENCE_BLUEPRINT.md` -> `MILESTONE_VISUAL_ACCEPTANCE.md`；
+- 当前执行状态权威：本文件 `PROJECT_CONTROL_CENTER.md`；
+- 历史经验与防重复踩坑：`COMPOUNDING_AND_PITFALLS.md`；
+- 补充决策与历史证据：ADRs -> `M0_VALIDATION.md`。
+
+`ROADMAP.md` 已退役；历史检查点中的旧阶段名称不能覆盖当前 S1–S6 规范。
 
 ## Current milestone
 
-M1 First-Chapter Agent Vertical Slice. M1-B exact opening-plan approval remains device-accepted at the business-state level. The current 2026-07-17 M1-C implementation checkpoint implements the previously bundled presentation/reconciliation corrections: Refresh feedback uses literal `|` separators rather than `?`; only a pending approval is projected as a central action card; an exact successful approval removes that central card while the right drawer retains the approved binding and receipt history; foreground activation restores the durable projection; and landscape uses a compact summary card that opens a scrollable full-detail review.
+**S1 Agent 驾驶舱定调与重构。** 当前首先冻结普通用户入口、最终 iPad 布局、左右区域行为、人话文案和每阶段可见交付，再开始改造 App。此阶段不是删除底层能力，而是把已经完成的生产级治理装进正确的普通人驾驶舱。
 
-The same worktree implements the first governed Chapter 1 calibration loop: approved opening-plan validation through the canonical approval validator, immutable V1 generation, paragraph locks, accept-and-freeze or reject-and-diagnose, exactly three ordered one-question diagnosis turns, exact rewrite-scope confirmation, immutable V2 with parent lineage, byte-exact locked-paragraph and separator validation, V1/V2 diff review, exact-version acceptance, scope-bound receipts, receipt-bound historical snapshot replay, and restart recovery. The opening-plan approval review closes only after the exact operation succeeds and the reapplied projection confirms the same request ID and binding hash as `approved`; chapter actions separately remain bound to the exact displayed version ID and content hash.
+S1 目标：
 
-Build 26 established the physical-device baseline: build identity, Refresh separators, the clean-install opening-plan review/detail surface, the observed Chapter 1 path, Keychain read, force-quit persistence, overwrite-install persistence, delete, and post-delete `Absent` all passed. Overwrite installation correctly retained the already-approved opening-plan state and therefore did not recreate a pending approval card; deleting the App cleared the database, and rerunning the flow correctly produced the card again.
+- 首屏直接进入仓颉对话；
+- 全中文、大白话，不要求用户理解写作或工程术语；
+- 左侧独立页面和中心对话状态隔离；
+- 右侧“这次聊出来的内容”默认收起；
+- 技术诊断从普通路径移到开发者/高级详情；
+- 现有项目、对话、草稿、数据库、工具回执和恢复能力继续兼容；
+- 横屏、竖屏、键盘、滚动和长内容显示符合 iPad 体验。
 
-Build 27 is retained as prior physical-device regression evidence for the clarified Keychain diagnostic surface. Its first-overwrite/second-overwrite discrepancy is not accepted as an installation procedure; Build 28 supersedes it with executable-versus-installed-bundle runtime identity checks and a fail-closed governance boundary. Previously accepted novel approval and Chapter 1 behavior remain regression evidence because those surfaces were not weakened or removed.
+当前代码基线仍然是 Build 28 技术候选。Build 26–28 已验证的项目持久化、审批、第一章版本、恢复、安全和 CI 能力作为后续重构的回归护栏。当前固定访谈、审批详情、段落锁定和 Keychain/Candidate Set 诊断页不作为视觉参考。
 
-Build 28 is now the current independently audited paired device candidate. The Build 27 device report exposed an update-activation risk: after a TrollStore overwrite, the App may show metadata from the newly installed disk bundle while an older executable process remains alive. Build 28 therefore stops treating `Info.plist` alone as proof of running code. It embeds an executable identity at compile time, independently loads the installed bundle identity from disk, compares version/build/commit/fingerprint strictly, and fails closed on mismatch or unavailable identity. While blocked, Agent turns, opening-plan approval, chapter operations, canon mutation, Keychain diagnostics, and paid generation must not execute.
+TrollStore 一次覆盖后仍可能运行旧进程、第二次覆盖才显示新界面的激活风险暂时搁置但不关闭。Build 28 的运行身份 fail-closed 防护和配对 Probe 证据继续保留；不得把第二次覆盖写成正常安装步骤。该问题不再阻塞 S1 产品驾驶舱设计和实现，但下一次正式真机候选仍需带版本身份验证。
 
-The same Build 28 candidate adds a separately bundled Keychain Isolation Probe with its own Bundle ID and access group. That companion can prove only that the exact audited Probe binary in the exact candidate set, with the recorded SHA-256 and entitlements, cannot access the main App's Keychain group. It cannot prove that arbitrary TrollStore-installed software is isolated, because TrollStore's ability to install applications carrying arbitrary entitlements remains part of the platform trust boundary. Core CI, iPadOS CI, paired IPA construction, and independent offline metadata/archive verification are complete; exact real-device one-overwrite activation and Keychain isolation acceptance remain pending.
+本轮新增权威设计文档：
 
-```text
-open -> restore conversation/session/run/messages -> center conversation
--> project.create transaction -> durable project plus scoped receipt
--> one-question interview -> durable session and messages
--> openingPlan.save transaction -> waitingApproval artifact plus receipt
--> restart -> restore the same conversation and approval state
--> openingPlan.approve transaction -> approved artifact plus receipt
--> chapter.generate -> canonical approval validation -> immutable V1 plus scoped receipt/snapshot
--> accept exact V1 -> approvedFrozen, or reject -> three ordered diagnosis answers
--> confirm exact rewrite scope -> chapter.rewrite -> immutable V2 linked to V1
--> byte-exact lock/separator validation -> diff review -> accept exact V2 -> approvedFrozen
--> restart/replay -> validate lineage and return the receipt-bound historical snapshot
-```
+- `docs/PRODUCT_EXPERIENCE_BLUEPRINT.md`：最终产品长什么样、关键页面、完整用户旅程和禁止设计；
+- `docs/MILESTONE_VISUAL_ACCEPTANCE.md`：S0–S6 每阶段用户能看到什么、能做什么、暂时不能做什么和真机验收脚本。
 
 ## Validated baseline
 
@@ -54,7 +67,7 @@ SHA-256 2092cfb5fe94b463c453ca25e6107a12de1d77e8be8309c85ee027f8863d62ef
 
 User confirmed TrollStore install, launch, immediate restart persistence, and no immediate crash for that M0 artifact.
 
-Current independently audited paired device candidate (real-device acceptance pending):
+Run-29 paired device candidate (physical-device validation executed; single-overwrite activation gate failed):
 
 ```text
 commit b059a1e33a7a3d578cf15cd66ae11521400159bd
@@ -70,11 +83,11 @@ Main Bundle ID and Keychain group com.juyang.CangJie
 Probe Bundle ID and Keychain group com.juyang.CangJie.KeychainIsolationProbe
 No embedded.mobileprovision | no unreviewed framework, dylib, plugin, Watch, or XPC payload
 Signed executable hashes differ from unsigned executable hashes for both roles
-Acceptance blocked-pending-trollstore-device-keychain-isolation-validation (expected fail-closed state)
+Packaged pre-test manifest field: blocked-pending-trollstore-device-keychain-isolation-validation (historical fail-closed value, not current device status)
 Local artifact directory F:\project\CangJieBuilds\run-29621391195
 ```
 
-Build 26 and Build 27 remain useful physical-device regression evidence, but neither can satisfy Build 28's exact Candidate Set contract. Build 28 requires one overwrite of the Main IPA after terminating the old App, runtime-to-installed-bundle identity equality, governed-operation blocking on mismatch, and the exact paired Probe's Keychain isolation evidence. Until those device observations are recorded, Build 28 correctly remains `blocked-pending-trollstore-device-keychain-isolation-validation`.
+Physical-device validation was completed on the user's M1 iPad Pro running iPadOS 16.6.1. The first Main IPA overwrite did **not** activate the new executable; a second overwrite was required before the new page and identity appeared, so the single-overwrite activation requirement failed and this candidate is not fully accepted. After activation, running executable, installed bundle, Candidate Set, runtime/bundle match, Main Canary digest, paired Probe identity, own/default/explicit access-group isolation checks, unchanged Canary verification, deletion to Absent, state preservation, and no-crash/no-dead-control observations all passed. The activation risk is temporarily deferred, not closed; product work continues, but the next formal candidate must retest one-overwrite activation and retain fail-closed runtime identity diagnostics. A second overwrite must never be documented as the normal fix.
 
 The preceding device-accepted recoverable-runtime candidate remains:
 
@@ -125,14 +138,25 @@ Reset/recovery: how to return to the required starting state
 
 ## Immediate queue
 
-1. Complete the Build 28 executable-versus-installed-bundle activation gate and verify every governed entry point fails closed on mismatch without losing the user's draft.
-2. Complete the independent Keychain Isolation Probe integration with a distinct Bundle ID, distinct access group, positive own-group control, and fail-closed main-group checks.
-3. Build the main App and Probe as one candidate set; stamp both with the same candidate-set ID and record each IPA SHA-256, executable SHA-256, build, commit, and exact entitlements.
-4. Run Core CI and iPadOS CI, fix only from the first causal error, then trigger the dual-IPA workflow and independently audit the downloaded artifacts. Double overwrite is not an accepted recovery or test procedure.
-5. Physical-device gate remains pending. For the one-time upgrade from Build 27 to Build 28, first remove Build 27 from the iPad app switcher, then overwrite-install the audited Build 28 main IPA. Confirm running executable identity and installed bundle identity match and status is `Active` before any Agent or canon test. Then install the paired Probe IPA and execute the exact candidate-set isolation procedure.
+1. 先由用户确认本轮产品定调：第一核心用户、首页、左右区域、对话历史、全屏阅读层和 S1–S6 可见成果。
+2. 定调确认后，以 `PRODUCT_EXPERIENCE_BLUEPRINT.md` 为视觉契约审计现有 SwiftUI shell，列出可复用状态模型、必须替换的默认路径和新增组件。
+3. 按 TDD 实现 S1 驾驶舱：中文欢迎页、中心对话、左侧历史与独立功能页、右侧人话结果、专业字段默认折叠，以及横竖屏/键盘/滚动适配。
+4. 为 S1 验证导航身份、中心状态不重建、右侧确认后消失、长内容可滚动、草稿恢复和术语可见性。
+5. 保留现有 Build 28 工具、数据库、审批、版本和安全能力作为后台回归，不把诊断页继续放在普通用户主路径。
+6. S1 完成后构建一个明确标记为“产品驾驶舱候选”的 IPA，提供页面位置、点击路径、预期文字和外观问题清单，由用户做第一次新方向真机验收。
+7. S1 通过后按顺序推进：S2 真实 Provider 与工具 Agent -> S3 动态灵感挖掘和基础资料 -> S4 自由批注与前三章 -> S5 自动连载 -> S6 质量、增强资料与正式候选。
 
 ## Change log
 
+### 2026-07-18 普通用户优先的产品重新定调
+
+用户明确指出当前技术原型仍然假设使用者具备专业写作表达能力：固定访谈、必填拒绝原因、按段落锁定、审批工程字段和工作台式操作，把后台小说治理错误地暴露给了普通读者。新的权威定位是“给不会写小说的人使用的小说实现 Agent”：用户只提供念头、阅读反馈和重大决定，仓颉负责主动追问、建议、操作软件和调度生产级小说工程。
+
+本次重写 `IMPLEMENTATION_PLAN.md`，新增 `PRODUCT_EXPERIENCE_BLUEPRINT.md` 和 `MILESTONE_VISUAL_ACCEPTANCE.md`。旧技术能力不删除，但重新分层：中心仓颉对话为唯一必经入口；左侧进入独立页面；右侧展示本次对话产物；专业术语和治理详情默认隐藏；正文改为连续阅读和任意选字批注；“喜欢”与“原样保留”分离；无理由拒绝可以直接启动动态诊断。
+
+当前里程碑改为 S1 Agent 驾驶舱定调与重构。Build 28 安装激活风险被记录为暂时搁置而非解决；后续候选仍需运行身份验证，但产品开发不再围绕诊断页面继续扩张。
+
+独立终审进一步补齐了 S2 真实 Provider/Tool Call 边界、S3 基础资料与 S6 增强资料分层、意图证据与候选假设数据模型、左侧对话历史、全屏阅读层，以及 run-29 真机“隔离检查通过但单次覆盖激活失败”的真实状态。SwiftUI 改造必须等本轮产品定调确认后开始。
 ### 2026-07-17 Build-28 activation and Keychain-isolation worktree checkpoint
 
 The Build 27 physical-device pass completed visible Keychain create/read/update/delete and overwrite-persistence checks, but repeated a previously suspected activation anomaly: after one TrollStore overwrite the App could retain an older UI shape, while a subsequent overwrite or full restart exposed the expected build. The working diagnosis is an old-process/new-disk-bundle identity split. Because an old executable can read the replacement bundle's `Info.plist`, build text sourced only from the bundle is not proof that the newly installed executable is running. Requiring a second overwrite would hide rather than solve the defect and is prohibited.
@@ -436,7 +460,7 @@ Git Bash syntax check for build-candidate-set.sh: passed
 git diff --check: passed
 ```
 
-Current authoritative gate:
+Historical gate at this checkpoint — superseded:
 
 1. Review the complete diff and remove temporary logs/caches.
 2. Commit and push the exact Build 28 HEAD.
@@ -470,13 +494,16 @@ Paired build, independent signing, complete candidate-set re-verification, and a
 
 Independent Windows-side audit of the downloaded artifact directory also passed `scripts/verify-build-artifacts.py --metadata-only` and a separate archive/manifest verifier. It confirmed one Candidate Set ID, one version/build/commit, exact manifest SHA-256 values, exact Bundle IDs and self-only Keychain groups, matching packaged `Info.plist` identities, changed signed executable hashes, no provisioning profile, and no unreviewed nested code.
 
-Remaining gate is intentionally device-only:
+Historical device gate — executed on 2026-07-18 and superseded by the observed result:
 
-1. Terminate the old CangJie process before installing.
-2. Overwrite-install the exact Main IPA once, never twice.
-3. Confirm Device Diagnostics reports the running executable and installed bundle as matching and runtime authorization as active.
-4. If mismatch remains after relaunch, respring and collect diagnostics; do not perform another overwrite.
-5. Install the exact Probe from the same Candidate Set and complete the own-group positive control plus explicit forbidden main-group query.
-6. Preserve the main canary digest and require the Probe's main-group query to return `errSecMissingEntitlement`.
+1. The intended gate required one Main IPA overwrite, runtime/installed identity equality, active authorization, and the paired Probe isolation checks.
+2. The first overwrite did not activate the new executable, so the single-overwrite activation requirement failed.
+3. After a second overwrite activated the candidate, runtime/installed identity, Candidate Set, Main Canary, Probe identity, own/default/explicit group isolation, unchanged Canary, deletion, persistence, and stability checks passed.
+4. The packaged manifest's `blocked-pending-trollstore-device-keychain-isolation-validation` value is the pre-test fail-closed field embedded in the artifact; it is historical evidence, not the current operational status.
+5. Current status: activation defect temporarily deferred but not closed; the candidate is not fully accepted, product work may continue, and the next formal candidate must retest one-overwrite activation without normalizing a second overwrite.
 
-Only this real-device evidence can clear the manifest's fail-closed acceptance state.
+## 2026-07-18 product-experience rebaseline independent-review closure
+
+The ordinary-reader Agent-first rebaseline is now documented in `IMPLEMENTATION_PLAN.md`, `PRODUCT_EXPERIENCE_BLUEPRINT.md`, and `MILESTONE_VISUAL_ACCEPTANCE.md`. An independent read-only review found and this slice closed four contract defects before S1 implementation: a first-install `Continue last time` dead shortcut, inconsistent S3 exit criteria, intermediate-stage navigation entries without capability gates, and a right-drawer state-name mismatch. The S5 visible task example now explains character-information and timeline checks in ordinary language instead of exposing `CharacterKnowledge` terminology. A second ordinary-user review also closed two remaining ambiguities: S1 now persists messages with an explicit interface-preview receipt instead of pretending a real Agent exists, and S6 now carries the first-release non-goal list beside its acceptance contract.
+
+Current implementation gate remains unchanged: do not begin the S1 SwiftUI rewrite until the user confirms the product tone, default cockpit, navigation behavior, full-screen reading model, free-selection feedback model, and staged visible deliverables. Run-29 remains a partially accepted technical candidate with the single-overwrite activation defect deferred but not closed.

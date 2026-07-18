@@ -1,131 +1,627 @@
-# CangJie Agent-First Production Implementation Plan
+# 仓颉（CangJie）网络小说 AI Agent 权威实施方案
 
-- Status: ACTIVE AND AUTHORITATIVE
-- Baseline: 2026-07-16
-- Replaces retired `docs/ROADMAP.md` and all form/workbench-first interpretations.
+- 状态：`ACTIVE AND AUTHORITATIVE`
+- 新基线：2026-07-18
+- 仓库：`F:\project\CangJie`
+- 产品口号：**你只管有念头，仓颉负责把它写成小说。**
+- 本文取代 2026-07-16 版本中所有“专业写作工作台优先”“固定表单访谈”“用户先解释专业原因”的产品解释。
+- 旧版中已经验证的运行时治理、持久化、版本、审批、恢复、安全和 CI 能力继续保留，但降到后台，不再决定普通用户的默认体验。
 
-## 1. Product contract
+---
 
-CangJie is an agent-first, local-first iPad application for 1-2 million-character Simplified Chinese male-audience progression web novels.
+## 1. 产品定义
 
-```text
-App and Agent Runtime = machine
-LLM                   = pilot
-Typed tools           = controls
-Novel engine          = mission system
-User                  = final commander
-```
+### 1.1 一句话定位
 
-The LLM may understand, question, plan, draft, and propose. It cannot mutate state. Project creation, setting persistence, generation, pause/resume, status queries, canon merges, version acceptance, and chapter freezing require real versioned tools and durable receipts.
+仓颉是一款给**不会写小说、不会说写作术语、但有阅读品味或故事念头的普通人**使用的网络小说创作 Agent。
 
-North-star: idea/materials -> strategic interview -> reviewable cards -> confirmed opening bible -> approved chapters 1-3 -> rolling generation. Rejection requires diagnosis, locked good ranges, confirmed root cause/scope, then a main revision. Default chapter pipeline target is 10-20 minutes and RMB 5-20; hard limits pause. Recovery must be idempotent and must not duplicate charges or lose drafts.
+用户可以只给出一句话、一个画面、一种情绪、一段吐槽，甚至只说“我想写一本书，但不知道写什么”。仓颉负责主动理解、连续追问、提供灵感、试写验证、整理决定，并通过真实工具完成建书、保存设定、规划、写作、修改、检查、暂停、恢复、查询和导出。
 
-## 2. Workspace contract
+### 1.2 第一核心用户
 
-```text
-left independent pages | center persistent Agent | right artifacts/approvals
-```
+默认体验首先服务以下人群：
 
-Center conversation is the primary control plane and retains conversation ID, draft, scroll, streaming, and active run.
+- 爱看网络小说，但没有写作经验；
+- 脑中有片段、画面、设定或情绪，却无法完整表达；
+- 知道“喜欢/不喜欢”，但说不出“人物弧、叙事视角、爽点密度、信息顺序”等专业原因；
+- 不愿先学习复杂软件，也不愿填写密密麻麻的创作表格；
+- 有时有灵感，有时完全没有灵感，希望 AI 能给出贴合个人口味的建议；
+- 希望 AI 主动推进，而不是每一步都等用户找到正确按钮。
 
-Left region owns its own `NavigationStack`. Tapping Novel Projects pushes a dedicated `NovelProjectsPage` inside the left region and shows back navigation. It must not use a `DisclosureGroup`/accordion project tree, replace the center, recreate the conversation model, or silently bind browsing to Agent context. Conversations, Projects, Workbenches, Research, Runs, and Settings are left pages; workbenches are secondary.
+职业作者和高级用户可以打开详情、版本、设定、任务和模型路由，但他们不是默认界面的设计中心。
 
-Right drawer is collapsed by default and contains project cards, bible, plans, chapters, diffs, canon proposals, research, quality reports, costs, approvals, and receipts. Panel navigation never interrupts the Agent.
+### 1.3 用户真正购买的结果
 
-## 3. Governed runtime
+用户购买的不是“更多生成按钮”，而是以下结果：
 
-Safety invariants:
+1. **把说不清的念头挖成一个可持续的故事。**
+2. **只在一个对话窗口里，就能指挥整套小说工程。**
+3. **像普通读者一样表达感觉，也能让 AI 准确修改。**
+4. **不用理解后台术语，仍然得到生产级长篇一致性。**
+5. **中断、断网、崩溃和切后台后，不丢稿、不重复扣费。**
 
-1. Every side effect uses a typed tool.
-2. Model output is untrusted proposal data, never permission or proof.
-3. App code enforces schema, capability, scope, risk, approval, budget, idempotency, transition, verification, reconciliation, and audit.
-4. Showrunner is the only plan/prose/canon merger.
-5. Unknown outcomes reconcile before retry.
-6. External pages, imports, tool output, and model output cannot change policy.
-7. Execution claims link to receipts.
+### 1.4 首版边界
 
-Durable types: `Conversation`, `WorkItem`, `AgentRun`, `RunAttempt`, append-only `RunEvent`, `RunSnapshot`, `ResumeCursor`, `ToolReceipt`, and versioned `Artifact`. Work item, run, and attempt are separate.
+- 简体中文优先；
+- 个人使用优先；
+- 男频升级成长类网络小说为首轮深度优化题材；
+- 支持 100–200 万字长篇所需的数据和治理结构；
+- iPadOS 16.6+、11 英寸 iPad Pro 优先；
+- SwiftUI 原生 App + 独立 `CangJieCore`；
+- GitHub Actions 构建无 Apple 开发证书的 TrollStore 可安装 IPA；
+- 不以自动登录小说平台、自动发布、第三方代码插件、多端同步作为首版阻塞项。
 
-```text
-queued -> planning -> waitingApproval -> executing
--> waitingNetwork | pausedAtCheckpoint | reconciling
--> completed | failed | cancelled
-```
+---
 
-Pause persists the next safe cursor. Cancel ends the run. Background suspension checkpoints; iPadOS 16.6 is not promised unlimited background execution.
+## 2. 不可动摇的产品原则
 
-Each `AgentTool` declares stable ID/version, input/output schema, capability/scope, risk/approval, idempotency key, cost ceiling, execute/cancel/verify/reconcile handlers, redaction, and audit fields. M1 minimum: `project.create/list/inspect`, `conversation.setProjectFocus`, `run.inspect/pause/resume/cancel`, artifact draft/patch/accept, interview answer, bible propose/confirm, and chapter plan/generate/revise/accept.
+### 2.1 Agent 是前台主体，工作台是后台能力
 
-Approval binds exact plan revision, tool version, parameters, target versions, cost, expiration, and expected diff. Material changes invalidate approval.
-
-## 4. Agent team
-
-Strategic Adviser asks one highest-information question and converts answers to confirmable rules. Showrunner decomposes/arbitrates and alone merges. Plot Architect manages hierarchy and promises. Character Steward manages motives, costs, relationships, and knowledge. World Steward manages rules/resources/genre purity. Researcher creates sourced cards. Writer writes approved plans but cannot alter canon. Style, continuity, and quality agents submit evidence-located reports without infinite loops. Only one Writer owns prose.
-
-## 5. Novel and canon state
+打开 App 后首先看到仓颉，而不是创建项目表单、设定字段、小说术语或功能仪表盘。
 
 ```text
-create -> import/research -> strategic interview -> review cards
--> confirm bible -> plan/generate/review chapter 1 -> approve or diagnose/rewrite
--> repeat chapters 2-3 -> unlock rolling serial -> at most 5 unread chapters
+用户说人话
+→ 仓颉理解当前意图
+→ 仓颉决定下一步最有价值的问题或动作
+→ 需要操作软件时调用真实 Typed Tool
+→ App 验证权限、范围、预算、版本和幂等性
+→ 结果回到对话，并以大白话说明
 ```
 
-`FactStatus`: proposed, workingCanon, confirmedCanon, deprecated, contradicted.
-`TruthScope`: objective, rumor, belief(characterID), secret(audience).
-Chapter: draft, calibrationReview, rejected, approvedFrozen, workingCanon, invalidated, superseded.
+所有专业工作台仍然存在，但属于“需要时查看”和“高级用户手动接管”，不能成为完成主流程的必经入口。
 
-Unread chapters are working canon, not human-confirmed. Approval freezes prose and settles canon. Returning to an older chapter preserves the old branch, runs impact analysis, and regenerates only affected descendants. Pause for protagonist-goal changes, major death/turn, world-rule rewrite, main-track change, invalid volume outline, hard conflict, or budget overrun.
+### 2.2 普通用户不负责专业诊断
 
-Versioned domain records include `AuthorProfile`, `ProjectPreference`, `CreativeContract`, `PlanNode`, `Chapter/Version/Scene`, `CanonFact`, `CharacterKnowledge`, `PromiseLedger`, `ResearchCard`, `TaskRun`, `Checkpoint`, and `UsageRecord`. Chat is not canon.
+用户可以只说：
 
-## 6. Context, providers, import, security
+- “不对味”；
+- “这个人说话不像他”；
+- “前面挺好，后面我不喜欢”；
+- “我不知道为什么，就是没感觉”；
+- “保留这几句，其他重来”；
+- “这个方向不要”。
 
-`ContextCompiler` selects minimum versioned fragments: task/plan, confirmed rules, knowledge boundaries, recent prose and hierarchical summaries, open promises, relevant research, author/project preferences, locked ranges, and rejection diagnosis. Each fragment stores source, revision, priority, token estimate, sensitivity, retention, hash, and payload. Strict order: final prose -> canon/timeline/character/promise settlement -> checkpoint -> next chapter.
+仓颉必须根据选区、上下文、历史偏好和对话，通过反映式总结、对比选择、具体画面、微型试写等方式，把模糊感觉转成可执行规则。禁止先要求用户填写专业原因。
 
-Provider-neutral protocols support OpenAI Responses/chat-compatible, Anthropic, Gemini, DeepSeek, and custom compatible endpoints such as Agnes; runtime-probe capabilities. Support streaming, structured output, tools, cancellation, usage, errors, and reconciliation. Search adapters: Tavily, Brave, native search, URL Reader. Web is untrusted.
+### 2.3 “不知道”是信息，不是失败
 
-Import TXT/MD/DOCX/PDF/ZIP with PDFKit, page OCR, source tracking, explicit result status, and ZIP traversal/symlink/bomb/size defenses. Export TXT/MD/DOCX and a versioned optional encrypted project package, never API keys.
+用户回答“不知道”“说不上来”“都可以”时，Agent 不得机械进入下一道固定问题，也不得重复换一种措辞再问同一件事。它应在以下方式中选择信息增益最高的一种：
 
-Keys live only in Keychain. Logs/events/checkpoints/exports redact credentials. HTTPS is default. Skills are validated Markdown/JSON using an internal tool allowlist; no third-party code, shell, arbitrary files, or direct canon write in v1. `cc.zip` is private/unlicensed: absorb only generic concepts; never copy source, prompts, names, exact schemas/events, strings, structure, or tests.
+- 给出两个或三个明显不同的具体选项；
+- 描述两个短场景让用户选更接近的；
+- 先写 100–300 字微型试片；
+- 从用户喜欢或讨厌的作品体验反推；
+- 缩小到人物、氛围、冲突或结局中的一个维度；
+- 暂时标记为未决定，先推进可逆部分。
 
-## 7. Architecture and CI
+### 2.4 复杂度留在后台，决定权留给用户
+
+仓颉可以自动完成低风险、可逆、已授权动作。以下动作必须暂停并用大白话请用户决定：
+
+- 主角核心目标改变；
+- 主要人物死亡、黑化、永久退场或关系彻底翻转；
+- 世界硬规则被改写；
+- 主线、结局承诺或当前卷方向换轨；
+- 需要推翻大量已确认章节；
+- 单章或任务预计费用超过用户硬上限；
+- 两个都合理但会形成不同作品的方向选择。
+
+### 2.5 每次“已完成”都必须有真实证据
+
+模型说“我已经创建”“我已经暂停”不算完成。创建项目、保存设定、生成章节、暂停任务、恢复任务、确认版本和导出文件都必须由真实工具执行，并产生可核验回执。普通用户默认只看到人话结果；技术详情可展开查看。
+
+### 2.6 先保护用户满意的内容，再修改不满意的部分
+
+“喜欢”和“原样保留”必须区分：
+
+- **喜欢**：这是偏好证据，仓颉学习这种感觉，但未来可以在用户授权范围内润色；
+- **原样保留**：这是字节级强约束，重写时不能改动；
+- **不喜欢**：允许原因为空，直接进入 Agent 主导诊断；
+- **方向不对**：表示问题可能高于文字层面，需要检查人物、剧情、氛围或承诺。
+
+---
+
+## 3. 最终产品形态
+
+详细视觉和交互基准见 `docs/PRODUCT_EXPERIENCE_BLUEPRINT.md`。
+
+### 3.1 默认首页：仓颉对话
+
+首次打开显示：
 
 ```text
-SwiftUI App -> iPad adapters -> CangJieCore
+仓颉
+
+你不用会写小说。
+可以告诉我一个念头、一幅画面、一种感觉，
+甚至只说你最近喜欢看什么。
+剩下的我来问。
 ```
 
-Core owns domain/runtime/tool/context/budget/canon protocols and tests on Windows without Apple-only frameworks. App owns SwiftUI, GRDB/SQLite, Keychain, lifecycle, PDFKit, Vision, files, and URLSession. Stable root models separately own shell, conversation, left navigation, right artifacts, and run projection; left routes never own the conversation model.
+中心区域始终是当前对话。用户在这里完成从灵感到连载的大多数操作。
 
-CI: Windows core build/tests/coverage; pinned macOS/Xcode iPad build and tests; manual/tag device Release `.app`, ad-hoc/fakesign, `Payload/CangJie.app` IPA, SHA-256 and manifest. Acceptance combines deployment target, available simulator, and the physical iPadOS 16.6.1 device.
+### 3.2 左侧区域：独立功能页面
 
-## 8. Milestones
+左侧不是一直展开的项目树。它是一个可收起的导航区域：
 
-### M0 validated feasibility
-Windows core, Actions builds, installable IPA, device launch/basic persistence. It is not product UX.
+- 对话历史；
+- 我的小说；
+- 阅读与修改；
+- 故事记忆；
+- AI 任务；
+- 资料；
+- 设置。
 
-### M1 current: first-chapter Agent vertical slice
+点击“我的小说”后，**只在左侧区域内部进入一个独立的小说项目页面**，显示返回按钮和项目列表；中心对话不跳走、不重建、不丢草稿。其他入口同理。
 
-- M1-A: persistent center, independent left project page, collapsed right drawer, minimum durable models and real project/status tools. E2E: natural-language project request -> `project.create` -> durable project -> visible left page -> unchanged center -> verified receipt.
-- M1-B: one-question strategic interview, first-chapter card/bible proposal, exact plan/budget approval surviving restart.
-- M1-C: V1 generation, evidence review, locked ranges, diagnostic rejection, confirmed scope, V2 diff, acceptance and retained history.
-- M1-D: network/force-quit/background/repeated-tap recovery, unknown-outcome reconciliation, deterministic Fake Provider E2E, same-SHA device candidate.
+### 3.3 右侧区域：这次聊出来的内容
 
-### M2
-Secure import/OCR/ZIP, search/research cards, genre-purity research, richer interview, field approval, confirmed production bible.
+右侧默认收起，展开后首先显示普通用户关心的内容：
 
-### M3
-Three chapter gates, diagnosis, locked preservation, author/project preference separation, canon settlement, frozen chapters.
+1. 等你决定；
+2. 已经确定；
+3. 正在进行；
+4. 最近修改；
+5. 查看更多。
 
-### M4
-Hierarchical rolling plans, five-chapter lead, working canon, major-event/budget pauses, branch impact, knowledge/timeline/relationships/resources/promises.
+Hash、Receipt、Revision、Binding、内部 Agent 报告等工程信息默认隐藏在“技术详情”。
 
-### M5
-Chinese novel regression, AI-pattern/repetition checks, exports/encryption/Face ID, accessibility/performance, licenses/SBOM/security audit/release candidate.
+### 3.4 对话内产物
 
-## 9. Quality gates
+正文、方向总结、候选方案、修改说明和重大决定直接作为对话中的可展开内容出现。普通确认按钮使用大白话，例如：
 
-TDD is mandatory. Targets: core 90%, all executable 80%+. Unit tests cover navigation identity, context budget, canon/truth/knowledge, approval/rejection, three-chapter unlock, five-chapter cap, cost/cancel/idempotency/branches. Integration covers SQLite recovery, SSE/429/timeout/malformed data/reconciliation, search provenance, imports and round trips. E2E covers idea-to-project, left navigation without center loss, rejection and locked rewrite, recovery, backup/export, and Face ID.
+- “就按这个继续”；
+- “还不是我想要的”；
+- “保留这部分再改”；
+- “先给我看两个方向”；
+- “暂停生成”；
+- “查看刚才实际做了什么”。
 
-Chinese fixtures check genre pollution, knowledge leakage, ability/item/count/geography/time conflict, traceable promises, motivated choices/costs, repetitive AI language, false hooks, and summary dialogue. LLM judges cite evidence and never independently approve.
+### 3.5 连续正文和自由批注
 
-Every slice updates the control center and pitfalls log and reports version nature, included, excluded, verification, and next.
+正文以连续阅读文本显示，不按机械小段拆成 Lock/Unlock 卡片。用户长按并拖动任意文字范围后，系统菜单增加：
+
+- 喜欢；
+- 不喜欢；
+- 原样保留；
+- 方向不对；
+- 问仓颉；
+- 补充一句。
+
+批注携带精确选区、前后文、章节版本和标签回到中心对话。用户不填原因也能继续，Agent 负责追问。
+
+---
+
+## 4. 仓颉 Agent 的行为设计
+
+### 4.1 仓颉必须知道自己身处什么软件
+
+每次对话都获得受控的 App 能力清单、当前项目、当前任务、用户权限、预算、未完成决定和最近状态。它能回答：
+
+- “我现在有几本书？”
+- “第一章写到哪了？”
+- “刚才暂停成功了吗？”
+- “这本书目前确定了什么？”
+- “为什么还没继续生成？”
+- “帮我把我们刚讨论的设定保存进去。”
+
+它不能凭聊天记忆猜答案，必须在需要时调用查询工具。
+
+### 4.2 动态意图挖掘循环
+
+```text
+接收模糊表达
+→ 判断用户当前最需要：被理解 / 找方向 / 做选择 / 看样稿 / 执行动作
+→ 只问一个最高信息增益问题
+→ 读取回答和情绪信号
+→ 反映式总结：“我听下来，你更在意的是……”
+→ 必要时提供对比、例子或微型试写
+→ 把确认内容沉淀为大白话规则
+→ 达到足够确定度后主动建议下一步
+```
+
+问题数量不固定。禁止“永远三个问题”“每条消息自动进入下一题”“用关键词命中代替理解”。
+
+### 4.3 追问质量标准
+
+每个问题必须满足：
+
+- 一次只解决一个最关键的不确定性；
+- 普通读者看得懂；
+- 回答成本低；
+- 能明显改变后续故事或下一问；
+- 不把用户已经说过的内容再问一次；
+- 必须允许“都不喜欢”和“不知道”；
+- 如果用户已经表达明确，直接总结并执行，不为追问而追问。
+
+### 4.4 建议不是随机菜单
+
+当用户没灵感时，仓颉应先从其阅读偏好、讨厌点、想体验的情绪和可接受尺度建立临时偏好，再给出 2–3 个差异明显、能解释为何适合他的方向。用户否定后，Agent 要利用否定信息缩小空间，而不是重新随机生成一批。
+
+### 4.5 修改前说明
+
+执行重写前，仓颉先用简短人话说明：
+
+- 我理解的问题是什么；
+- 这次准备改哪里；
+- 哪些内容会保持不变；
+- 可能影响哪些后续内容；
+- 预计费用和时间；
+- 是否需要用户确认。
+
+---
+
+## 5. 软件内的 Agent 工具系统
+
+### 5.1 工具分层
+
+首版工具按能力域组织：
+
+- `project.*`：创建、复制、归档、查询、切换；
+- `conversation.*`：创建、命名、切换、绑定项目；
+- `idea.*`：保存念头、偏好和待确认方向；
+- `story.*`：保存作品方向、人物、世界规则、计划和承诺；
+- `chapter.*`：计划、生成、批注、诊断、重写、接受、分支；
+- `run.*`：查询、暂停、恢复、取消、重试和对账；
+- `research.*`：搜索、读取、保存研究卡、关联结论；
+- `export.*`：预检、导出、备份；
+- `settings.*`：读取可公开设置、模型路由和预算；
+- `diagnostics.*`：只读状态和经授权的诊断。
+
+### 5.2 权限与审批
+
+每个工具声明：
+
+- 输入/输出 schema；
+- 能力和项目范围；
+- 风险等级；
+- 是否需要确认；
+- 幂等键；
+- 费用上限；
+- 执行、取消、验证和对账；
+- 日志脱敏字段。
+
+低风险可逆动作可由用户一次授权后自动执行；高风险或不可逆动作必须绑定精确版本、范围、预算和预期变化。
+
+### 5.3 人话回执
+
+普通结果示例：
+
+> 已经为你创建《暂未命名的新书》，并把刚才那句话保存成最初灵感。现在我想先确认：你更想看主角一路压过去，还是每次赢都要付出代价？
+
+技术详情才展示：工具 ID、输入哈希、版本、费用、时间、回执和重试信息。
+
+---
+
+## 6. 长篇小说生产引擎
+
+前台简化不等于后台简化。以下能力全部保留并逐步做强。
+
+### 6.1 内置 Agent 团队
+
+1. **仓颉主 Agent / 战略顾问**：理解用户、控制对话节奏、选择工具和是否召集专家；
+2. **总编剧**：拆任务、处理一般分歧、唯一合并计划/正文/已确定设定；
+3. **剧情结构 Agent**：管理全书、分卷、当前单元、章节和场景承诺；
+4. **人物 Agent**：管理欲望、恐惧、能力、关系、选择、代价和知识边界；
+5. **世界观管理员**：管理规则、地理、组织、力量、资源和题材纯度；
+6. **研究 Agent**：建立带来源、时间、采用结论和可信度的研究卡；
+7. **正文写手**：按批准计划和最小上下文写作，不私自修改已确定内容；
+8. **文风、连续性和质量 Agent**：给出带文本证据的报告，不运行无限修订循环。
+
+正文同一时间只有一个 Writer owner；总编剧是唯一合并者；其他 Agent 只能提交 proposal 或 patch。
+
+### 6.2 核心数据
+
+- `AuthorProfile`：跨项目阅读与写作偏好、喜欢/不喜欢证据、禁区；
+- `ProjectPreference`：本书题材、语气、尺度和专属规则；
+- `IntentEvidence`：用户原话、选择、否定、批注和行为证据，保留来源、时间和作用范围；
+- `IntentHypothesis`：Agent 对用户真正想法的候选理解，以及支持证据、反对证据、置信度和状态；
+- `CreativeUnknown`：仍未确定、会影响作品的关键问题，以及提问优先级和是否已经问过；
+- `PreferenceSignal`：正向、负向或待确认的偏好信号，区分一次性情境和跨项目偏好；
+- `CreativeDecision`：推测、建议、用户确认、用户否认和被后续决定取代的版本化记录；
+- `AutonomyPreference`：用户希望多问、少问、直接试写或允许自动决定的范围；
+- `CreativeContract`：后台的作品方向、核心冲突、人物、硬规则、结局承诺和开篇方向；
+- `PlanNode`：全书/卷/单元/章/场景计划；
+- `Chapter/Version/Scene`：正文、版本、分支、批注和审批状态；
+- `TextAnnotation`：精确选区、标签、备注、上下文和约束强度；
+- `CanonFact`：已确定事实、来源、证据位置、有效时间和确认人；
+- `CharacterKnowledge`：角色知道、相信、误解或隐瞒什么；
+- `PromiseLedger`：伏笔、读者预期、兑现状态和窗口；
+- `ResearchCard`：查询、来源、摘要、短引用、采用结论、可信度和版权边界；
+- `TaskRun/Checkpoint/UsageRecord`：状态、上下文、工具、模型、费用、错误和恢复点。
+
+聊天记录不是已确定设定。只有经工具保存和确认的内容才具有治理效力。
+
+意图挖掘状态必须独立持久化和版本化：用户否定一个方向时，相关 `IntentHypothesis` 进入已否定状态并保留反对证据；尚未确认的理解不能升级为 `CreativeDecision.confirmed`；`CreativeUnknown` 记录已问问题和答案来源，防止换词重复；短试写产生的是新证据，不会偷偷改成用户决定。
+
+### 6.3 状态模型
+
+```text
+FactStatus:
+proposed | workingCanon | confirmedCanon | deprecated | contradicted
+
+TruthScope:
+objective | rumor | belief(characterID) | secret(audience)
+
+ChapterStatus:
+draft | calibrationReview | rejected | approvedFrozen
+| workingCanon | invalidated | superseded
+
+TaskStatus:
+queued | running | waitingNetwork | waitingUser
+| paused | failed | completed | cancelled | reconciling
+```
+
+用户默认看到的翻译：
+
+| 内部状态 | 默认显示 |
+|---|---|
+| proposed | 还在讨论 |
+| workingCanon | 后续正在按这个写，但你还没最终确认 |
+| confirmedCanon | 已经确定 |
+| approvedFrozen | 这章确定了 |
+| waitingUser | 等你决定 |
+| reconciling | 正在确认刚才是否真的完成，暂不重复执行 |
+
+### 6.4 上下文与记忆
+
+`ContextCompiler` 为每次任务选择最小必要上下文：
+
+- 当前用户意图和任务；
+- 当前章节计划；
+- 已确定世界规则、人物状态和知识边界；
+- 最近正文和分层摘要；
+- 未兑现伏笔和读者承诺；
+- 相关研究卡；
+- 作者偏好、本书偏好、喜欢/不喜欢批注；
+- 原样保留选区和最近拒绝诊断。
+
+保存上下文资产 ID、版本和哈希。顺序强制为：
+
+```text
+最终正文
+→ 设定/时间线/人物/伏笔结算
+→ checkpoint
+→ 下一章
+```
+
+### 6.5 自动连载治理
+
+- 前三章逐章由用户确认，用于校准；
+- 三章确认后才解锁滚动自动连载；
+- 最多领先 5 章未读工作内容；
+- 单章完整流水线默认目标为 10–20 分钟、5–20 元人民币；用户可设置更低硬上限，预计或实际达到硬上限时必须暂停；
+- 重大事件、硬冲突、预算越界必须暂停；
+- 用户退回较早章节时保留旧分支，先做影响分析，再选择性重生成；
+- 不得因为“爽文公式”自动贬低慢热、悲剧、扁平弧等用户明确选择。
+
+---
+
+## 7. iPad 技术架构
+
+### 7.1 客户端
+
+- SwiftUI 原生 App；
+- `CangJieCore` 使用 Swift Package 和 Swift 5 语言模式；
+- iPadOS deployment target 16.6；
+- SQLite/GRDB，使用事务、WAL、迁移和全文索引；
+- Keychain 保存 API Key；
+- PDFKit、Vision、URLSession 和系统文件能力由 App 适配层提供；
+- 不依赖 iOS 17 SwiftData 或持续后台运行能力。
+
+```text
+SwiftUI 对话驾驶舱
+→ Application / Agent Orchestrator
+→ Typed Tools + Policy + Budget + Approval
+→ Novel Domain + Context + Canon + Task Journal
+→ SQLite / Keychain / Provider / Search / Import / Export adapters
+```
+
+### 7.2 Provider
+
+平台无关 `LLMProvider` 支持流式文本、结构化输出、工具调用、取消、用量和标准错误。首版目标：
+
+- OpenAI Responses 与 Chat-compatible；
+- Anthropic；
+- Gemini；
+- DeepSeek；
+- 自定义 OpenAI-compatible Base URL；
+- Agnes 作为自定义 Provider。
+
+能力通过运行时探测，不把模型能力写死在 UI。模型路由可按主 Agent、规划、正文、摘要、抽取、审校配置。
+
+阶段归属必须明确：S2 完成至少一个真实 Provider 的端到端垂直切片，包括 Keychain 凭证、能力探测、流式输出、取消、结构化工具调用、工具结果回传、用量记录和标准错误；后续阶段再扩展多 Provider 路由。固定关键词或规则分支只能作为测试替身，不能通过 S2 的 Agent 验收。
+
+### 7.3 搜索、研究和导入
+
+- Tavily、Brave、模型原生搜索和 URL Reader；
+- TXT、Markdown、DOCX、PDF、ZIP；
+- 文本 PDF 使用 PDFKit；扫描 PDF 使用 Vision 离线 OCR；
+- ZIP 先清点，再防路径穿越、符号链接逃逸、压缩炸弹、同名碰撞和异常文件；
+- 每个文件明确显示成功、部分成功、需校对、不支持或失败；
+- 网页、文档和模型输出均为不可信输入，不能修改系统权限或直接写入已确定设定；
+- 版权作品只分析公开简介、评论、结构特征和必要短引用，不抓取完整正文。
+
+### 7.4 中断恢复
+
+- 写正文后先结算，再 checkpoint；
+- App 切后台或锁屏时在安全点暂停；
+- 返回前台后恢复；
+- 未知结果先对账，不直接重试；
+- 相同幂等键只能返回原始历史结果；
+- 不重复扣费、不重复追加正文、不丢未发送输入。
+
+### 7.5 安全与隐私
+
+- API Key 只进 Keychain，不进数据库、日志、导出包或 Git；
+- 日志写入前脱敏 Authorization、Key、Cookie 和凭证字段；
+- 自定义 Base URL 默认 HTTPS；
+- Skill 只能是受验证 Markdown/JSON，只调用白名单内置工具；
+- 首版禁止第三方代码、Shell、任意文件操作和直接写入已确定设定；
+- `cc.zip` 仅做 clean-room 架构参考，不复制源码、提示词、名称、精确 schema、字符串或测试；
+- 公开仓库暂不授予开源许可。
+
+---
+
+## 8. 分阶段实施与用户可见成果
+
+详细真机验收地图见 `docs/MILESTONE_VISUAL_ACCEPTANCE.md`。
+
+### S0：技术可行性基线（已完成，不代表产品体验）
+
+已验证：Windows Core 测试、GitHub Actions iOS 构建、TrollStore 安装、App 启动、本地写入、覆盖保留、基础恢复、受治理审批和第一章技术闭环。
+
+现有 Build 26–28 只作为技术证据。固定三问、关键词意图、段落 Lock/Unlock、工程字段和诊断页均不是目标 UX。
+
+### S1：Agent 驾驶舱定调与重构
+
+可见成果：
+
+- 新欢迎页和中心仓颉对话；
+- S1 发送内容只验证输入、持久化和消息布局：保存用户原话并显示明确标注的“界面预览版”系统回执，不调用真实 LLM、不解释意图、不执行工具，也不冒充仓颉已经理解；真实模型闭环从 S2 开始；
+- 左侧包含“新对话”、历史标题、最近时间、当前高亮和独立功能页面导航；入口按真实能力和数据状态显示，不放死页面；
+- 右侧“这次聊出来的内容”；
+- 人话状态和确认；
+- 专业字段默认隐藏；
+- 现有数据和恢复能力不丢失。
+
+退出标准：一个从未使用过写作软件的人，不看说明也知道可以直接输入一个念头；项目页面、右侧内容和中心对话互不破坏状态。
+
+### S2：真正可操作软件的 Agent
+
+可见成果：
+
+- 至少接通一个真实 LLM Provider，API Key 由 Keychain 保存；
+- 对话支持真实流式输出、取消、用量记录和错误恢复；
+- 模型通过结构化 Tool Call 创建小说、查看项目、保存刚才讨论、查询进度和切换项目；
+- 工具结果回传模型，并以大白话和可展开回执显示；
+- 至少有一个可暂停、恢复和失败对账的真实受治理任务，例如把当前讨论整理为“作品起点”；
+- 固定关键词解析器和预写死回复不得作为验收实现。
+
+退出标准：关键动作不需要用户进入工作台；真实模型不能凭文字冒充执行；任务查询、暂停、恢复、取消和未知结果对账可用；断网、重复点击、重启和未知结果不产生重复状态或费用。
+
+### S3：动态灵感挖掘与作品方向
+
+可见成果：
+
+- 从一句模糊念头或“我没想法”开始；
+- 每次只问一个关键问题；
+- “不知道”时换成对比、画面或微型试写；
+- 自动总结“这本书目前确定的方向”；
+- 用户可逐项纠正或一句话否定；
+- Agent 持久化证据、候选理解、已否定方向、待确定问题和用户自主程度，不靠固定问卷维持状态；
+- 基础资料能力可由 Agent 调用：TXT、Markdown、文本型 PDF、URL Reader、基础搜索和来源追踪；
+- 资料可作为意图挖掘上下文，但未经确认不能直接进入已确定设定。
+
+退出标准：真实普通用户无需理解“主线、爽点、制作圣经、正典”，也能形成足以启动第一章、并让前三章不会立刻失去依据的可确认作品方向；前三章的具体章级设计、写作和逐章校准仍属于 S4；连续否定后不会重复旧问题；基础资料和来源能够真实参与讨论。
+
+### S4：连续正文、自由批注与前三章校准
+
+可见成果：
+
+- 第一章直接在对话中交付并可进入连续阅读；
+- 任意选字批注喜欢、不喜欢、原样保留、方向不对；
+- 原因可为空；
+- Agent 动态诊断并在改前说明范围；
+- 满意内容不会在重写中丢失；
+- 前三章逐章确认。
+
+退出标准：三章全部通过；每次拒绝至少沉淀负向证据，并得到“已确认规则 / 待验证假设 / 仍不确定但将用短试写继续判断”之一，禁止为了过门槛编造确定规则；原样保留选区字节不变；默认界面无机械分段锁定和固定三问。
+
+### S5：滚动自动连载与长篇治理
+
+可见成果：
+
+- 用户说“继续写”“暂停”“现在到哪了”即可控制；
+- 最多领先 5 章；
+- 重大事件和预算越界用大白话暂停询问；
+- 用户可退回旧章并保留旧分支；
+- 故事记忆页可查看人物、规则、时间线和伏笔，但不必手工维护。
+
+退出标准：连续自动生成至少 5 章；中断恢复；无已知硬性设定冲突、人物知识越界和题材污染；退回中间章节不会破坏旧分支。
+
+### S6：质量、增强资料、导出与候选正式版
+
+可见成果：
+
+- AI 味、重复、人物、时间线、钩子、节奏和题材纯度检查；
+- 在 S3 基础导入之上补齐 DOCX、扫描 PDF 离线 OCR、ZIP 清点与安全防护、大文件失败报告和完整研究中心；
+- TXT/Markdown/DOCX 和完整项目包；
+- 可选密码加密、Face ID、日志清理；
+- 发布前字数、标题、空行和敏感词提示；
+- 性能、存储、电量、横竖屏、键盘和无障碍优化。
+
+退出标准：真实章节中至少 80% 无需整章重写，用户人工润色约 10 分钟以内；自动化覆盖达标；无高危安全问题；真实 iPad 长时间稳定。
+
+---
+
+## 9. 质量与测试
+
+### 9.1 TDD
+
+新状态机、工具、批注、正典变更、Provider 和导入功能先写失败测试，再最小实现，再重构。目标：
+
+- `CangJieCore` ≥ 90%；
+- 整体可执行代码 ≥ 80%；
+- 单元、集成和关键 UI/E2E 都必须存在。
+
+### 9.2 Agent 专项评测
+
+建立固定普通用户夹具：
+
+- 用户只有一句模糊念头；
+- 用户连续说“不知道”；
+- 用户否定所有建议；
+- 用户只能描述一个画面；
+- 用户圈选文字但不写原因；
+- 用户要求暂停、恢复和查询；
+- 用户使用模糊指代，如“把刚才那个保存”；
+- 用户改变主意但要求保留前半段。
+
+评测关注：是否真正理解当前状态、是否问了高信息增益问题、是否避免重复、是否正确调用工具、是否保护已确认内容、是否用大白话解释。
+
+### 9.3 小说专项回归
+
+- 修仙文本不得无理由混入公司、实验室、算法、现代管理和科技黑话；
+- 人物只能使用当前章节已知信息；
+- 能力、物品、数量、地理和时间不得冲突；
+- 伏笔兑现可追溯；
+- 角色选择符合欲望、认知和代价；
+- 检测 AI 套话、重复句式、空洞震惊、虚假钩子和总结式对白；
+- LLM Judge 必须给文本证据，不能独立决定通过。
+
+### 9.4 真机验收说明契约
+
+每次要求用户测试时，必须明确：
+
+```text
+安装的是哪个版本和 SHA-256
+从哪里进入
+控件在屏幕哪个区域
+点击、输入、长按或滚动的精确步骤
+预期结果出现在哪里
+失败时应截图或记录什么
+如何重置到起点
+本次明确不测试什么
+```
+
+中间进度汇报后继续工作。只有一个大阶段完成并需要用户真机验收，或确实缺少无法推断的信息时才停下。
+
+---
+
+## 10. 成功判据
+
+仓颉不是因为“功能很多”而成功，而是因为普通用户可以完成下面这条链路：
+
+```text
+我只有一个念头
+→ 仓颉让我觉得它真的听懂了
+→ 我不需要学术语就能做出选择
+→ 仓颉替我把决定保存并执行
+→ 我像读小说一样看成品、圈出感觉
+→ 仓颉能继续追问并准确修改
+→ 我随时可以问进度、暂停、恢复
+→ 后台仍能保证长篇一致性、版本、安全和费用
+```
+
+最终判断标准：**用户感受到的是一个懂他、会主动推进、能真正操作软件的小说创作伙伴；系统内部运行的是一个受治理、可恢复、可审计的生产级长篇小说工程。**
