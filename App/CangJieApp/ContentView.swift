@@ -882,7 +882,14 @@ struct ContentView: View {
         }
     }
 
+    @ViewBuilder
     private var conversationRail: some View {
+        if selectedActivity == .conversation {
+            conversationRailContent
+        }
+    }
+
+    private var conversationRailContent: some View {
         NavigationStack {
             List {
                 Section {

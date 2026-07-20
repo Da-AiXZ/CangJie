@@ -1438,3 +1438,12 @@ Local replacement slice after exact commit `9dd360492e67805b811daa51bda8532d315e
 - The minimal local repair keeps the original activity-bar implementation in `activityBarContent` and structurally constructs it only when `selectedActivity == .conversation`. This removes the covered activity-bar subtree rather than adding another leaf-specific accessibility assertion or weakening the test.
 - Local evidence: `swiftc -frontend -parse App/CangJieApp/ContentView.swift`, all `scripts/tests/test-*.py` contracts, and `git diff --check` passed. The repository `unittest discover -s tests -p 'test_*.py'` currently discovers zero tests; this is recorded as no discovered tests, not as additional coverage evidence.
 - The change is not yet accepted remotely. Do not trigger IPA until the exact replacement commit passes both Core and iPadOS CI. The protected `.tmp-appvm-index.txt` remains untracked and must not be staged.
+
+## 2026-07-20 S1 covered conversation-rail sibling repair pending CI
+
+Replacement evidence for exact commit `0f50983bee1eb7296212510324e6832bc75d6367`:
+
+- Core CI run `29765895872` passed.
+- iPadOS CI run `29765896742` still completed with UI failures, but the previous first failure at line 71 disappeared; the first real failure advanced to `CangJieSmokeUITests.swift:72`, where `landscape-conversation-rail` remained queryable after the landscape Novel Projects surface opened.
+- The minimal local repair applies the same structural construction rule to `conversationRail`: its original body is preserved as `conversationRailContent`, and the public rail is constructed only for `selectedActivity == .conversation`.
+- Local evidence for this next slice: Swift parse, all `scripts/tests/test-*.py` contracts, and `git diff --check` passed. Remote acceptance is pending; no IPA workflow is allowed until the exact replacement commit passes both Core and iPadOS CI.
