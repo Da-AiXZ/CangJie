@@ -1161,3 +1161,5 @@ An isolation report may contain all completed evidence in its model while later 
 ## P-276 SwiftUI List Toggle tests must target the native switch control
 
 In iPadOS UI run `29774894603`, `XCUIElement.tap()` on the accessibility element for a SwiftUI `Toggle` inside a `List` synthesized an event but left the value at `1`; the earlier version then failed when the timestamp row stayed visible. Keep the immediate-effect and persistence assertions, and target the trailing normalized coordinate inside the switch row so the test reaches the native control rather than its label/container. Do not remove the assertion or weaken the production binding based on a failed hit target.
+
+Acceptance evidence: exact commit `9b8a408` passed iPadOS CI `29779040541`; the timestamp setting test passed with its value-transition, immediate-disappearance, row-label, and relaunch assertions intact.

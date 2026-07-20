@@ -1490,7 +1490,7 @@ Evidence from failed iPadOS run `29770397526` was grouped by contract before edi
 
 Local evidence after this batch: `swiftc -frontend -parse` passed for all three changed Swift files; all seven `scripts/tests/test-*.py` contracts passed; `python -m unittest discover -s scripts/tests -p 'test-*.py'` passed with 32 tests and 1 skipped; `swift test` passed. The protected `.tmp-appvm-index.txt` remains untracked with the recorded SHA-256 unchanged. Remote acceptance is still pending a new Core and iPadOS Actions result; do not trigger IPA yet.
 
-## 2026-07-21 S1 Toggle interaction repair pending CI
+## 2026-07-21 S1 Toggle interaction repair accepted
 
 Evidence from the complete iPadOS log for run `29774894603`:
 
@@ -1499,4 +1499,10 @@ Evidence from the complete iPadOS log for run `29774894603`:
 - The minimal repair changes the two test-side Toggle activations to tap the trailing normalized coordinate of the native switch exposed inside the SwiftUI List row. The `@AppStorage` binding, `.id(showsConversationTimestamps)` rebuild, immediate-effect checks, and relaunch persistence checks remain unchanged.
 - Local evidence after the repair: Swift syntax parse passed; seven Python contract scripts passed (including 32 tests with 1 skipped); `swift test` passed with 99 XCTest cases and 15 Swift Testing cases; `git diff --check` passed. The protected `.tmp-appvm-index.txt` remains untracked and unchanged.
 
-Remote acceptance is pending the replacement Core and iPadOS Actions result. Do not trigger IPA until both pass.
+Remote acceptance for exact commit `9b8a4086ace915b057a113a215ea3024c2c0e473`:
+
+- Core CI `29779040424` passed its strict test and 90 percent line-coverage gate.
+- iPadOS CI `29779040541` passed 197 App XCTest cases, all 19 main App UI tests, 13 Isolation Probe unit tests, and the Isolation Probe UI test. Both simulator test commands reported `TEST SUCCEEDED`.
+- The formerly failing `testTasksAndSettingsPreserveConversationAndTimestampSettingReallyApplies` passed in 50.101 seconds, proving the trailing-coordinate activation reached the Toggle and preserved the immediate and relaunched timestamp contracts.
+
+This S1 CI repair is remotely accepted. IPA packaging remains a separate acceptance gate and has not been triggered by this slice.
