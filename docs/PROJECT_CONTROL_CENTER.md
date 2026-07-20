@@ -1468,3 +1468,24 @@ Local replacement slice after exact commit `ff3218d5a3bf73670d29d07028f4c4cac6d7
 - The minimal repair structurally constructs only the selected portrait region, and constructs none while the portrait navigation surface is presented. The `AppViewModel`, draft, selected conversation, messages, reader projection, and focus state remain owned by their existing model/state paths; no test assertion or frozen product direction changed.
 - Local evidence: `swiftc -frontend -parse App/CangJieApp/ContentView.swift` passed; all seven `scripts/tests/test-*.py` contracts passed; repository tests passed with 32 tests and 1 skipped; `git diff --check` passed. `python -m unittest discover -s tests -p 'test_*.py'` discovered 0 tests and is not counted as coverage evidence.
 - This slice is not remotely accepted yet. Do not trigger IPA until the exact replacement commit passes both Core and iPadOS CI. The protected `.tmp-appvm-index.txt` remains untracked and unchanged.
+
+## 2026-07-20 S1 project refresh assertion boundary repair pending CI
+
+Replacement evidence for exact commit `a76c5f24e6b9353362bb728f4abb5771c1f3b237`:
+
+- Core CI `29770397646` passed. iPadOS CI `29770397526` passed the previous portrait focus test; the first remaining main App UI failure advanced to `CangJieSmokeUITests.swift:296` in `testProjectRefreshShowsVisibleAcknowledgement`.
+- The failure was not a mutation of `AppViewModel.businessStatus`: `AppViewModel.reloadProjects()` only reloads projects/progress and publishes a project-refresh notice. The test read `agent-business-status` while the independent Novel Projects surface covered the conversation, but the product/modal accessibility contract requires covered center elements to be absent.
+- The minimal test repair asserts `agent-business-status` is absent while the shelf is open, taps the existing `novel-projects-back-button`, then waits for the status to reappear and compares its label with the pre-refresh value. No production behavior, status ownership, or test security gate was weakened.
+- Other failures in the same run (message label prefix, settings disappearance wait, and portrait TextView lookup) are separate evidence and are not changed in this slice.
+- Local and remote acceptance are pending the exact replacement CI run. IPA remains gated on both Core and iPadOS success; `.tmp-appvm-index.txt` remains untracked and unchanged.
+
+## 2026-07-20 S1 batch repair for complete iPadOS failure log pending CI
+
+Evidence from failed iPadOS run `29770397526` was grouped by contract before editing:
+
+- Covered-center failures at the project refresh and portrait rotation assertions were test-boundary errors. The center conversation is structurally absent while the independent Novel Projects page covers it; tests now assert absence and verify restoration after the real back action.
+- The two scale-fixture message failures shared one cause. The persisted fixture contains user messages, whose canonical display projection includes the `??` prefix; the UI expectations now match that existing Core contract.
+- The timestamp failure retained the immediate-effect contract. The conversation rail list now receives `.id(showsConversationTimestamps)` so its accessibility subtree is rebuilt when the setting changes; the test also waits for the switch value to become `0` before leaving Settings.
+- Isolation Probe evidence rows were present in the completed report but the latter two rows were below the visible lazy Form region. The test now performs bounded scrolling and waits for both identifiers; no probe logic or security gate was weakened.
+
+Local evidence after this batch: `swiftc -frontend -parse` passed for all three changed Swift files; all seven `scripts/tests/test-*.py` contracts passed; `python -m unittest discover -s scripts/tests -p 'test-*.py'` passed with 32 tests and 1 skipped; `swift test` passed. The protected `.tmp-appvm-index.txt` remains untracked with the recorded SHA-256 unchanged. Remote acceptance is still pending a new Core and iPadOS Actions result; do not trigger IPA yet.

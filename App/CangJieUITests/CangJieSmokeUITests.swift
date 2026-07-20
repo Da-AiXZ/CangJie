@@ -154,7 +154,7 @@ final class CangJieSmokeUITests: XCTestCase {
                 .waitForExistence(timeout: 10)
         )
         XCTAssertTrue(app.descendants(matching: .any)["novel-projects-page"].exists)
-        XCTAssertEqual(composer.value as? String, "旋转后仍然保留的念头")
+        XCTAssertFalse(composer.exists)
 
         XCUIDevice.shared.orientation = .portrait
         XCTAssertTrue(
@@ -170,7 +170,9 @@ final class CangJieSmokeUITests: XCTestCase {
         )
         app.buttons["portrait-navigation-close"].tap()
         app.buttons["portrait-focus-conversation"].tap()
-        XCTAssertEqual(composer.value as? String, "旋转后仍然保留的念头")
+        let restoredPortraitComposer = app.textViews["agent-composer"]
+        XCTAssertTrue(restoredPortraitComposer.waitForExistence(timeout: 5))
+        XCTAssertEqual(restoredPortraitComposer.value as? String, "旋转后仍然保留的念头")
 
         XCUIDevice.shared.orientation = .landscapeLeft
 
@@ -179,7 +181,9 @@ final class CangJieSmokeUITests: XCTestCase {
                 .waitForExistence(timeout: 10)
         )
         XCTAssertTrue(app.buttons["activity-bar-conversation"].exists)
-        XCTAssertEqual(composer.value as? String, "旋转后仍然保留的念头")
+        let restoredLandscapeComposer = app.textViews["agent-composer"]
+        XCTAssertTrue(restoredLandscapeComposer.waitForExistence(timeout: 5))
+        XCTAssertEqual(restoredLandscapeComposer.value as? String, "旋转后仍然保留的念头")
     }
 
     func testFirstLaunchShowsExactWelcomePageAndHidesUnavailableEntrypoints() {
@@ -293,6 +297,13 @@ final class CangJieSmokeUITests: XCTestCase {
         XCTAssertTrue(feedback.label.contains("书架已刷新 |"))
         XCTAssertEqual(feedback.label.filter { $0 == "|" }.count, 2)
         XCTAssertFalse(feedback.label.contains("?"))
+        XCTAssertFalse(businessStatus.exists)
+
+        let backButton = app.buttons["novel-projects-back-button"]
+        XCTAssertTrue(backButton.waitForExistence(timeout: 5))
+        backButton.tap()
+
+        XCTAssertTrue(businessStatus.waitForExistence(timeout: 5))
         XCTAssertEqual(businessStatus.label, businessStatusBeforeRefresh)
     }
 
@@ -528,9 +539,12 @@ final class CangJieSmokeUITests: XCTestCase {
         XCTAssertTrue(restoredTimestampSwitch.waitForExistence(timeout: 5))
         XCTAssertEqual(restoredTimestampSwitch.value as? String, "1")
         restoredTimestampSwitch.tap()
+        assertEventually(restoredTimestampSwitch, hasValue: "0")
         app.buttons["settings-back-button"].tap()
         assertEventuallyDisappears(app.staticTexts["conversation-time-0"])
-        XCTAssertFalse(restoredConversationRowWithTimestamp.label.contains("更新时间"))
+        let conversationRowWithoutTimestamp = app.buttons["conversation-row-0"]
+        XCTAssertTrue(conversationRowWithoutTimestamp.waitForExistence(timeout: 5))
+        XCTAssertFalse(conversationRowWithoutTimestamp.label.contains("更新时间"))
 
         relaunchWithoutFixturePreservingDatabaseScope(app)
 
@@ -1100,7 +1114,7 @@ final class CangJieSmokeUITests: XCTestCase {
         XCTAssertTrue(firstMessage.waitForExistence(timeout: 5), file: file, line: line)
         XCTAssertEqual(
             firstMessage.label,
-            "长对话消息 041",
+            "你：长对话消息 041",
             file: file,
             line: line
         )
@@ -1127,13 +1141,13 @@ final class CangJieSmokeUITests: XCTestCase {
         )
         XCTAssertEqual(
             app.staticTexts["conversation-message-198"].label,
-            "长对话消息 239",
+            "你：长对话消息 239",
             file: file,
             line: line
         )
         XCTAssertEqual(
             newestMessage.label,
-            "长对话消息 240",
+            "你：长对话消息 240",
             file: file,
             line: line
         )
@@ -1403,6 +1417,26 @@ final class CangJieSmokeUITests: XCTestCase {
             XCTWaiter.wait(for: [expectation], timeout: timeout),
             .completed,
             "Expected keyboard focus to become \(expectedValue)",
+            file: file,
+            line: line
+        )
+    }
+
+    private func assertEventually(
+        _ element: XCUIElement,
+        hasValue expectedValue: String,
+        timeout: TimeInterval = 5,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        let expectation = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "value == %@", expectedValue),
+            object: element
+        )
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [expectation], timeout: timeout),
+            .completed,
+            "Expected value \(expectedValue), got \(String(describing: element.value))",
             file: file,
             line: line
         )

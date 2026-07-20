@@ -917,6 +917,7 @@ struct ContentView: View {
                         .accessibilityIdentifier("conversations-heading")
                 }
             }
+            .id(showsConversationTimestamps)
             .navigationTitle("对话")
         }
     }

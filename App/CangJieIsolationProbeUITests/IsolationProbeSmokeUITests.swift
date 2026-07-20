@@ -17,8 +17,14 @@ final class IsolationProbeSmokeUITests: XCTestCase {
         XCTAssertTrue(overall.waitForExistence(timeout: 10))
         XCTAssertFalse(overall.label.contains("Running"))
         XCTAssertTrue(app.staticTexts["isolation-probe-own-group-status"].exists)
-        XCTAssertTrue(app.staticTexts["isolation-probe-default-group-status"].exists)
-        XCTAssertTrue(app.staticTexts["isolation-probe-forbidden-group-status"].exists)
+
+        let defaultGroupStatus = app.staticTexts["isolation-probe-default-group-status"]
+        let forbiddenGroupStatus = app.staticTexts["isolation-probe-forbidden-group-status"]
+        for _ in 0..<3 where !defaultGroupStatus.exists || !forbiddenGroupStatus.exists {
+            app.swipeUp()
+        }
+        XCTAssertTrue(defaultGroupStatus.waitForExistence(timeout: 5))
+        XCTAssertTrue(forbiddenGroupStatus.waitForExistence(timeout: 5))
         XCTAssertFalse(app.staticTexts["isolation-probe-main-canary-value"].exists)
     }
 }

@@ -1141,3 +1141,19 @@ P-270 portrait top-bar evidence: exact replacement commit `fbad49a` removed the 
 The portrait single-focus contract exposes exactly one primary region at a time. In the observed iPadOS run `29768294219`, `assertPortraitPrimaryFocus` failed at `CangJieSmokeUITests.swift:935` because `portrait-reader-region` remained queryable when conversation was selected. Keeping reader, conversation, and results permanently in a `ZStack` and toggling `.opacity`, hit testing, or `.accessibilityHidden` is not a reliable accessibility boundary for XCUITest's live hierarchy.
 
 Construct only the selected portrait region, and construct none while the portrait navigation surface covers the workspace. This changes view-tree presence, not durable AppViewModel state: drafts, messages, selected Conversation, reader projection, and focus selection must remain intact across focus changes. Verify every focus transition and restoration on iPadOS; do not weaken `assertPortraitPrimaryFocus` or replace the absence contract with an opacity assertion.
+
+## P-272 Covered-center assertions must verify restoration after the independent page closes
+
+When a left-region Novel Projects page covers the center Agent conversation, its elements intentionally leave the accessibility tree. A test must not retain an `XCUIElement` query and read `.label` while the center is covered; that produces a false failure even when `AppViewModel.businessStatus` is unchanged. For refresh/persistence tests, assert covered absence, dismiss through the real back action, wait for the center element to reappear, and then compare the exact pre-transition value. Do not mirror durable center status into the shelf page merely to satisfy a stale query.
+
+## P-273 Complete failure logs must be repaired by root-cause class, not CI round
+
+When one iPadOS run reports several failures, first map every failure to the production contract and shared helper. In this run, covered-center accessibility, the user-message display prefix, timestamp List refresh, and lazy Form visibility were distinct classes; the two scale failures shared one message projection cause. Repair all evidenced classes in one local slice, but do not change an unproven production contract merely to reduce the failure count.
+
+## P-274 Timestamp settings must rebuild the conversation accessibility subtree
+
+A binding can change while a SwiftUI List retains an accessibility projection from the previous conditional child tree. Keep the immediate-effect assertion, wait for the Toggle value transition, and key the List identity to the setting so the conditional timestamp row is structurally rebuilt. Then verify both child absence and the parent row label after returning to the conversation.
+
+## P-275 Lazy Form evidence requires bounded scrolling
+
+An isolation report may contain all completed evidence in its model while later SwiftUI Form rows are not yet instantiated in the XCUITest hierarchy. Scroll a bounded number of times and wait for each required identifier. Do not remove checks or alter fail-closed probe behavior to accommodate an offscreen row.
