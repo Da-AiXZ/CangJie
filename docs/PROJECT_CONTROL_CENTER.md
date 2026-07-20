@@ -1351,3 +1351,22 @@ Minimal follow-up repair:
 - Added Pitfall P-269 to require containment at every nested queryable composite boundary rather than only at the workspace root.
 
 This section records a pending repair, not a passing Apple result. The authoritative proof requires Core CI and iPadOS CI to pass for the same replacement commit. No IPA workflow may be triggered until that exact dual-CI gate passes.
+
+## 2026-07-20 S1 modal accessibility ordering and stale assertion repair
+
+Remote evidence for exact commit `2362c2f899d0efee4f6171a363a862494fe16a82`:
+
+- Core CI run `29744240231` passed.
+- iPadOS CI run `29744240317` executed all 197 App XCTest cases with zero failures, then completed 19 main App UI tests with 9 failures.
+- The Isolation Probe's 13 unit tests passed, but its single UI smoke test produced two assertion failures at lines 20 and 21; the run therefore did not establish complete UI success, and that probe evidence remains separate from the first failure in the main App UI suite.
+- The first real main App UI failure was `CangJieSmokeUITests.swift:319`: while the landscape independent page modal was open, a stale assertion required the covered `welcome-page` to remain in the accessibility tree. That conflicts with the dedicated modal-boundary test and P-259, which require covered workspace regions to leave the accessibility tree.
+- Later failures at lines 69, 100, and 936 exposed the production half of the same contract: eight dynamic landscape and portrait regions applied `.accessibilityElement(children: .contain)` after `.accessibilityHidden(...)`, allowing a containment modifier to re-expose regions that should remain hidden.
+
+Minimal repair:
+
+- Changed only five stale assertions inside independent-page flows so they require covered conversation content to be absent while the modal boundary is active; all tests still verify the draft/state before the transition and the restored content after returning.
+- Reordered the existing containment and hidden modifiers on the eight dynamic landscape/portrait regions so containment preserves descendants when visible and `.accessibilityHidden(...)` remains the outer fail-closed gate when the region is covered or inactive.
+- No identifier, layout, navigation, persistence path, runtime lifecycle, or frozen S1 product rule changed.
+- Added Pitfall P-270 to keep containment subordinate to dynamic accessibility visibility and to prevent state-preservation tests from contradicting modal accessibility tests.
+
+This is pending Apple verification. The nine main App UI failures from run `29744240317` must not be treated as one root cause: after this modal-boundary repair, the next iPadOS CI run must identify the new first real error before any additional change.

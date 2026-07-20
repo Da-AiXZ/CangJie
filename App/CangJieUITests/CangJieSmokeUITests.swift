@@ -315,8 +315,7 @@ final class CangJieSmokeUITests: XCTestCase {
         XCTAssertTrue(app.descendants(matching: .any)["novel-projects-page"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.staticTexts["novel-projects-empty-state"].exists)
         XCTAssertFalse(app.buttons["novel-project-row-0"].exists)
-        XCTAssertEqual(composer.value as? String, draftText)
-        XCTAssertTrue(app.descendants(matching: .any)["welcome-page"].exists)
+        XCTAssertFalse(app.descendants(matching: .any)["welcome-page"].exists)
         XCTAssertFalse(app.buttons["conversation-row-0"].exists)
 
         let backButton = app.buttons["novel-projects-back-button"]
@@ -355,8 +354,7 @@ final class CangJieSmokeUITests: XCTestCase {
         XCTAssertTrue(projectRow.label.contains("雾城守夜人"))
         XCTAssertTrue(projectRow.label.contains("刚保存了故事念头，还没有开始正文"))
         XCTAssertFalse(projectRow.label.contains("封闭十年的山门在雨夜重新响起"))
-        XCTAssertEqual(composer.value as? String, fixtureDraft)
-        XCTAssertTrue(app.staticTexts["你：\(fixtureMessage)"].exists)
+        XCTAssertFalse(app.staticTexts["你：\(fixtureMessage)"].exists)
 
         projectRow.tap()
 
@@ -373,8 +371,7 @@ final class CangJieSmokeUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["novel-project-detail-stage-note"].exists)
         XCTAssertFalse(app.descendants(matching: .any)["novel-project-detail-entry-continue"].exists)
         XCTAssertFalse(app.descendants(matching: .any)["novel-project-detail-entry-materials-tasks"].exists)
-        XCTAssertEqual(composer.value as? String, fixtureDraft)
-        XCTAssertTrue(app.staticTexts["你：\(fixtureMessage)"].exists)
+        XCTAssertFalse(app.staticTexts["你：\(fixtureMessage)"].exists)
 
         let detailBackButton = app.buttons["novel-project-detail-back-button"]
         XCTAssertTrue(detailBackButton.waitForExistence(timeout: 5))
@@ -382,7 +379,6 @@ final class CangJieSmokeUITests: XCTestCase {
 
         XCTAssertTrue(app.descendants(matching: .any)["novel-projects-page"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.buttons["novel-project-row-0"].exists)
-        XCTAssertEqual(composer.value as? String, fixtureDraft)
 
         let shelfBackButton = app.buttons["novel-projects-back-button"]
         XCTAssertTrue(shelfBackButton.waitForExistence(timeout: 5))
@@ -461,7 +457,7 @@ final class CangJieSmokeUITests: XCTestCase {
 
         XCTAssertTrue(app.descendants(matching: .any)["novel-projects-page"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.buttons["projects-refresh-button"].exists)
-        XCTAssertTrue(app.staticTexts["你：" + secondText].exists)
+        XCTAssertFalse(app.staticTexts["你：" + secondText].exists)
 
         let projectsBackButton = app.buttons["novel-projects-back-button"]
         XCTAssertTrue(projectsBackButton.waitForExistence(timeout: 5))
@@ -483,6 +479,8 @@ final class CangJieSmokeUITests: XCTestCase {
         XCTAssertTrue(composer.waitForExistence(timeout: 10))
         XCTAssertTrue(conversationRow.waitForExistence(timeout: 5))
 
+        XCTAssertEqual(composer.value as? String, fixtureDraft)
+
         app.buttons["activity-bar-tasks"].tap()
         XCTAssertTrue(app.descendants(matching: .any)["ai-tasks-page"].waitForExistence(timeout: 5))
         let tasksEmptyState = app.staticTexts["ai-tasks-empty-state"]
@@ -491,11 +489,12 @@ final class CangJieSmokeUITests: XCTestCase {
             tasksEmptyState.label,
             "当前没有正在进行的 AI 任务。这个版本只验证界面、导航和本地保存，尚未接入真正的模型任务。"
         )
-        XCTAssertEqual(composer.value as? String, fixtureDraft)
-        XCTAssertTrue(app.staticTexts["你：\(fixtureMessage)"].exists)
+        XCTAssertFalse(app.staticTexts["你：\(fixtureMessage)"].exists)
         app.buttons["ai-tasks-back-button"].tap()
         XCTAssertEqual(app.buttons["activity-bar-conversation"].value as? String, "当前页面")
         XCTAssertEqual(conversationRow.value as? String, "当前对话")
+        XCTAssertEqual(composer.value as? String, fixtureDraft)
+        XCTAssertTrue(app.staticTexts["你：\(fixtureMessage)"].exists)
 
         app.buttons["activity-bar-settings"].tap()
         XCTAssertTrue(app.descendants(matching: .any)["settings-page"].waitForExistence(timeout: 5))
