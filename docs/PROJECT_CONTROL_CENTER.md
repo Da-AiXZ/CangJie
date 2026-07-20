@@ -1365,8 +1365,15 @@ Remote evidence for exact commit `2362c2f899d0efee4f6171a363a862494fe16a82`:
 Minimal repair:
 
 - Changed only five stale assertions inside independent-page flows so they require covered conversation content to be absent while the modal boundary is active; all tests still verify the draft/state before the transition and the restored content after returning.
-- Reordered the existing containment and hidden modifiers on the eight dynamic landscape/portrait regions so containment preserves descendants when visible and `.accessibilityHidden(...)` remains the outer fail-closed gate when the region is covered or inactive.
+- Reordered containment ahead of the dynamic hidden modifier on the eight landscape/portrait regions. This was intended to make `.accessibilityHidden(...)` the outer fail-closed gate, but the replacement-run evidence below showed that `.accessibilityIdentifier(...)` still followed it and therefore remained the actual outer modifier.
 - No identifier, layout, navigation, persistence path, runtime lifecycle, or frozen S1 product rule changed.
 - Added Pitfall P-270 to keep containment subordinate to dynamic accessibility visibility and to prevent state-preservation tests from contradicting modal accessibility tests.
 
-This is pending Apple verification. The nine main App UI failures from run `29744240317` must not be treated as one root cause: after this modal-boundary repair, the next iPadOS CI run must identify the new first real error before any additional change.
+Replacement evidence for exact commit `7f44fef8c1256b91491ec4691da4e8e9119a6f1a`:
+
+- Core CI run `29748810946` passed.
+- iPadOS CI run `29748811204` again passed all 197 App XCTest cases, then completed 19 main App UI tests with 7 failures.
+- The first real main App UI failure remained `CangJieSmokeUITests.swift:69`: `agent-composer` was still queryable after the landscape independent-page modal opened. This proves the previous ordering was incomplete: SwiftUI's later `.accessibilityIdentifier(...)` still wrapped `.accessibilityHidden(...)`, so the hidden gate was not outermost.
+- The Isolation Probe again passed all 13 unit tests and its one UI smoke test still reported the two existing failures at lines 20 and 21; those remain later evidence and are not the current first-error repair target.
+
+The minimal follow-up changes only the same eight modifier chains to `contain -> identifier -> hidden`, placing `.accessibilityHidden(...)` last as the actual outer fail-closed gate. No later UI failure is being repaired in this slice. Apple verification remains pending for the next exact replacement commit.

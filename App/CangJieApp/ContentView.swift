@@ -383,8 +383,8 @@ struct ContentView: View {
                 .offset(x: conversationLeading)
                 .allowsHitTesting(selectedActivity == .conversation)
                 .accessibilityElement(children: .contain)
-                .accessibilityHidden(selectedActivity != .conversation)
                 .accessibilityIdentifier("landscape-conversation-region")
+                .accessibilityHidden(selectedActivity != .conversation)
 
             activityBar
                 .frame(width: activityWidth, height: size.height)
@@ -401,8 +401,8 @@ struct ContentView: View {
                 .offset(x: activityWidth + dividerWidth)
                 .allowsHitTesting(selectedActivity == .conversation)
                 .accessibilityElement(children: .contain)
-                .accessibilityHidden(selectedActivity != .conversation)
                 .accessibilityIdentifier("landscape-conversation-rail")
+                .accessibilityHidden(selectedActivity != .conversation)
 
             Color(uiColor: .separator)
                 .frame(width: dividerWidth, height: size.height)
@@ -419,8 +419,8 @@ struct ContentView: View {
                     .offset(x: size.width - resultsWidth)
                     .allowsHitTesting(selectedActivity == .conversation)
                     .accessibilityElement(children: .contain)
-                    .accessibilityHidden(selectedActivity != .conversation)
                     .accessibilityIdentifier("landscape-results-region")
+                    .accessibilityHidden(selectedActivity != .conversation)
             }
 
             if selectedActivity != .conversation {
@@ -458,8 +458,8 @@ struct ContentView: View {
             .offset(x: mainLeading)
             .allowsHitTesting(selectedActivity == .conversation)
             .accessibilityElement(children: .contain)
-            .accessibilityHidden(selectedActivity != .conversation)
             .accessibilityIdentifier("landscape-reader-region")
+            .accessibilityHidden(selectedActivity != .conversation)
 
             Color(uiColor: .separator)
                 .frame(width: dividerWidth, height: size.height)
@@ -487,8 +487,8 @@ struct ContentView: View {
                 .offset(x: activityWidth + dividerWidth)
                 .allowsHitTesting(selectedActivity == .conversation)
                 .accessibilityElement(children: .contain)
-                .accessibilityHidden(selectedActivity != .conversation)
                 .accessibilityIdentifier("landscape-conversation-rail")
+                .accessibilityHidden(selectedActivity != .conversation)
 
             Color(uiColor: .separator)
                 .frame(width: dividerWidth, height: size.height)
@@ -610,8 +610,8 @@ struct ContentView: View {
                 .opacity(showingReader ? 1 : 0)
                 .allowsHitTesting(showingReader && !showingNavigation)
                 .accessibilityElement(children: .contain)
-                .accessibilityHidden(!showingReader || showingNavigation)
                 .accessibilityIdentifier("portrait-reader-region")
+                .accessibilityHidden(!showingReader || showingNavigation)
             }
 
             conversation
@@ -620,8 +620,8 @@ struct ContentView: View {
                 .opacity(showingConversation ? 1 : 0)
                 .allowsHitTesting(showingConversation && !showingNavigation)
                 .accessibilityElement(children: .contain)
-                .accessibilityHidden(!showingConversation || showingNavigation)
                 .accessibilityIdentifier("portrait-conversation-region")
+                .accessibilityHidden(!showingConversation || showingNavigation)
 
             artifacts
                 .frame(width: size.width, height: contentHeight)
@@ -629,8 +629,8 @@ struct ContentView: View {
                 .opacity(showingResults ? 1 : 0)
                 .allowsHitTesting(showingResults && !showingNavigation)
                 .accessibilityElement(children: .contain)
-                .accessibilityHidden(!showingResults || showingNavigation)
                 .accessibilityIdentifier("portrait-results-region")
+                .accessibilityHidden(!showingResults || showingNavigation)
 
             portraitTopBar
                 .frame(width: size.width, height: topBarHeight)
