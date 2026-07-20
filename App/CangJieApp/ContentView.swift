@@ -1100,6 +1100,7 @@ struct ContentView: View {
                     }
                     TextEditor(text: $model.draft)
                         .focused($isComposerFocused)
+                        .accessibilityElement(children: .ignore)
                         .accessibilityIdentifier("agent-composer")
                         .disabled(!model.isComposerAvailable)
                         .accessibilityHidden(

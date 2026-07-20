@@ -1377,3 +1377,21 @@ Replacement evidence for exact commit `7f44fef8c1256b91491ec4691da4e8e9119a6f1a`
 - The Isolation Probe again passed all 13 unit tests and its one UI smoke test still reported the two existing failures at lines 20 and 21; those remain later evidence and are not the current first-error repair target.
 
 The minimal follow-up keeps the same eight modifier chains as `contain -> identifier -> hidden`, placing `.accessibilityHidden(...)` last as the actual outer fail-closed gate, and additionally applies the same dynamic hidden condition directly to the UIKit-backed `TextEditor` because the composer escaped the parent region boundary. No later UI failure is being repaired in this slice. Apple verification remains pending for the next exact replacement commit.
+
+## 2026-07-20 S1 TextEditor accessibility isolation follow-up
+
+The next minimal repair is currently uncommitted in `App/CangJieApp/ContentView.swift`:
+
+- The composer keeps `.focused($isComposerFocused)` and its existing `agent-composer` identifier, disabled state, and modal hidden condition.
+- Before the identifier and dynamic hidden gate, it now applies `.accessibilityElement(children: .ignore)` so the UIKit-backed `TextEditor` is exposed as one leaf accessibility element instead of allowing its UIKit descendants to escape the parent modal boundary.
+- The eight composite region chains remain `contain -> identifier -> hidden`; no S1 navigation, persistence, conversation-model, lifecycle, authorization, or test assertion contract was weakened.
+
+Deterministic Windows evidence for this uncommitted slice:
+
+- `swiftc -frontend -parse App/CangJieApp/ContentView.swift` passed.
+- All seven `scripts/tests/test-*.py` contracts passed.
+- Repository tests passed: 32 tests, 0 failures, 1 skipped.
+- `git diff --check`, UTF-8/U+FFFD scan for repository text files, secret scan, generated/signing/private path scan passed.
+- Protected `.tmp-appvm-index.txt` remains untracked, length `28868`, SHA-256 `4682EEB10DC361950FB0FDE60A8BFF3D16A801542412AAAA5FDA981392011DE8`.
+
+The latest authoritative iPadOS CI run for parent commit `3300f3d9b965927e5b6152aaeb36c418ea37e655` remains failed (`29757615272`). Its first real Main App UI failure is still `CangJieSmokeUITests.swift:69`, where `agent-composer` is queryable after the landscape result drawer opens; the later seven-failure list and the two Isolation Probe UI failures are not being repaired in this slice. Apple verification for the new modifier is pending on the next exact replacement commit, and no IPA workflow may be triggered before same-commit Core and iPadOS CI pass.
