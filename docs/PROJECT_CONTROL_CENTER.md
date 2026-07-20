@@ -1428,3 +1428,13 @@ Replacement evidence for exact commit `5bdf1419a51c6601ad23a7b87c1b51f5b1520bff`
 - The first real main App UI failure advanced to `CangJieSmokeUITests.swift:70`, where the covered `result-drawer-toggle` remained queryable. This proves the defect applies to the whole covered conversation subtree, not only the UIKit editor.
 
 The next minimal repair moves the structural visibility gate from the composer alone to the complete `conversation` view. The `AppViewModel`, selected conversation, draft, messages, and streaming state remain persistent; only the covered SwiftUI control subtree leaves the accessibility/render tree until the independent page or portrait navigation overlay is dismissed. No test assertion or frozen product direction changes.
+
+## 2026-07-20 S1 covered activity-bar sibling repair pending CI
+
+Local replacement slice after exact commit `9dd360492e67805b811daa51bda8532d315ef8d9`:
+
+- The newest iPadOS CI run is `29763517697`; Core run `29763517678` passed, while iPadOS completed 197 App XCTest cases successfully and failed 8 of 19 main App UI tests.
+- The first real failure is `CangJieSmokeUITests.swift:71`: after the landscape Novel Projects surface opens, `activity-bar-conversation` remains queryable even though the enclosing `activityBar` has `.accessibilityHidden(selectedActivity != .conversation)`.
+- The minimal local repair keeps the original activity-bar implementation in `activityBarContent` and structurally constructs it only when `selectedActivity == .conversation`. This removes the covered activity-bar subtree rather than adding another leaf-specific accessibility assertion or weakening the test.
+- Local evidence: `swiftc -frontend -parse App/CangJieApp/ContentView.swift`, all `scripts/tests/test-*.py` contracts, and `git diff --check` passed. The repository `unittest discover -s tests -p 'test_*.py'` currently discovers zero tests; this is recorded as no discovered tests, not as additional coverage evidence.
+- The change is not yet accepted remotely. Do not trigger IPA until the exact replacement commit passes both Core and iPadOS CI. The protected `.tmp-appvm-index.txt` remains untracked and must not be staged.

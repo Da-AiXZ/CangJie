@@ -817,7 +817,14 @@ struct ContentView: View {
         }
     }
 
+    @ViewBuilder
     private var activityBar: some View {
+        if selectedActivity == .conversation {
+            activityBarContent
+        }
+    }
+
+    private var activityBarContent: some View {
         VStack(spacing: 8) {
             ForEach(S1ActivityBarContract.visibleItems, id: \.destination) { item in
                 Button {
