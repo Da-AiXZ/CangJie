@@ -84,6 +84,7 @@ private struct NovelProjectsPage: View {
                 }
             }
         }
+        .accessibilityElement(children: .contain)
         .accessibilityIdentifier("novel-projects-page")
         .navigationTitle("我的小说")
         .navigationBarBackButtonHidden(true)
@@ -163,6 +164,7 @@ private struct NovelProjectDetailPage: View {
             }
 
         }
+        .accessibilityElement(children: .contain)
         .accessibilityIdentifier("novel-project-detail-page")
         .navigationTitle(project.title)
         .navigationBarTitleDisplayMode(.inline)
@@ -217,6 +219,7 @@ private struct NovelProjectBrowserReaderPage: View {
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .background(Color(uiColor: .systemBackground))
+        .accessibilityElement(children: .contain)
         .accessibilityIdentifier("novel-project-browser-reader")
         .navigationTitle("阅读正文")
         .navigationBarTitleDisplayMode(.inline)
@@ -259,6 +262,7 @@ private struct S1TasksPage: View {
                 }
             }
         }
+        .accessibilityElement(children: .contain)
         .accessibilityIdentifier("ai-tasks-page")
     }
 }
@@ -291,6 +295,7 @@ private struct S1SettingsPage: View {
                 }
             }
         }
+        .accessibilityElement(children: .contain)
         .accessibilityIdentifier("settings-page")
     }
 }
@@ -378,6 +383,7 @@ struct ContentView: View {
                 .offset(x: conversationLeading)
                 .allowsHitTesting(selectedActivity == .conversation)
                 .accessibilityHidden(selectedActivity != .conversation)
+                .accessibilityElement(children: .contain)
                 .accessibilityIdentifier("landscape-conversation-region")
 
             activityBar
@@ -395,6 +401,7 @@ struct ContentView: View {
                 .offset(x: activityWidth + dividerWidth)
                 .allowsHitTesting(selectedActivity == .conversation)
                 .accessibilityHidden(selectedActivity != .conversation)
+                .accessibilityElement(children: .contain)
                 .accessibilityIdentifier("landscape-conversation-rail")
 
             Color(uiColor: .separator)
@@ -412,6 +419,7 @@ struct ContentView: View {
                     .offset(x: size.width - resultsWidth)
                     .allowsHitTesting(selectedActivity == .conversation)
                     .accessibilityHidden(selectedActivity != .conversation)
+                    .accessibilityElement(children: .contain)
                     .accessibilityIdentifier("landscape-results-region")
             }
 
@@ -450,6 +458,7 @@ struct ContentView: View {
             .offset(x: mainLeading)
             .allowsHitTesting(selectedActivity == .conversation)
             .accessibilityHidden(selectedActivity != .conversation)
+            .accessibilityElement(children: .contain)
             .accessibilityIdentifier("landscape-reader-region")
 
             Color(uiColor: .separator)
@@ -478,6 +487,7 @@ struct ContentView: View {
                 .offset(x: activityWidth + dividerWidth)
                 .allowsHitTesting(selectedActivity == .conversation)
                 .accessibilityHidden(selectedActivity != .conversation)
+                .accessibilityElement(children: .contain)
                 .accessibilityIdentifier("landscape-conversation-rail")
 
             Color(uiColor: .separator)
@@ -509,13 +519,16 @@ struct ContentView: View {
 
             if model.isArtifactDrawerPresented {
                 artifacts
+                    .accessibilityElement(children: .contain)
                     .accessibilityIdentifier("reader-companion-results")
             } else {
                 conversation
+                    .accessibilityElement(children: .contain)
                     .accessibilityIdentifier("reader-companion-conversation")
             }
         }
         .background(Color(uiColor: .systemGroupedBackground))
+        .accessibilityElement(children: .contain)
         .accessibilityIdentifier("reader-companion-region")
     }
 
@@ -566,6 +579,7 @@ struct ContentView: View {
                 }
                 .offset(x: leading)
                 .shadow(color: .black.opacity(0.14), radius: 16, x: 5, y: 0)
+                .accessibilityElement(children: .contain)
                 .accessibilityIdentifier("landscape-left-page-overlay")
         }
         .accessibilityElement(children: .contain)
@@ -596,6 +610,7 @@ struct ContentView: View {
                 .opacity(showingReader ? 1 : 0)
                 .allowsHitTesting(showingReader && !showingNavigation)
                 .accessibilityHidden(!showingReader || showingNavigation)
+                .accessibilityElement(children: .contain)
                 .accessibilityIdentifier("portrait-reader-region")
             }
 
@@ -605,6 +620,7 @@ struct ContentView: View {
                 .opacity(showingConversation ? 1 : 0)
                 .allowsHitTesting(showingConversation && !showingNavigation)
                 .accessibilityHidden(!showingConversation || showingNavigation)
+                .accessibilityElement(children: .contain)
                 .accessibilityIdentifier("portrait-conversation-region")
 
             artifacts
@@ -613,6 +629,7 @@ struct ContentView: View {
                 .opacity(showingResults ? 1 : 0)
                 .allowsHitTesting(showingResults && !showingNavigation)
                 .accessibilityHidden(!showingResults || showingNavigation)
+                .accessibilityElement(children: .contain)
                 .accessibilityIdentifier("portrait-results-region")
 
             portraitTopBar
@@ -668,6 +685,7 @@ struct ContentView: View {
         .padding(.horizontal, 8)
         .background(Color(uiColor: .secondarySystemGroupedBackground))
         .overlay(alignment: .bottom) { Divider() }
+        .accessibilityElement(children: .contain)
         .accessibilityIdentifier("portrait-focus-bar")
     }
 
@@ -742,6 +760,7 @@ struct ContentView: View {
                         .accessibilityHidden(true)
                 }
             .shadow(color: .black.opacity(0.18), radius: 18, x: 6, y: 0)
+            .accessibilityElement(children: .contain)
             .accessibilityIdentifier("portrait-left-page-overlay")
         }
         .accessibilityElement(children: .contain)
@@ -830,6 +849,7 @@ struct ContentView: View {
         .padding(.vertical, 12)
         .frame(maxHeight: .infinity)
         .background(Color(uiColor: .secondarySystemGroupedBackground))
+        .accessibilityElement(children: .contain)
         .accessibilityIdentifier("activity-bar")
     }
 
@@ -978,6 +998,7 @@ struct ContentView: View {
             }
         }
         .background(Color(uiColor: .systemBackground))
+        .accessibilityElement(children: .contain)
         .accessibilityIdentifier("reader-region")
     }
     private var conversation: some View {

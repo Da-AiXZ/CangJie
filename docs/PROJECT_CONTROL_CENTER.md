@@ -1333,3 +1333,21 @@ Minimal repair:
 - Added Pitfall P-268 so future container identifiers preserve descendant accessibility before they are used as XCUITest layout markers.
 
 The Apple simulator run remains the authoritative execution proof. This is not an IPA or device-installation stop point: the repair must be committed and pushed, and Core CI plus iPadOS CI must pass for that same exact commit before the paired IPA workflow may be triggered.
+
+## 2026-07-20 S1 nested accessibility containment follow-up
+
+Remote evidence for exact commit `a54c96e556793cd78d75d443756bb6bba2f434de`:
+
+- Core CI run `29741467149` passed.
+- iPadOS CI run `29741467153` compiled the App and executed all 197 App XCTest cases with zero failures, then failed in the UI suite.
+- The first real UI failure remained `CangJieSmokeUITests.testAgentFirstWorkspaceLaunches` at `App/CangJieUITests/CangJieSmokeUITests.swift:14`, where `agent-control-plane-title` was absent.
+- A later hierarchy diagnostic in the same run showed the next collapse boundary: while the test queried `agent-composer`, XCUITest exposed one `TextView` identified as `reader-companion-region` whose value was the saved draft text.
+
+Minimal follow-up repair:
+
+- The root-only containment repair in `a54c96e` was necessary but incomplete: an outer `.accessibilityElement(children: .contain)` does not prevent a nested composite view with its own identifier from replacing that nested view's descendants.
+- Added `.accessibilityElement(children: .contain)` at the 21 remaining queryable composite identifier boundaries in `ContentView.swift`, covering independent left pages, landscape and portrait regions, companion panes, overlays, the activity bar, and the shared Reader region.
+- Kept all leaf `Text`, `TextEditor`, `Button`, `Toggle`, and `NavigationLink` identifiers unchanged. Existing XCUITests remain the red regression contract and no assertion, product behavior, navigation rule, lifecycle path, or frozen S1 direction was weakened.
+- Added Pitfall P-269 to require containment at every nested queryable composite boundary rather than only at the workspace root.
+
+This section records a pending repair, not a passing Apple result. The authoritative proof requires Core CI and iPadOS CI to pass for the same replacement commit. No IPA workflow may be triggered until that exact dual-CI gate passes.
