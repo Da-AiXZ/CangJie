@@ -601,36 +601,31 @@ struct ContentView: View {
         return ZStack(alignment: .topLeading) {
             Color(uiColor: .systemGroupedBackground)
 
-            if model.hasReadableContent {
+            if model.hasReadableContent && showingReader && !showingNavigation {
                 VStack(spacing: 0) {
                     reader
                 }
                 .frame(width: size.width, height: contentHeight)
                 .offset(y: topBarHeight)
-                .opacity(showingReader ? 1 : 0)
-                .allowsHitTesting(showingReader && !showingNavigation)
                 .accessibilityElement(children: .contain)
                 .accessibilityIdentifier("portrait-reader-region")
-                .accessibilityHidden(!showingReader || showingNavigation)
             }
 
-            conversation
-                .frame(width: size.width, height: contentHeight)
-                .offset(y: topBarHeight)
-                .opacity(showingConversation ? 1 : 0)
-                .allowsHitTesting(showingConversation && !showingNavigation)
-                .accessibilityElement(children: .contain)
-                .accessibilityIdentifier("portrait-conversation-region")
-                .accessibilityHidden(!showingConversation || showingNavigation)
+            if showingConversation && !showingNavigation {
+                conversation
+                    .frame(width: size.width, height: contentHeight)
+                    .offset(y: topBarHeight)
+                    .accessibilityElement(children: .contain)
+                    .accessibilityIdentifier("portrait-conversation-region")
+            }
 
-            artifacts
-                .frame(width: size.width, height: contentHeight)
-                .offset(y: topBarHeight)
-                .opacity(showingResults ? 1 : 0)
-                .allowsHitTesting(showingResults && !showingNavigation)
-                .accessibilityElement(children: .contain)
-                .accessibilityIdentifier("portrait-results-region")
-                .accessibilityHidden(!showingResults || showingNavigation)
+            if showingResults && !showingNavigation {
+                artifacts
+                    .frame(width: size.width, height: contentHeight)
+                    .offset(y: topBarHeight)
+                    .accessibilityElement(children: .contain)
+                    .accessibilityIdentifier("portrait-results-region")
+            }
 
             portraitTopBar
                 .frame(width: size.width, height: topBarHeight)

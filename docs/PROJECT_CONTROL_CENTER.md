@@ -1456,3 +1456,15 @@ Replacement evidence for exact commit `fbad49a4ed5016e646aff5414a61794a0ecb40f9`
 - iPadOS CI run `29767253552` proved the previous line 72 failure was gone; the first real failure advanced to `CangJieSmokeUITests.swift:101`, where `portrait-navigation-open` remained queryable while the portrait navigation modal was open.
 - The minimal local repair preserves the original top-bar body as `portraitTopBarContent` and structurally constructs `portraitTopBar` only when the portrait navigation overlay is not presented and the selected activity is conversation.
 - Local evidence: Swift parse, all `scripts/tests/test-*.py` contracts, and `git diff --check` passed. Remote acceptance is pending on the exact replacement commit; IPA remains gated on both Core and iPadOS success.
+
+## 2026-07-20 S1 portrait primary-focus region repair pending CI
+
+Local replacement slice after exact commit `ff3218d5a3bf73670d29d07028f4c4cac6d72787`:
+
+- The authoritative iPadOS CI run is `29768294219`; Core CI `29768294192` passed.
+- The first real main App UI failure is `CangJieSmokeUITests.swift:935`: `assertPortraitPrimaryFocus(in: app, selected: "conversation")` found `portrait-reader-region` still queryable although conversation was selected.
+- The test helper at `CangJieSmokeUITests.swift:1213-1227` requires exactly one of `portrait-reader-region`, `portrait-conversation-region`, and `portrait-results-region` to exist for the selected focus.
+- The production cause was confirmed in `ContentView.swift`: all three portrait regions were always constructed and relied on `.opacity`, `.allowsHitTesting`, and `.accessibilityHidden` to represent focus. The same dynamic composite-accessibility failure already observed in the landscape modal path allowed the nonselected reader region to remain in the XCUITest live query.
+- The minimal repair structurally constructs only the selected portrait region, and constructs none while the portrait navigation surface is presented. The `AppViewModel`, draft, selected conversation, messages, reader projection, and focus state remain owned by their existing model/state paths; no test assertion or frozen product direction changed.
+- Local evidence: `swiftc -frontend -parse App/CangJieApp/ContentView.swift` passed; all seven `scripts/tests/test-*.py` contracts passed; repository tests passed with 32 tests and 1 skipped; `git diff --check` passed. `python -m unittest discover -s tests -p 'test_*.py'` discovered 0 tests and is not counted as coverage evidence.
+- This slice is not remotely accepted yet. Do not trigger IPA until the exact replacement commit passes both Core and iPadOS CI. The protected `.tmp-appvm-index.txt` remains untracked and unchanged.
