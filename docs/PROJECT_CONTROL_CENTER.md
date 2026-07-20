@@ -1307,3 +1307,13 @@ Focused Windows evidence completed before replacement CI:
 - Full Core coverage was not repeated because the parent Core CI is green and this write set changes no `CangJieCore` or Swift package source, following P-264.
 
 Apple XCTest/XCUITest has not yet been rerun for this replacement commit. No IPA exists at this checkpoint.
+
+## 2026-07-20 App conversation display-prefix assertion repair
+
+Remote evidence for commit `31b0342d4cf03b6e84ef0796d160e4e8c9047eef`:
+
+- Core CI run `29736010384` passed the strict Core tests and 90% line-coverage gate.
+- iPadOS CI run `29736010383` compiled the App and AppTests and reached simulator execution. Its first real failure was `AppViewModelTests.swift:539` in `testAgentCreationMessageExecutesProjectToolAndClearsComposer`.
+- Complete failed-step logs showed exactly three App XCTest failures at lines 539, 758, and 786 before later UI failures. All three shared one cause: the tests asserted bare/localized assistant content or the old English word `approved`, while `conversationMessages` intentionally exposes `AgentMessage.displayText`, including the `仓颉：` speaker prefix and ordinary Chinese projection.
+
+The minimal repair changes only those three expectations: project creation, restored opening-plan confirmation, and the next-message chapter-ready reminder now assert the exact displayed assistant strings including `仓颉：`. Production message generation, persistence, Runtime behavior, and ordinary startup remain unchanged. Later UI failures are not classified or changed in this slice; the next Apple run must first prove these App XCTest corrections and then expose the next real failure, if any. No IPA was triggered because iPadOS CI was not green.

@@ -538,7 +538,7 @@ final class AppViewModelTests: XCTestCase {
             XCTAssertEqual(viewModel.status, "正在和你一起想清楚")
             XCTAssertTrue(
                 viewModel.conversationMessages.contains {
-                    $0 == "已经为你建好《Untitled Novel》。名字和方向都可以之后再调整。"
+                    $0 == "仓颉：已经为你建好《Untitled Novel》。名字和方向都可以之后再调整。"
                 }
             )
         }
@@ -755,7 +755,10 @@ final class AppViewModelTests: XCTestCase {
             XCTAssertEqual(restored.openingPlanApproval?.id, displayed.id)
             XCTAssertEqual(restored.openingPlanApproval?.bindingHash, displayed.bindingHash)
             XCTAssertEqual(restored.lastToolReceipt?.toolID, "artifact.openingPlan.approve")
-            XCTAssertTrue(restored.conversationMessages.last?.contains("approved") == true)
+            XCTAssertEqual(
+                restored.conversationMessages.last,
+                "仓颉：开篇方向已经确认。接下来可以开始准备第一章。"
+            )
         }
     }
 
@@ -783,7 +786,10 @@ final class AppViewModelTests: XCTestCase {
             XCTAssertEqual(viewModel.openingPlanApproval?.status, .approved)
             XCTAssertEqual(try database.countArtifacts(kind: "openingPlan"), 1)
             XCTAssertEqual(viewModel.lastToolReceipt?.toolID, "artifact.openingPlan.approve")
-            XCTAssertEqual(viewModel.conversationMessages.last, "开篇方向已经确认。你说“生成第一章”或“继续”，我就开始准备第一章。")
+            XCTAssertEqual(
+                viewModel.conversationMessages.last,
+                "仓颉：开篇方向已经确认。你说“生成第一章”或“继续”，我就开始准备第一章。"
+            )
         }
     }
 
