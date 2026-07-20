@@ -1417,3 +1417,14 @@ Replacement evidence for exact commit `44f6bfa4f99bc40bbe6fcc264dbd72e0b12c9e84`
 - iPadOS CI run `29760513963` passed all 197 App XCTest cases, then completed 19 main App UI tests with 7 failures; the Isolation Probe retained 13 passing unit tests and two UI failures at lines 20 and 21.
 - The first real main App UI failure remained `CangJieSmokeUITests.swift:69`: `agent-composer` was still queryable after the landscape independent-page modal opened.
 - Moving the dynamic hidden gate to a containing composer HStack did not remove the UIKit-backed editor from XCUITest's live query. The next minimal experiment therefore removes only the composer control subtree while the conversation surface is covered, retaining the `AppViewModel` draft and persistent conversation.
+
+## 2026-07-20 S1 covered composer removal exposes the next covered conversation control
+
+Replacement evidence for exact commit `5bdf1419a51c6601ad23a7b87c1b51f5b1520bff`:
+
+- Core CI run `29762005445` passed.
+- iPadOS CI run `29762005383` passed all 197 App XCTest cases, then completed 19 main App UI tests with 7 failures; the Isolation Probe retained 13 passing unit tests and its two UI failures at lines 20 and 21.
+- Structurally removing the covered composer succeeded: the previous line 69 assertion for `agent-composer` no longer failed.
+- The first real main App UI failure advanced to `CangJieSmokeUITests.swift:70`, where the covered `result-drawer-toggle` remained queryable. This proves the defect applies to the whole covered conversation subtree, not only the UIKit editor.
+
+The next minimal repair moves the structural visibility gate from the composer alone to the complete `conversation` view. The `AppViewModel`, selected conversation, draft, messages, and streaming state remain persistent; only the covered SwiftUI control subtree leaves the accessibility/render tree until the independent page or portrait navigation overlay is dismissed. No test assertion or frozen product direction changes.

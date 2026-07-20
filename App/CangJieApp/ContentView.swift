@@ -1001,8 +1001,10 @@ struct ContentView: View {
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("reader-region")
     }
+    @ViewBuilder
     private var conversation: some View {
-        VStack(spacing: 0) {
+        if selectedActivity == .conversation && !isPortraitNavigationPresented {
+            VStack(spacing: 0) {
             HStack {
                 VStack(alignment: .leading) {
                     Text("仓颉")
@@ -1088,8 +1090,7 @@ struct ContentView: View {
             if let chapter = pendingRewriteScopeApproval {
                 pendingRewriteScopeCard(chapter)
             }
-            if selectedActivity == .conversation && !isPortraitNavigationPresented {
-                    HStack(alignment: .bottom) {
+            HStack(alignment: .bottom) {
                     ZStack(alignment: .topLeading) {
                         if model.draft.isEmpty {
                             Text("随便说点什么……")
