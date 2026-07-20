@@ -1088,41 +1088,39 @@ struct ContentView: View {
             if let chapter = pendingRewriteScopeApproval {
                 pendingRewriteScopeCard(chapter)
             }
-            HStack(alignment: .bottom) {
-                ZStack(alignment: .topLeading) {
-                    if model.draft.isEmpty {
-                        Text("随便说点什么……")
-                            .foregroundStyle(.tertiary)
-                            .padding(.horizontal, 11)
-                            .padding(.vertical, 14)
-                            .allowsHitTesting(false)
-                            .accessibilityIdentifier("agent-composer-placeholder")
+            if selectedActivity == .conversation && !isPortraitNavigationPresented {
+                    HStack(alignment: .bottom) {
+                    ZStack(alignment: .topLeading) {
+                        if model.draft.isEmpty {
+                            Text("随便说点什么……")
+                                .foregroundStyle(.tertiary)
+                                .padding(.horizontal, 11)
+                                .padding(.vertical, 14)
+                                .allowsHitTesting(false)
+                                .accessibilityIdentifier("agent-composer-placeholder")
+                        }
+                        TextEditor(text: $model.draft)
+                            .focused($isComposerFocused)
+                            .accessibilityIdentifier("agent-composer")
+                            .disabled(!model.isComposerAvailable)
                     }
-                    TextEditor(text: $model.draft)
-                        .focused($isComposerFocused)
-                        .accessibilityIdentifier("agent-composer")
-                        .disabled(!model.isComposerAvailable)
+                    .frame(minHeight: 70, maxHeight: 130)
+                    .padding(6)
+                    .background(.background, in: RoundedRectangle(cornerRadius: 12))
+                    Button {
+                        model.sendS1PreviewMessage()
+                        isComposerFocused = false
+                    } label: {
+                        Image(systemName: "arrow.up.circle.fill").font(.system(size: 32))
+                    }
+                    .disabled(
+                        model.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                            || !model.isComposerAvailable
+                    )
+                    .accessibilityIdentifier("agent-send-button")
                 }
-                .frame(minHeight: 70, maxHeight: 130)
-                .padding(6)
-                .background(.background, in: RoundedRectangle(cornerRadius: 12))
-                Button {
-                    model.sendS1PreviewMessage()
-                    isComposerFocused = false
-                } label: {
-                    Image(systemName: "arrow.up.circle.fill").font(.system(size: 32))
-                }
-                .disabled(
-                    model.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                        || !model.isComposerAvailable
-                )
-                .accessibilityIdentifier("agent-send-button")
+                .padding()
             }
-            .padding()
-            .accessibilityElement(children: .contain)
-            .accessibilityHidden(
-                selectedActivity != .conversation || isPortraitNavigationPresented
-            )
         }
     }
 

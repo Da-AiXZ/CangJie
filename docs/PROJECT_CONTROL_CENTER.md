@@ -1407,3 +1407,13 @@ Replacement evidence for exact commit `a46f507a89e701ec34ee6a1d9bed6cc9c4a2abcf`
 - This rejects `.accessibilityElement(children: .ignore)` as a direct `TextEditor` repair: it hid the visible UIKit-backed editor instead of only hiding it across the modal boundary.
 
 The next minimal repair removes `.ignore` and applies `contain -> hidden` to the composer HStack that owns both the `TextEditor` and send button. The child editor keeps its existing identifier, disabled state, focus binding, and draft binding. This targets the nested composite boundary that escaped the landscape/portrait region gate while preserving the visible composer contract.
+
+
+## 2026-07-20 S1 composer wrapper hiding rejected by UIKit escape
+
+Replacement evidence for exact commit `44f6bfa4f99bc40bbe6fcc264dbd72e0b12c9e84`:
+
+- Core CI run `29760514114` passed.
+- iPadOS CI run `29760513963` passed all 197 App XCTest cases, then completed 19 main App UI tests with 7 failures; the Isolation Probe retained 13 passing unit tests and two UI failures at lines 20 and 21.
+- The first real main App UI failure remained `CangJieSmokeUITests.swift:69`: `agent-composer` was still queryable after the landscape independent-page modal opened.
+- Moving the dynamic hidden gate to a containing composer HStack did not remove the UIKit-backed editor from XCUITest's live query. The next minimal experiment therefore removes only the composer control subtree while the conversation surface is covered, retaining the `AppViewModel` draft and persistent conversation.

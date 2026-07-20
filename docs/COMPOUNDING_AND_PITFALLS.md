@@ -1124,3 +1124,6 @@ P-270 follow-up evidence: the direct hidden gate on the UIKit-backed `TextEditor
 
 
 P-270 rejection evidence: exact commit `a46f507` passed Core CI but failed iPadOS UI at the first visible composer assertion (`CangJieSmokeUITests.swift:16`) because `.accessibilityElement(children: .ignore)` removed the visible `TextEditor` from the queryable tree. Do not use `.ignore` on this UIKit-backed leaf. The follow-up must hide the containing composer HStack with `children: .contain` and the same dynamic hidden condition, leaving the editor itself queryable whenever the conversation surface is active.
+
+
+P-270 wrapper rejection evidence: exact commit `44f6bfa` restored the visible composer assertion but still failed the modal absence assertion at `CangJieSmokeUITests.swift:69`. A containing HStack with `.accessibilityElement(children: .contain)` and a final dynamic `.accessibilityHidden(...)` was not sufficient for this UIKit-backed editor. If the accessibility modifier cannot remove the live UIKit query, conditionally remove the composer control subtree only while the conversation surface is covered; keep draft state in the model and verify exact restoration after dismissal.
