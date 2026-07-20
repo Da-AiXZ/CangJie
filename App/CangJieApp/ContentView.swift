@@ -1102,6 +1102,9 @@ struct ContentView: View {
                         .focused($isComposerFocused)
                         .accessibilityIdentifier("agent-composer")
                         .disabled(!model.isComposerAvailable)
+                        .accessibilityHidden(
+                            selectedActivity != .conversation || isPortraitNavigationPresented
+                        )
                 }
                 .frame(minHeight: 70, maxHeight: 130)
                 .padding(6)
