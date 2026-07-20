@@ -1489,3 +1489,14 @@ Evidence from failed iPadOS run `29770397526` was grouped by contract before edi
 - Isolation Probe evidence rows were present in the completed report but the latter two rows were below the visible lazy Form region. The test now performs bounded scrolling and waits for both identifiers; no probe logic or security gate was weakened.
 
 Local evidence after this batch: `swiftc -frontend -parse` passed for all three changed Swift files; all seven `scripts/tests/test-*.py` contracts passed; `python -m unittest discover -s scripts/tests -p 'test-*.py'` passed with 32 tests and 1 skipped; `swift test` passed. The protected `.tmp-appvm-index.txt` remains untracked with the recorded SHA-256 unchanged. Remote acceptance is still pending a new Core and iPadOS Actions result; do not trigger IPA yet.
+
+## 2026-07-21 S1 Toggle interaction repair pending CI
+
+Evidence from the complete iPadOS log for run `29774894603`:
+
+- Core CI `29774895084` passed. The iPadOS run completed all other main-app tests and reported one real failure only: `CangJieSmokeUITests.swift:542`, where the timestamp Toggle remained at value `1` after `XCUIElement.tap()` and the subsequent timestamp projection did not change.
+- The previous run had already shown the same interaction failing at the next contract assertion (`conversation-time-0` did not disappear), so the new value assertion was not the cause and was not removed.
+- The minimal repair changes the two test-side Toggle activations to tap the trailing normalized coordinate of the native switch exposed inside the SwiftUI List row. The `@AppStorage` binding, `.id(showsConversationTimestamps)` rebuild, immediate-effect checks, and relaunch persistence checks remain unchanged.
+- Local evidence after the repair: Swift syntax parse passed; seven Python contract scripts passed (including 32 tests with 1 skipped); `swift test` passed with 99 XCTest cases and 15 Swift Testing cases; `git diff --check` passed. The protected `.tmp-appvm-index.txt` remains untracked and unchanged.
+
+Remote acceptance is pending the replacement Core and iPadOS Actions result. Do not trigger IPA until both pass.

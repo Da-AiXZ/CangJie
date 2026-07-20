@@ -1157,3 +1157,7 @@ A binding can change while a SwiftUI List retains an accessibility projection fr
 ## P-275 Lazy Form evidence requires bounded scrolling
 
 An isolation report may contain all completed evidence in its model while later SwiftUI Form rows are not yet instantiated in the XCUITest hierarchy. Scroll a bounded number of times and wait for each required identifier. Do not remove checks or alter fail-closed probe behavior to accommodate an offscreen row.
+
+## P-276 SwiftUI List Toggle tests must target the native switch control
+
+In iPadOS UI run `29774894603`, `XCUIElement.tap()` on the accessibility element for a SwiftUI `Toggle` inside a `List` synthesized an event but left the value at `1`; the earlier version then failed when the timestamp row stayed visible. Keep the immediate-effect and persistence assertions, and target the trailing normalized coordinate inside the switch row so the test reaches the native control rather than its label/container. Do not remove the assertion or weaken the production binding based on a failed hit target.

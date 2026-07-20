@@ -522,7 +522,7 @@ final class CangJieSmokeUITests: XCTestCase {
         app.buttons["activity-bar-settings"].tap()
         XCTAssertTrue(writableTimestampSwitch.waitForExistence(timeout: 5))
         if writableTimestampSwitch.value as? String == "0" {
-            writableTimestampSwitch.tap()
+            tapSwitchControl(writableTimestampSwitch)
         }
         app.buttons["settings-back-button"].tap()
         XCTAssertTrue(app.staticTexts["conversation-time-0"].waitForExistence(timeout: 5))
@@ -538,7 +538,7 @@ final class CangJieSmokeUITests: XCTestCase {
         let restoredTimestampSwitch = app.switches["settings-conversation-time-toggle"]
         XCTAssertTrue(restoredTimestampSwitch.waitForExistence(timeout: 5))
         XCTAssertEqual(restoredTimestampSwitch.value as? String, "1")
-        restoredTimestampSwitch.tap()
+        tapSwitchControl(restoredTimestampSwitch)
         assertEventually(restoredTimestampSwitch, hasValue: "0")
         app.buttons["settings-back-button"].tap()
         assertEventuallyDisappears(app.staticTexts["conversation-time-0"])
@@ -1440,6 +1440,11 @@ final class CangJieSmokeUITests: XCTestCase {
             file: file,
             line: line
         )
+    }
+
+    private func tapSwitchControl(_ element: XCUIElement) {
+        // SwiftUI List toggles can expose the row as the switch frame; target the trailing control.
+        element.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.5)).tap()
     }
 
     private func assertEventuallyDisappears(
