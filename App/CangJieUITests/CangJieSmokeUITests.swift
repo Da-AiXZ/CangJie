@@ -288,14 +288,13 @@ final class CangJieSmokeUITests: XCTestCase {
         XCTAssertTrue(diagnosticsLink.waitForExistence(timeout: 5))
         diagnosticsLink.tap()
 
-        XCTAssertTrue(
-            app.descendants(matching: .any)["device-diagnostics-list"]
-                .waitForExistence(timeout: 5)
-        )
-        let prepareCanaryButton = app.buttons["isolation-canary-prepare"]
-        XCTAssertTrue(prepareCanaryButton.exists)
-        XCTAssertTrue(prepareCanaryButton.isEnabled)
+        let diagnosticsList = app.descendants(matching: .any)["device-diagnostics-list"]
+        XCTAssertTrue(diagnosticsList.waitForExistence(timeout: 5))
         XCTAssertTrue(app.staticTexts["diagnostics-candidate-set"].exists)
+
+        let prepareCanaryButton = app.buttons["isolation-canary-prepare"]
+        reveal(prepareCanaryButton, in: diagnosticsList, swiping: .up, maxSwipes: 3)
+        XCTAssertTrue(prepareCanaryButton.isEnabled)
     }
 
     func testProjectRefreshShowsVisibleAcknowledgement() {

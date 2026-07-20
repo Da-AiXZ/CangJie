@@ -1520,3 +1520,11 @@ TrollStore Candidate Set run `29781764682` succeeded for exact commit `44c6a293e
 Run 30 is nevertheless not install-ready. Its manifest requires preparing the main-App isolation canary before running the paired Probe, but the S1 refactor left `DeviceDiagnosticsView` without any production navigation reference. Asking for installation would therefore hand the user a candidate that cannot complete its own security acceptance script.
 
 The minimal repair keeps diagnostics absent from the ordinary Agent surface and adds one real `设置 > 高级 > 设备诊断` navigation path to the existing view. A new UI test requires the link to be absent on the ordinary conversation surface, present only after opening Settings, and able to reach the Candidate Set and isolation-canary controls. Run 30 remains preserved as rejected audit evidence and must be superseded by a new dual-CI and paired-IPA candidate before device installation.
+
+First replacement evidence for exact commit `7be2e5009d6c6d0a95fa7e087532f0eca3961b9e`:
+
+- Core CI `29784927714` passed.
+- iPadOS CI `29784927718` proved the ordinary-surface absence, Settings link, navigation action, and `device-diagnostics-list` destination all worked. Its only real failure was the new test at line 296 because the lower `isolation-canary-prepare` row had not yet been instantiated by the lazy SwiftUI List.
+- The test now verifies the top Candidate Set identity first, performs at most three upward swipes inside the diagnostics List until the canary control is hittable, and still requires that control to be enabled. No production behavior or security assertion is weakened.
+
+Remote acceptance and a replacement paired IPA remain pending.
