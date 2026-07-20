@@ -264,6 +264,7 @@ final class S1CockpitViewModelTests: XCTestCase {
         }
     }
 
+    @MainActor
     func testS1PreviewRestoreUsesBoundedLatestMessageWindowInChronologicalOrder() throws {
         try withDatabase { database in
             let conversation = try database.ensureDefaultConversation(
@@ -333,6 +334,7 @@ final class S1CockpitViewModelTests: XCTestCase {
         )
         XCTAssertTrue(reopenedWindow.hasEarlierMessages)
     }
+    @MainActor
     func testS1PreviewRestoreStopsAtUTF8ByteBudget() throws {
         try withDatabase { database in
             let conversation = try database.ensureDefaultConversation(
@@ -555,6 +557,7 @@ final class S1CockpitViewModelTests: XCTestCase {
         }
     }
 
+    @MainActor
     func testS1ConversationTitleComesFromFirstUserTurnAndDoesNotChangeLater() throws {
         try withDatabase { database in
             let conversation = try database.ensureDefaultConversation(
@@ -576,6 +579,7 @@ final class S1CockpitViewModelTests: XCTestCase {
         }
     }
 
+    @MainActor
     func testS1MessageOrderRemainsStableWhenClockMovesBackward() throws {
         try withDatabase { database in
             let conversation = try database.ensureDefaultConversation(now: Date(timeIntervalSince1970: 1_000))
@@ -605,6 +609,7 @@ final class S1CockpitViewModelTests: XCTestCase {
         }
     }
 
+    @MainActor
     func testS1FirstTurnDoesNotMoveConversationUpdatedAtBackward() throws {
         try withDatabase { database in
             let originalDate = Date(timeIntervalSince1970: 1_000)
@@ -621,6 +626,7 @@ final class S1CockpitViewModelTests: XCTestCase {
         }
     }
 
+    @MainActor
     func testS1TurnRollsBackWhenSystemReceiptInsertFails() throws {
         try withDatabase { database in
             let conversation = try database.ensureDefaultConversation(now: Date(timeIntervalSince1970: 1_000))
@@ -696,7 +702,7 @@ final class S1CockpitViewModelTests: XCTestCase {
                 database: database,
                 draftAutosaveDelayNanoseconds: 20_000_000
             )
-            try database.queue.write { db in
+            try await database.queue.write { db in
                 try db.execute(sql: """
                     CREATE TRIGGER fail_s1_draft_autosave
                     BEFORE INSERT ON draft
@@ -711,7 +717,7 @@ final class S1CockpitViewModelTests: XCTestCase {
             XCTAssertTrue(viewModel.diagnosticErrorMessage?.contains("DB-DRAFT-AUTOSAVE") == true)
             XCTAssertEqual(viewModel.errorMessage, "草稿暂时无法保存，请稍后再试")
 
-            try database.queue.write { db in
+            try await database.queue.write { db in
                 try db.execute(sql: "DROP TRIGGER fail_s1_draft_autosave")
             }
             viewModel.sendS1PreviewMessage()

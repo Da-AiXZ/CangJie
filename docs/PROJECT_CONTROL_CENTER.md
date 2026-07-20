@@ -1191,3 +1191,27 @@ Windows verification after the repair:
 - Git Bash ldid and simulator-selector tests passed; the symlink negative case was skipped because the Windows host cannot create symlinks. The entitlement and GRDB resource shell contracts were not counted as Windows evidence because the local Git Bash host could not execute them under the same macOS assumptions; they remain required in Apple CI.
 
 This is not yet a device-test stop point. The next gate is a new push and successful Core CI plus iPadOS CI for the repair commit. Only after both pass may `build-ipa.yml` be manually triggered on `macos-15`; only after the exact Candidate Set manifest, SHA-256, entitlements, signature evidence, and commit binding are verified may the user be asked to install the paired IPA files.
+
+
+## 2026-07-20 S1 App XCTest actor-isolation semantic repair
+
+This remains an implementation and verification slice inside **S1: Agent cockpit direction and refactor**. It does not claim S1 completion, S2 Provider/model integration, a real Typed Tool loop, formal prose generation, H0-H5 completion, IPA acceptance, or physical-device acceptance.
+
+The previous exact commit `b80c73d5c9503b8759038126017a7f05acad439a` passed Core CI (`29720910079`) but its iPadOS CI (`29720910028`) failed while compiling `CangJieAppTests`. The first real errors were six calls from nonisolated synchronous tests into the `@MainActor` `withDatabase` helper at lines 268, 337, 559, 580, 609, and 625 of `App/CangJieAppTests/S1CockpitViewModelTests.swift`, followed by missing `await` on the async `DatabaseQueue.write` calls at lines 699 and 714. The App target itself had already compiled, and the later Keychain Isolation Probe success did not waive the failed test target.
+
+Repair scope:
+
+- Marked only the six tests that call the MainActor-isolated synchronous helper as `@MainActor`; the production-window reopen test that does not use that helper remains nonisolated.
+- Added `await` to the two async `DatabaseQueue.write` calls in `testSuccessfulS1SendPreservesExistingStorageError`; no actor boundary, test, or safety gate was removed.
+- Added Pitfall `P-261` to distinguish XCTest actor/async semantic coverage from the file-scoped import gap recorded by P-260.
+
+Windows verification:
+
+- `swiftc -frontend -parse App/CangJieAppTests/S1CockpitViewModelTests.swift` passed; this proves syntax only, not App XCTest actor semantics.
+- All Python contract scripts passed, including the standalone candidate-set/build-identity checks and the repository unittest suite; the platform-dependent symlink case remains skipped on Windows.
+- `git diff --check` passed and the working tree changes were limited to the test file plus the two evidence documents.
+
+Apple boundary and next gate:
+
+- The authoritative proof is a new `macos-15` iPadOS CI run compiling and executing the actual App XCTest target with zero actor-isolation or missing-`await` errors, while Core CI passes for the same exact commit.
+- No IPA workflow has been triggered for this repair, no Candidate Set manifest or IPA hashes exist for it, and there is no physical-device installation stop yet. Only after both CI workflows pass may `build-ipa.yml` be manually triggered; only after its exact Candidate Set manifest, commit binding, SHA-256, signature, entitlements, and validation instructions are verified may the user be asked to install the paired IPAs.
