@@ -2179,6 +2179,33 @@ final class AppDatabaseTests: XCTestCase {
         }
     }
 
+    func testS1ReadableContentQueriesKeepWhereClauseSeparatedOnRealSQLite() throws {
+        try withDatabase { database in
+            let conversation = try database.ensureDefaultConversation()
+            let project = try database.createProject(
+                title: "Query Boundary",
+                premise: "P"
+            )
+            try database.saveAgentSession(
+                AgentSessionState(
+                    focusedProjectID: project.id,
+                    interviewStep: 0,
+                    currentQuestion: "",
+                    interviewAnswers: [],
+                    updatedAt: Date(timeIntervalSince1970: 5_000)
+                ),
+                conversationID: conversation.id
+            )
+
+            XCTAssertNil(try database.loadS1ReadableContent(projectID: project.id))
+            XCTAssertNil(
+                try database.restoreS1ReadableContent(
+                    selectedConversationID: conversation.id
+                )
+            )
+        }
+    }
+
     func testProductionChapterToolReaderProjectionSurvivesActualDatabaseReopen() throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)

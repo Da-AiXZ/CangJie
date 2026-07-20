@@ -25,7 +25,7 @@ extension AppDatabase {
 
             guard let row = try Row.fetchOne(
                 db,
-                sql: Self.s1ReadableContentSelect + """
+                sql: Self.s1ReadableContentSelect + "\n" + """
                     WHERE calibration.conversationID = ?
                       AND calibration.projectID = ?
                     ORDER BY calibration.chapterNumber DESC, calibration.updatedAt DESC
@@ -50,7 +50,7 @@ extension AppDatabase {
         try queue.read { db in
             let rows = try Row.fetchAll(
                 db,
-                sql: Self.s1ReadableContentSelect + """
+                sql: Self.s1ReadableContentSelect + "\n" + """
                     WHERE calibration.projectID = ?
                     ORDER BY calibration.chapterNumber DESC, calibration.updatedAt DESC
                     """,

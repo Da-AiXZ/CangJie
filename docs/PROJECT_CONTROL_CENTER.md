@@ -1236,3 +1236,44 @@ Repair scope and local evidence:
 - Added Pitfall P-262 so this exact Swift precedence error is not repeated.
 
 No IPA workflow may be triggered until Core CI and iPadOS CI pass for the same new exact commit. This is not a physical-device installation stop point.
+
+## 2026-07-20 S1 readable-content SQL boundary repair
+
+This remains an implementation and verification slice inside S1. It does not claim S1 completion, S2 Provider/model integration, a real Typed Tool loop, H0-H5 completion, IPA acceptance, or physical-device acceptance.
+
+Remote evidence for exact commit `df8da6500e6fe50004ee1c3ccf280d855ba60ce0`:
+
+- Core CI run `29722408178` passed.
+- iPadOS CI run `29722408085` compiled the targets and started the real App XCTest suite, then failed. The first real failure was `AppDatabaseTests.testProductionChapterToolReaderProjectionSurvivesActualDatabaseReopen` at line 2211 with SQLite error 1.
+- The emitted SQL proved the root cause: the shared SELECT ended in `calibration.projectID` and the appended filter began immediately with `WHERE`, producing `calibration.projectIDWHERE calibration.conversationID = ?`. The same boundary defect also appeared in the project-scoped `WHERE calibration.projectID = ?` query.
+- Later Tool Receipt, Agent Session, governance-transition, ordinary-copy, workspace, main UI, and Isolation Probe UI failures are not being pre-emptively rewritten in this slice. Some Reader failures are direct SQL cascades, while the remaining first independent error must be taken from the next complete Apple CI run.
+
+Repair and regression coverage:
+
+- Both query compositions now insert an explicit `"\n"` between `s1ReadableContentSelect` and the appended `WHERE` clause. The fix does not rely on invisible trailing whitespace in a Swift multiline literal.
+- Added `testS1ReadableContentQueriesKeepWhereClauseSeparatedOnRealSQLite`, which executes both the Conversation-scoped and project-scoped production queries against a real temporary SQLite database and expects an honest `nil` when no chapter calibration exists. SQLite must still parse and execute both complete statements, so token adhesion fails the focused test before higher-level chapter setup can hide the cause.
+- A repository scan found no other Swift `SQL constant + multiline literal` composition using the same risky pattern outside the two repaired call sites.
+- Added Pitfall P-263 so future shared SQL fragments require an explicit separator and real SQLite execution coverage.
+
+Windows evidence:
+
+- `swiftc -frontend -parse` passed for the repaired production file and the focused XCTest source; this is syntax evidence only.
+- The exact Core gate passed locally: 99 XCTest plus 15 Swift Testing tests, 114 total with zero failures, and 94.15% `CangJieCore` line coverage against the 90% minimum.
+- All explicit Python candidate-set, build-identity, artifact-verification, and App-import contracts passed; `py_compile` and `git diff --check` passed. The platform-dependent symlink case remained the single expected Windows skip.
+
+Apple boundary and next gate:
+
+- The user does not need a local Mac. App compilation, XCTest/XCUITest, and IPA packaging remain remote responsibilities of GitHub Actions on `macos-15`; the authenticated `gh` CLI is the Windows control and artifact-verification surface.
+- No IPA workflow may run until Core CI and iPadOS CI both pass for the same exact repair commit. After that, `build-ipa.yml` may be manually triggered, and the paired Candidate Set must be downloaded and verified for commit binding, manifest, SHA-256, signature, entitlements, and fail-closed acceptance before requesting physical-device installation.
+
+### 2026-07-20 CI turnaround correction
+
+The four Apple verification rounds from `86bb9069b9665ecb5a02aa7ae6d7ef267ca570ac` through `df8da6500e6fe50004ee1c3ccf280d855ba60ce0` consumed about 1 hour 35 minutes end to end. The macOS iPadOS jobs themselves accounted for approximately 28 minutes 45 seconds; most remaining time was local diagnosis, repeated broad verification, overlong evidence writing, Agent coordination, and avoidable PowerShell/environment command retries. The implementation changes were small, so codebase size does not justify that turnaround.
+
+Execution correction for the remaining S1 CI loop:
+
+- App-only repairs use the smallest relevant local proof: focused source/test parsing, directly related contracts, complete diff review, secret/generated-artifact checks, and `git diff --check`. Do not rerun the full Core coverage gate when the exact prior commit already passed Core CI and no Core or package source changed.
+- Keep the required control-center and pitfall updates evidence-dense and short; status documentation must not dominate repair time.
+- Use parallel Agents only for sidecar scanning or review while the critical-path repair and remote CI continue locally. Agent coordination must not delay a ready commit.
+- Repair the first evidenced root cause and all occurrences of that same defect class in one slice. Do not speculate across independent governance or UI failures before a new Apple run identifies the next first real error.
+- Treat progress summaries as broadcasts rather than pauses. Push the reviewed repair promptly, monitor GitHub Actions through the authenticated `gh` CLI, and stop only at the paired-IPA physical-device gate or a genuine required-input block.
