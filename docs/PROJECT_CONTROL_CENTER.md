@@ -1395,3 +1395,15 @@ Deterministic Windows evidence for this uncommitted slice:
 - Protected `.tmp-appvm-index.txt` remains untracked, length `28868`, SHA-256 `4682EEB10DC361950FB0FDE60A8BFF3D16A801542412AAAA5FDA981392011DE8`.
 
 The latest authoritative iPadOS CI run for parent commit `3300f3d9b965927e5b6152aaeb36c418ea37e655` remains failed (`29757615272`). Its first real Main App UI failure is still `CangJieSmokeUITests.swift:69`, where `agent-composer` is queryable after the landscape result drawer opens; the later seven-failure list and the two Isolation Probe UI failures are not being repaired in this slice. Apple verification for the new modifier is pending on the next exact replacement commit, and no IPA workflow may be triggered before same-commit Core and iPadOS CI pass.
+
+
+## 2026-07-20 S1 TextEditor isolation experiment rejected by visible-state regression
+
+Replacement evidence for exact commit `a46f507a89e701ec34ee6a1d9bed6cc9c4a2abcf`:
+
+- Core CI run `29759167309` passed.
+- iPadOS CI run `29759167294` failed after compiling the App and executing 19 main App UI tests with 16 failures; the Isolation Probe still passed its 13 unit tests and retained its two UI failures at lines 20 and 21.
+- The first real main App UI failure moved to `CangJieSmokeUITests.swift:16`: the visible launch-state assertion `XCTAssertTrue(app.textViews["agent-composer"].exists)` failed.
+- This rejects `.accessibilityElement(children: .ignore)` as a direct `TextEditor` repair: it hid the visible UIKit-backed editor instead of only hiding it across the modal boundary.
+
+The next minimal repair removes `.ignore` and applies `contain -> hidden` to the composer HStack that owns both the `TextEditor` and send button. The child editor keeps its existing identifier, disabled state, focus binding, and draft binding. This targets the nested composite boundary that escaped the landscape/portrait region gate while preserving the visible composer contract.

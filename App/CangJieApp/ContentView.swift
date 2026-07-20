@@ -1100,12 +1100,8 @@ struct ContentView: View {
                     }
                     TextEditor(text: $model.draft)
                         .focused($isComposerFocused)
-                        .accessibilityElement(children: .ignore)
                         .accessibilityIdentifier("agent-composer")
                         .disabled(!model.isComposerAvailable)
-                        .accessibilityHidden(
-                            selectedActivity != .conversation || isPortraitNavigationPresented
-                        )
                 }
                 .frame(minHeight: 70, maxHeight: 130)
                 .padding(6)
@@ -1123,6 +1119,10 @@ struct ContentView: View {
                 .accessibilityIdentifier("agent-send-button")
             }
             .padding()
+            .accessibilityElement(children: .contain)
+            .accessibilityHidden(
+                selectedActivity != .conversation || isPortraitNavigationPresented
+            )
         }
     }
 
