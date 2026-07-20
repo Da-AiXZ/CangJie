@@ -1447,3 +1447,12 @@ Replacement evidence for exact commit `0f50983bee1eb7296212510324e6832bc75d6367`
 - iPadOS CI run `29765896742` still completed with UI failures, but the previous first failure at line 71 disappeared; the first real failure advanced to `CangJieSmokeUITests.swift:72`, where `landscape-conversation-rail` remained queryable after the landscape Novel Projects surface opened.
 - The minimal local repair applies the same structural construction rule to `conversationRail`: its original body is preserved as `conversationRailContent`, and the public rail is constructed only for `selectedActivity == .conversation`.
 - Local evidence for this next slice: Swift parse, all `scripts/tests/test-*.py` contracts, and `git diff --check` passed. Remote acceptance is pending; no IPA workflow is allowed until the exact replacement commit passes both Core and iPadOS CI.
+
+## 2026-07-20 S1 portrait top-bar modal repair pending CI
+
+Replacement evidence for exact commit `fbad49a4ed5016e646aff5414a61794a0ecb40f9`:
+
+- Core CI run `29767253594` passed.
+- iPadOS CI run `29767253552` proved the previous line 72 failure was gone; the first real failure advanced to `CangJieSmokeUITests.swift:101`, where `portrait-navigation-open` remained queryable while the portrait navigation modal was open.
+- The minimal local repair preserves the original top-bar body as `portraitTopBarContent` and structurally constructs `portraitTopBar` only when the portrait navigation overlay is not presented and the selected activity is conversation.
+- Local evidence: Swift parse, all `scripts/tests/test-*.py` contracts, and `git diff --check` passed. Remote acceptance is pending on the exact replacement commit; IPA remains gated on both Core and iPadOS success.

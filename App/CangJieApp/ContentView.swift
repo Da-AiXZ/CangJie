@@ -645,7 +645,14 @@ struct ContentView: View {
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("workspace-portrait-single-focus")
     }
+    @ViewBuilder
     private var portraitTopBar: some View {
+        if !isPortraitNavigationPresented && selectedActivity == .conversation {
+            portraitTopBarContent
+        }
+    }
+
+    private var portraitTopBarContent: some View {
         HStack(spacing: 10) {
             Button {
                 isComposerFocused = false
