@@ -408,17 +408,21 @@ final class AppViewModelTests: XCTestCase {
 
             XCTAssertEqual(factoryCalls, 0)
             XCTAssertEqual(viewModel.draft, "existing draft")
-            XCTAssertEqual(viewModel.businessStatus, "等你说说想写什么")
+            XCTAssertEqual(
+                viewModel.businessStatus,
+                "当前只验证界面、导航和本地保存，尚未接入真正的模型任务"
+            )
             XCTAssertEqual(viewModel.transientNotice?.message, "本地内容已准备好")
 
             viewModel.draft = "updated draft"
             viewModel.saveDraft()
 
             XCTAssertEqual(try database.loadDraft()?.content, "updated draft")
-            let saveMessage = try XCTUnwrap(viewModel.transientNotice?.message)
-            XCTAssertTrue(saveMessage.hasPrefix("Draft saved | "))
-            XCTAssertEqual(saveMessage.filter { $0 == "|" }.count, 1)
-            XCTAssertFalse(saveMessage.contains("?"))
+            XCTAssertEqual(viewModel.transientNotice?.message, "草稿已保存")
+            let saveDiagnostic = try XCTUnwrap(viewModel.diagnosticNoticeMessage)
+            XCTAssertTrue(saveDiagnostic.hasPrefix("Draft saved | "))
+            XCTAssertEqual(saveDiagnostic.filter { $0 == "|" }.count, 1)
+            XCTAssertFalse(saveDiagnostic.contains("?"))
         }
     }
 
@@ -474,7 +478,10 @@ final class AppViewModelTests: XCTestCase {
 
             XCTAssertEqual(factoryCalls, 1)
             XCTAssertEqual(viewModel.draft, "")
-            XCTAssertEqual(viewModel.businessStatus, "等你说说想写什么")
+            XCTAssertEqual(
+                viewModel.businessStatus,
+                "当前只验证界面、导航和本地保存，尚未接入真正的模型任务"
+            )
             XCTAssertEqual(viewModel.transientNotice?.message, "本地内容已准备好")
         }
     }
@@ -491,14 +498,14 @@ final class AppViewModelTests: XCTestCase {
         )
 
         XCTAssertEqual(factoryCalls, 1)
-        XCTAssertTrue(viewModel.status.contains("DB-INIT"))
+        XCTAssertTrue(viewModel.diagnosticErrorMessage?.contains("DB-INIT") == true)
         XCTAssertEqual(viewModel.draft, "")
 
         viewModel.saveDraft()
         viewModel.createCheckpoint(reason: "test")
 
         XCTAssertEqual(factoryCalls, 1)
-        XCTAssertTrue(viewModel.status.contains("DB-INIT"))
+        XCTAssertTrue(viewModel.diagnosticErrorMessage?.contains("DB-INIT") == true)
     }
 
 
@@ -515,7 +522,7 @@ final class AppViewModelTests: XCTestCase {
 
         XCTAssertEqual(viewModel.draft, "do not lose this command")
         XCTAssertEqual(viewModel.conversationMessages, messagesBeforeSend)
-        XCTAssertTrue(viewModel.errorMessage?.contains("Agent runtime unavailable") == true)
+        XCTAssertTrue(viewModel.diagnosticErrorMessage?.contains("Agent runtime unavailable") == true)
     }
     @MainActor
     func testAgentCreationMessageExecutesProjectToolAndClearsComposer() throws {
@@ -528,8 +535,12 @@ final class AppViewModelTests: XCTestCase {
             XCTAssertEqual(viewModel.draft, "")
             XCTAssertEqual(viewModel.projects.count, 1)
             XCTAssertEqual(viewModel.projects.first?.premise, "create a cultivation novel")
-            XCTAssertEqual(viewModel.status, "Verified: project.create")
-            XCTAssertTrue(viewModel.conversationMessages.contains { $0.contains("Project created") })
+            XCTAssertEqual(viewModel.status, "正在和你一起想清楚")
+            XCTAssertTrue(
+                viewModel.conversationMessages.contains {
+                    $0 == "已经为你建好《Untitled Novel》。名字和方向都可以之后再调整。"
+                }
+            )
         }
     }
 
@@ -633,6 +644,7 @@ final class AppViewModelTests: XCTestCase {
             )
 
             let viewModel = AppViewModel(database: database, keychain: StubSecretRepository())
+            XCTAssertTrue(viewModel.activateGovernedRuntimeProjection())
             let displayed = try XCTUnwrap(viewModel.openingPlanApproval)
             XCTAssertEqual(displayed.id, saved.approval.id)
 
@@ -711,6 +723,7 @@ final class AppViewModelTests: XCTestCase {
             let persistedMessages = first.conversationMessages
 
             let restored = AppViewModel(database: database, keychain: StubSecretRepository())
+            XCTAssertTrue(restored.activateGovernedRuntimeProjection())
             XCTAssertEqual(restored.conversationMessages, persistedMessages)
             XCTAssertEqual(restored.interviewStep, 3)
             XCTAssertTrue(restored.planAwaitingApproval)
@@ -736,6 +749,7 @@ final class AppViewModelTests: XCTestCase {
             )
 
             let restored = AppViewModel(database: database, keychain: StubSecretRepository())
+            XCTAssertTrue(restored.activateGovernedRuntimeProjection())
             XCTAssertFalse(restored.planAwaitingApproval)
             XCTAssertEqual(restored.openingPlanApproval?.status, .approved)
             XCTAssertEqual(restored.openingPlanApproval?.id, displayed.id)
@@ -769,7 +783,7 @@ final class AppViewModelTests: XCTestCase {
             XCTAssertEqual(viewModel.openingPlanApproval?.status, .approved)
             XCTAssertEqual(try database.countArtifacts(kind: "openingPlan"), 1)
             XCTAssertEqual(viewModel.lastToolReceipt?.toolID, "artifact.openingPlan.approve")
-            XCTAssertTrue(viewModel.conversationMessages.last?.contains("Chapter planning") == true)
+            XCTAssertEqual(viewModel.conversationMessages.last, "开篇方向已经确认。你说“生成第一章”或“继续”，我就开始准备第一章。")
         }
     }
 
@@ -821,6 +835,7 @@ final class AppViewModelTests: XCTestCase {
             )
 
             let restored = AppViewModel(database: database, keychain: StubSecretRepository())
+            XCTAssertTrue(restored.activateGovernedRuntimeProjection())
 
             XCTAssertEqual(try database.agentRun(idempotencyKey: approvalKey)?.status, .completed)
             XCTAssertFalse(restored.planAwaitingApproval)
@@ -856,6 +871,44 @@ final class AppViewModelTests: XCTestCase {
             XCTAssertEqual(viewModel.transientNotice?.message, "当前内容已安全保存")
             XCTAssertNil(viewModel.errorMessage)
             XCTAssertEqual(try database.loadDraft()?.content, "unsent scene note")
+        }
+    }
+
+    @MainActor
+    func testFirstActivePhaseKeepsOrdinaryStartupOnS1PreviewWithoutActivatingRuntime() throws {
+        try withDatabase { database in
+            let viewModel = AppViewModel(database: database, keychain: StubSecretRepository())
+            let conversation = try database.ensureDefaultConversation()
+            let expectedStatus = "当前只验证界面、导航和本地保存，尚未接入真正的模型任务"
+
+            XCTAssertEqual(viewModel.businessStatus, expectedStatus)
+            XCTAssertTrue(try database.listAgentMessages(conversationID: conversation.id).isEmpty)
+            XCTAssertNil(try database.latestAgentRun(conversationID: conversation.id))
+
+            viewModel.handleScenePhase(.active)
+
+            XCTAssertEqual(
+                viewModel.businessStatus,
+                "对话和草稿已恢复。当前只验证界面、导航和本地保存，尚未接入真正的模型任务"
+            )
+            XCTAssertTrue(try database.listAgentMessages(conversationID: conversation.id).isEmpty)
+            XCTAssertNil(try database.latestAgentRun(conversationID: conversation.id))
+            XCTAssertTrue(try database.listProjects().isEmpty)
+        }
+    }
+
+    @MainActor
+    func testGovernedRuntimeProjectionActivationIsBlockedWhileInactive() throws {
+        try withDatabase { database in
+            let viewModel = AppViewModel(database: database, keychain: StubSecretRepository())
+            let conversation = try database.ensureDefaultConversation()
+
+            viewModel.handleScenePhase(.inactive)
+
+            XCTAssertFalse(viewModel.activateGovernedRuntimeProjection())
+            XCTAssertTrue(try database.listAgentMessages(conversationID: conversation.id).isEmpty)
+            XCTAssertNil(try database.latestAgentRun(conversationID: conversation.id))
+            XCTAssertTrue(try database.listProjects().isEmpty)
         }
     }
 
@@ -1018,6 +1071,7 @@ final class AppViewModelTests: XCTestCase {
             first.handleScenePhase(.inactive)
 
             let restored = AppViewModel(database: database, keychain: StubSecretRepository())
+            XCTAssertTrue(restored.activateGovernedRuntimeProjection())
 
             XCTAssertEqual(restored.businessStatus, "开篇方向已确认，准备第一章")
             XCTAssertNil(restored.errorMessage)
@@ -1043,7 +1097,7 @@ final class AppViewModelTests: XCTestCase {
             XCTAssertEqual(viewModel.businessStatus, businessStatus)
             XCTAssertEqual(viewModel.transientNotice?.kind, .projectRefresh)
             let refreshMessage = try XCTUnwrap(viewModel.transientNotice?.message)
-            XCTAssertTrue(refreshMessage.hasPrefix("Projects refreshed | 1 project | "))
+            XCTAssertTrue(refreshMessage.hasPrefix("书架已刷新 | 1 本小说 | "))
             XCTAssertEqual(refreshMessage.filter { $0 == "|" }.count, 2)
             XCTAssertFalse(refreshMessage.contains("?"))
             XCTAssertNil(viewModel.errorMessage)
@@ -1096,7 +1150,7 @@ final class AppViewModelTests: XCTestCase {
             XCTAssertEqual(try database.approvalRequest(id: replacement.approval.id)?.status, .pending)
             XCTAssertEqual(viewModel.openingPlanApproval?.id, replacement.approval.id)
             XCTAssertTrue(viewModel.planAwaitingApproval)
-            XCTAssertTrue(viewModel.errorMessage?.contains("STALE") == true)
+            XCTAssertTrue(viewModel.diagnosticErrorMessage?.contains("STALE") == true)
             XCTAssertEqual(try database.countToolReceipts(toolID: "artifact.openingPlan.approve"), 0)
         }
     }
@@ -1178,6 +1232,7 @@ final class AppViewModelTests: XCTestCase {
             )
 
             let restored = AppViewModel(database: database, keychain: StubSecretRepository())
+            XCTAssertTrue(restored.activateGovernedRuntimeProjection())
 
             XCTAssertEqual(restored.openingPlanApproval?.id, firstPlan.approval.id)
             XCTAssertEqual(restored.openingPlanApproval?.projectID, firstProject.id)
@@ -1209,8 +1264,10 @@ final class AppViewModelTests: XCTestCase {
                 idempotencyKey: approvalKey
             )
 
-            _ = AppViewModel(database: database, keychain: StubSecretRepository())
-            _ = AppViewModel(database: database, keychain: StubSecretRepository())
+            let firstRestore = AppViewModel(database: database, keychain: StubSecretRepository())
+            XCTAssertTrue(firstRestore.activateGovernedRuntimeProjection())
+            let secondRestore = AppViewModel(database: database, keychain: StubSecretRepository())
+            XCTAssertTrue(secondRestore.activateGovernedRuntimeProjection())
 
             let messages = try database.listAgentMessages(conversationID: displayed.conversationID)
             XCTAssertEqual(
@@ -1259,6 +1316,7 @@ final class AppViewModelTests: XCTestCase {
                 )
 
                 let restored = AppViewModel(database: database, keychain: StubSecretRepository())
+                XCTAssertTrue(restored.activateGovernedRuntimeProjection())
 
                 XCTAssertEqual(try database.agentRun(idempotencyKey: approvalKey)?.status, terminalStatus)
                 XCTAssertEqual(restored.openingPlanApproval?.status, .approved)
@@ -1286,6 +1344,7 @@ final class AppViewModelTests: XCTestCase {
             }
 
             let restored = AppViewModel(database: database, keychain: StubSecretRepository())
+            XCTAssertTrue(restored.activateGovernedRuntimeProjection())
             let replacement = try XCTUnwrap(restored.openingPlanApproval)
 
             XCTAssertNotEqual(replacement.id, stale.id)
@@ -1324,6 +1383,7 @@ final class AppViewModelTests: XCTestCase {
             )
 
             let restored = AppViewModel(database: database, keychain: StubSecretRepository())
+            XCTAssertTrue(restored.activateGovernedRuntimeProjection())
 
             XCTAssertEqual(restored.openingPlanApproval?.status, .pending)
             XCTAssertTrue(restored.planAwaitingApproval)
@@ -1418,7 +1478,9 @@ final class AppViewModelTests: XCTestCase {
             try database.saveAgentRun(decoyRun, conversationID: fixture.conversationID)
 
             let firstRestore = AppViewModel(database: database, keychain: StubSecretRepository())
+            XCTAssertTrue(firstRestore.activateGovernedRuntimeProjection())
             let secondRestore = AppViewModel(database: database, keychain: StubSecretRepository())
+            XCTAssertTrue(secondRestore.activateGovernedRuntimeProjection())
 
             let settled = try XCTUnwrap(
                 database.agentRun(id: fixture.run.id, conversationID: fixture.conversationID)
@@ -1458,8 +1520,10 @@ final class AppViewModelTests: XCTestCase {
                     database.agentRun(id: fixture.run.id, conversationID: fixture.conversationID)
                 )
 
-                _ = AppViewModel(database: database, keychain: StubSecretRepository())
-                _ = AppViewModel(database: database, keychain: StubSecretRepository())
+                let firstRestore = AppViewModel(database: database, keychain: StubSecretRepository())
+                XCTAssertTrue(firstRestore.activateGovernedRuntimeProjection())
+                let secondRestore = AppViewModel(database: database, keychain: StubSecretRepository())
+                XCTAssertTrue(secondRestore.activateGovernedRuntimeProjection())
 
                 XCTAssertEqual(
                     try database.agentRun(id: fixture.run.id, conversationID: fixture.conversationID),
@@ -1476,7 +1540,8 @@ final class AppViewModelTests: XCTestCase {
                 database: database,
                 keyPrefix: "chapter.restore.lock"
             )
-            _ = AppViewModel(database: database, keychain: StubSecretRepository())
+            let initialRestore = AppViewModel(database: database, keychain: StubSecretRepository())
+            XCTAssertTrue(initialRestore.activateGovernedRuntimeProjection())
             let messagesBeforeLock = try database.listAgentMessages(conversationID: fixture.conversationID)
             let lockRun = AgentRunSnapshot(
                 id: UUID(),
@@ -1500,8 +1565,10 @@ final class AppViewModelTests: XCTestCase {
                 now: Date(timeIntervalSince1970: 3_201)
             )
 
-            _ = AppViewModel(database: database, keychain: StubSecretRepository())
-            _ = AppViewModel(database: database, keychain: StubSecretRepository())
+            let firstLockRestore = AppViewModel(database: database, keychain: StubSecretRepository())
+            XCTAssertTrue(firstLockRestore.activateGovernedRuntimeProjection())
+            let secondLockRestore = AppViewModel(database: database, keychain: StubSecretRepository())
+            XCTAssertTrue(secondLockRestore.activateGovernedRuntimeProjection())
 
             XCTAssertEqual(
                 try database.listAgentMessages(conversationID: fixture.conversationID),
@@ -1528,6 +1595,7 @@ final class AppViewModelTests: XCTestCase {
             XCTAssertEqual(viewModel.lastToolReceipt?.toolID, "chapter.generate")
 
             let restored = AppViewModel(database: database, keychain: StubSecretRepository())
+            XCTAssertTrue(restored.activateGovernedRuntimeProjection())
             XCTAssertEqual(restored.chapter?.activeVersion.id, chapter.activeVersion.id)
             XCTAssertEqual(restored.chapter?.activeVersion.contentHash, chapter.activeVersion.contentHash)
             XCTAssertEqual(restored.chapter?.stage, .reviewingV1)
@@ -1562,6 +1630,7 @@ final class AppViewModelTests: XCTestCase {
             XCTAssertEqual(try database.countToolReceipts(toolID: "chapter.lockParagraph.set"), 1)
 
             let restored = AppViewModel(database: database, keychain: StubSecretRepository())
+            XCTAssertTrue(restored.activateGovernedRuntimeProjection())
             XCTAssertEqual(restored.chapter?.calibration.lockedParagraphIndexes, [1])
             XCTAssertEqual(restored.lastToolReceipt?.toolID, "chapter.lockParagraph.set")
         }
@@ -1736,6 +1805,7 @@ final class AppViewModelTests: XCTestCase {
             XCTAssertEqual(try database.countChapterVersions(projectID: v1.projectID, chapterNumber: 1), 2)
 
             let restored = AppViewModel(database: database, keychain: StubSecretRepository())
+            XCTAssertTrue(restored.activateGovernedRuntimeProjection())
             XCTAssertEqual(restored.chapter?.stage, .approvedFrozen)
             XCTAssertEqual(restored.chapter?.versions.map(\.revision), [1, 2])
             XCTAssertEqual(restored.chapter?.calibration.lockedParagraphIndexes, [1])

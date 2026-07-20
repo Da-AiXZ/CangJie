@@ -1,7 +1,7 @@
 # CangJie Project Control Center
 
 - Authority: current operational truth
-- Updated: 2026-07-19
+- Updated: 2026-07-20
 - Repository: `F:\project\CangJie`
 - Remote: `https://github.com/Da-AiXZ/CangJie`, branch `main`
 ## Agent Harness architecture decision
@@ -1280,3 +1280,30 @@ Execution correction for the remaining S1 CI loop:
 ## 2026-07-20 exact Apple CI receipt-fixture evidence
 
 The user does not need a local Mac: App compilation, XCTest/XCUITest, and IPA packaging run on GitHub Actions `macos-15`, with authenticated `gh` as the Windows control and acceptance surface; lack of a local Mac is not a blocker. For exact commit `194b13b08cc5c88e3611e9ff5741cec8839642d1`, Core CI `29724624126` passed and iPadOS CI `29724624129` failed after the SQL regression passed in Apple XCTest; the first real failure was a historical canonical approval-message fixture using a non-canonical approval `ToolReceipt` key, which Runtime restore correctly rejected fail-closed. The minimal repair changes only the fixture to `artifact.openingPlan.approve.<requestID>.<bindingHash>` and does not relax production governance; iPadOS CI is not green, S1 is not complete, and no IPA is ready for device testing.
+
+## 2026-07-20 S1 governed Runtime restore test-boundary repair
+
+This slice remains inside the frozen S1 cockpit direction. It does not re-enable governed Runtime restoration during ordinary startup, start S2, claim Provider/model integration, produce an IPA, or claim device acceptance.
+
+Remote first-error evidence for parent commit `5af41ff969d8c17f5416d06b458662f1d5e0800a`:
+
+- Core CI run `29725933957` passed.
+- iPadOS CI run `29725933980` compiled the App and AppTests targets, then failed in `AppViewModelTests.testActiveAndBackgroundPhasesKeepAgentBusinessStatus` at `App/CangJieAppTests/AppViewModelTests.swift:874`. The first real failure compared the restored ordinary S1 status, `对话和草稿已恢复。当前只验证界面、导航和本地保存，尚未接入真正的模型任务`, with the historical Runtime status, `正在和你一起想清楚`.
+- The failing suite still depended on the old initializer side effect that automatically created and restored Runtime state, and several assertions mixed user-visible Chinese copy with internal diagnostic codes.
+
+Minimal repair and preserved boundary:
+
+- Ordinary initialization continues with `runtime == nil` and restores only the S1 preview projection.
+- `activateGovernedRuntimeProjection()` is an explicit test/internal opt-in for historical Runtime restore and reconciliation coverage; it now requires an active lifecycle and revalidates build activation before creating Runtime or allowing restore side effects.
+- App lifecycle activation restores the S1 preview when Runtime has never been activated, but restores Runtime projection when a real interaction already activated it. Direct regression tests cover both the ordinary first-active branch and refusal of explicit activation while inactive.
+- User-visible notices and business status are asserted independently from `diagnosticNoticeMessage` and `diagnosticErrorMessage`. Repeated-restore tests retain named instances and explicitly activate each restore, preventing no-op tests from passing accidentally.
+- Existing S1 database, Conversation, shelf, progress, Reader, approval, and accepted-chapter test repairs remain in the same worktree slice. `.tmp-appvm-index.txt` was identified as a UTF-16LE temporary line-number index of `AppViewModelTests.swift` (SHA-256 `4682EEB10DC361950FB0FDE60A8BFF3D16A801542412AAAA5FDA981392011DE8`) and was preserved unchanged and untracked.
+
+Focused Windows evidence completed before replacement CI:
+
+- `swiftc -frontend -parse` passed for `AppViewModel.swift` and all seven changed S1/App test files.
+- Every `scripts/tests/test-*.py` contract script passed when executed individually; the artifact suite reported 32 tests with one platform-dependent skip.
+- `git diff --check`, UTF-8/U+FFFD/mojibake scans, changed-line credential scans, and generated/signing/private-database path scans passed. The secret-pattern hits were only the existing `StubSecretRepository` test type.
+- Full Core coverage was not repeated because the parent Core CI is green and this write set changes no `CangJieCore` or Swift package source, following P-264.
+
+Apple XCTest/XCUITest has not yet been rerun for this replacement commit. No IPA exists at this checkpoint.

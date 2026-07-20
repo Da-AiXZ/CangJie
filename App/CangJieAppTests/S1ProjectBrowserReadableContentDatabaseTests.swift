@@ -278,18 +278,50 @@ final class S1ProjectBrowserReadableContentDatabaseTests: XCTestCase {
                 message: "先写山门故事",
                 now: Date(timeIntervalSince1970: 5_000)
             )
-            _ = try seedActiveChapter(
+            let chapter = try seedActiveChapter(
                 in: database,
                 scope: scope,
                 chapterNumber: 1,
                 title: "第一章 山门夜响",
                 body: "山门内外隔着一场十年未停的雨。",
-                now: Date(timeIntervalSince1970: 5_010),
-                stage: .approvedFrozen,
-                acceptedVersionMode: .missing
+                now: Date(timeIntervalSince1970: 5_010)
             )
 
-            XCTAssertNil(try database.loadS1ReadableContent(projectID: scope.projectID))
+            XCTAssertThrowsError(try database.queue.write { db in
+                try db.execute(
+                    sql: """
+                        UPDATE chapterCalibration
+                        SET stage = ?, acceptedVersionID = NULL, updatedAt = ?
+                        WHERE chapterLogicalID = ?
+                        """,
+                    arguments: [
+                        ChapterCalibrationStage.approvedFrozen.rawValue,
+                        Date(timeIntervalSince1970: 5_020).timeIntervalSince1970,
+                        chapter.logicalID.uuidString
+                    ]
+                )
+            }) { error in
+                let message = String(describing: error)
+                XCTAssertTrue(
+                    message.contains("invalid chapterCalibration scope")
+                        || message.contains("approved chapter calibration requires accept receipt"),
+                    "写入门必须拒绝没有匹配 acceptedVersionID 和真实 accept 证据的冻结状态：\(message)"
+                )
+            }
+
+            let calibration = try XCTUnwrap(try database.chapterCalibration(
+                conversationID: scope.conversationID,
+                projectID: scope.projectID,
+                chapterNumber: 1
+            ))
+            XCTAssertEqual(calibration.stage, .reviewingV1)
+            XCTAssertNil(calibration.acceptedVersionID)
+            XCTAssertEqual(try database.countToolReceipts(toolID: "chapter.accept"), 0)
+            XCTAssertEqual(try chapterAcceptSnapshotCount(in: database), 0)
+            XCTAssertEqual(
+                try database.loadS1ReadableContent(projectID: scope.projectID)?.statusDescription,
+                "这一章正在等你阅读"
+            )
         }
     }
 
@@ -302,7 +334,8 @@ final class S1ProjectBrowserReadableContentDatabaseTests: XCTestCase {
                 message: "先写山门故事",
                 now: Date(timeIntervalSince1970: 6_000)
             )
-            _ = try seedActiveChapter(
+
+            XCTAssertThrowsError(try seedActiveChapter(
                 in: database,
                 scope: scope,
                 chapterNumber: 1,
@@ -310,8 +343,21 @@ final class S1ProjectBrowserReadableContentDatabaseTests: XCTestCase {
                 body: "这一版使用非法 revision 重新计算了哈希，也不能成为可信正文。",
                 now: Date(timeIntervalSince1970: 6_010),
                 revision: 0
-            )
+            )) { error in
+                XCTAssertTrue(
+                    String(describing: error).contains("invalid chapterVersion identity"),
+                    "即使 contentHash 按 revision=0 重新计算，写入门也必须拒绝非法版本身份"
+                )
+            }
 
+            let storedCounts = try database.queue.read { db in
+                (
+                    try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM chapterVersion") ?? -1,
+                    try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM chapterCalibration") ?? -1
+                )
+            }
+            XCTAssertEqual(storedCounts.0, 0)
+            XCTAssertEqual(storedCounts.1, 0)
             XCTAssertNil(try database.loadS1ReadableContent(projectID: scope.projectID))
         }
     }
@@ -331,10 +377,30 @@ final class S1ProjectBrowserReadableContentDatabaseTests: XCTestCase {
                 chapterNumber: 1,
                 title: "第一章 山门夜响",
                 body: "这版正文已经由用户确认。",
-                now: Date(timeIntervalSince1970: 7_010),
-                stage: .approvedFrozen,
-                acceptedVersionMode: .active
+                now: Date(timeIntervalSince1970: 7_010)
             )
+            let activeVersion = try XCTUnwrap(try database.chapterVersion(
+                id: chapter.activeVersionID,
+                conversationID: scope.conversationID,
+                projectID: scope.projectID
+            ))
+
+            let accepted = try database.executeChapterAcceptTool(
+                conversationID: scope.conversationID,
+                projectID: scope.projectID,
+                versionID: activeVersion.id,
+                displayedContentHash: activeVersion.contentHash,
+                idempotencyKey: "s1-project-browser.chapter.accept.\(activeVersion.id.uuidString)",
+                now: Date(timeIntervalSince1970: 7_020)
+            )
+
+            XCTAssertFalse(accepted.isReplay)
+            XCTAssertEqual(accepted.calibration.stage, .approvedFrozen)
+            XCTAssertEqual(accepted.calibration.acceptedVersionID, activeVersion.id)
+            XCTAssertEqual(accepted.receipt.toolID, "chapter.accept")
+            XCTAssertEqual(accepted.receipt.outputReference, activeVersion.id.uuidString)
+            XCTAssertEqual(try database.countToolReceipts(toolID: "chapter.accept"), 1)
+            XCTAssertEqual(try chapterAcceptSnapshotCount(in: database), 1)
 
             let projection = try XCTUnwrap(
                 database.loadS1ReadableContent(projectID: scope.projectID)
@@ -347,11 +413,6 @@ final class S1ProjectBrowserReadableContentDatabaseTests: XCTestCase {
         let conversationID: UUID
         let projectID: UUID
         let projectTitle: String
-    }
-
-    private enum AcceptedVersionMode {
-        case missing
-        case active
     }
 
     private struct SeededChapter {
@@ -410,8 +471,6 @@ final class S1ProjectBrowserReadableContentDatabaseTests: XCTestCase {
         body: String,
         now: Date,
         revision: Int = 1,
-        stage: ChapterCalibrationStage = .reviewingV1,
-        acceptedVersionMode: AcceptedVersionMode = .missing,
         creationStatus: String = ChapterVersionCreationStatus.calibrationReview.rawValue,
         storedHashOverride: String? = nil
     ) throws -> SeededChapter {
@@ -444,9 +503,9 @@ final class S1ProjectBrowserReadableContentDatabaseTests: XCTestCase {
                     scope.projectID.uuidString,
                     chapterNumber,
                     version.versionID.uuidString,
-                    stage.rawValue,
+                    ChapterCalibrationStage.reviewingV1.rawValue,
                     ChapterFingerprint.diagnosisHash([]),
-                    acceptedVersionMode == .active ? version.versionID.uuidString : nil,
+                    nil,
                     now.addingTimeInterval(1).timeIntervalSince1970
                 ]
             )
@@ -456,6 +515,15 @@ final class S1ProjectBrowserReadableContentDatabaseTests: XCTestCase {
             activeVersionID: version.versionID,
             chapterNumber: chapterNumber
         )
+    }
+
+    private func chapterAcceptSnapshotCount(in database: AppDatabase) throws -> Int {
+        try database.queue.read { db in
+            try Int.fetchOne(
+                db,
+                sql: "SELECT COUNT(*) FROM chapterToolResultSnapshot WHERE toolID = 'chapter.accept'"
+            ) ?? -1
+        }
     }
 
     @discardableResult

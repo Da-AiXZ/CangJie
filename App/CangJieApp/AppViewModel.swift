@@ -847,7 +847,11 @@ final class AppViewModel: ObservableObject {
             lifecyclePermitsMutations = true
             guard revalidateBuildActivation() else { return }
             guard flushPendingDraftAutosave() else { return }
-            restoreS1PreviewProjection()
+            if runtime == nil {
+                restoreS1PreviewProjection()
+            } else {
+                restoreRuntimeProjection()
+            }
             refreshProbeState(publishSuccess: false)
             refreshIsolationCanary(publishSuccess: false)
         @unknown default:
@@ -947,8 +951,17 @@ final class AppViewModel: ObservableObject {
         }
     }
 
-    private func restoreRuntimeProjection() {
-        guard let runtime else { return }
+    @discardableResult
+    func activateGovernedRuntimeProjection() -> Bool {
+        guard lifecyclePermitsMutations else { return false }
+        guard revalidateBuildActivation() else { return false }
+        guard ensureRuntimeAvailable() else { return false }
+        return restoreRuntimeProjection()
+    }
+
+    @discardableResult
+    private func restoreRuntimeProjection() -> Bool {
+        guard let runtime else { return false }
         do {
             let snapshot = try runtime.restore()
             let restoredMilestone = Self.businessMilestone(for: snapshot)
@@ -957,11 +970,13 @@ final class AppViewModel: ObservableObject {
             if milestoneChanged {
                 businessStatus = Self.businessStatus(for: snapshot)
             }
+            return true
         } catch {
 #if DEBUG
             print("Agent runtime projection restore failed:", error)
 #endif
             publishError("Agent restore failed (AGENT-RESTORE)")
+            return false
         }
     }
 

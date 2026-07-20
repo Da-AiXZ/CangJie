@@ -191,6 +191,9 @@ final class S1NovelProgressDatabaseTests: XCTestCase {
         in database: AppDatabase,
         title: String
     ) throws -> ProjectFixture {
+        _ = try database.selectNewS1Conversation(
+            now: Date(timeIntervalSince1970: 899)
+        )
         let conversation = try database.appendS1WorkspacePreviewTurn(
             selectedConversationID: nil,
             turn: S1ConversationPreview.makeTurn(from: "为\(title)保存一个故事念头"),

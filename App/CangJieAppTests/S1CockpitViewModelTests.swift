@@ -473,6 +473,7 @@ final class S1CockpitViewModelTests: XCTestCase {
         try withDatabase { database in
             let first = makeViewModel(database: database)
             first.draft = "unsent draft"
+            first.saveDraft()
 
             let restored = makeViewModel(database: database)
 
@@ -504,6 +505,10 @@ final class S1CockpitViewModelTests: XCTestCase {
                 role: .system,
                 content: S1ConversationPreview.systemReceipt,
                 now: Date(timeIntervalSince1970: 903)
+            )
+            _ = try database.selectS1Conversation(
+                conversation.id,
+                now: Date(timeIntervalSince1970: 904)
             )
 
             let viewModel = makeViewModel(database: database)
@@ -539,6 +544,10 @@ final class S1CockpitViewModelTests: XCTestCase {
             XCTAssertNotNil(try database.latestAgentRun(conversationID: conversationID))
             XCTAssertNotNil(try database.latestToolReceipt(conversationID: conversationID))
             XCTAssertNotNil(try database.latestApprovalRequest(conversationID: conversationID))
+            _ = try database.selectS1Conversation(
+                conversationID,
+                now: Date(timeIntervalSince1970: 904)
+            )
 
             let restored = makeViewModel(database: database)
 

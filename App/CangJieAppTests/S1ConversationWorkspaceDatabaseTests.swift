@@ -50,7 +50,10 @@ final class S1ConversationWorkspaceDatabaseTests: XCTestCase {
             let restored = try database.restoreS1ConversationWorkspace()
 
             XCTAssertEqual(restored.selectedConversation?.id, appended.conversation.id)
-            XCTAssertEqual(restored.selectedConversation?.title, idea)
+            XCTAssertEqual(
+                restored.selectedConversation?.title,
+                S1ConversationPreview.makeHistoryTitle(fromValidatedUserText: idea)
+            )
             XCTAssertEqual(restored.draft, "")
             XCTAssertEqual(
                 restored.messageWindow.messages.map(\.content),
@@ -74,20 +77,21 @@ final class S1ConversationWorkspaceDatabaseTests: XCTestCase {
             )
 
             try database.selectNewS1Conversation(now: Date(timeIntervalSince1970: 1_002))
-            try database.saveS1ConversationDraft(
-                "unbound second story",
-                selectedConversationID: nil,
-                now: Date(timeIntervalSince1970: 1_003)
-            )
             let second = try database.appendS1WorkspacePreviewTurn(
                 selectedConversationID: nil,
                 turn: S1ConversationPreview.makeTurn(from: "second story"),
-                now: Date(timeIntervalSince1970: 1_004)
+                now: Date(timeIntervalSince1970: 1_003)
             ).conversation
             try database.saveS1ConversationDraft(
                 "second draft",
                 selectedConversationID: second.id,
-                now: Date(timeIntervalSince1970: 1_005)
+                now: Date(timeIntervalSince1970: 1_004)
+            )
+            _ = try database.selectNewS1Conversation(now: Date(timeIntervalSince1970: 1_005))
+            try database.saveS1ConversationDraft(
+                "unbound second story",
+                selectedConversationID: nil,
+                now: Date(timeIntervalSince1970: 1_006)
             )
 
             let restoredFirst = try database.selectS1Conversation(first.id)

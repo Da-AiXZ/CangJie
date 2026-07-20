@@ -24,8 +24,9 @@ final class S1ReadableContentViewModelTests: XCTestCase {
     func testSwitchingConversationRefreshesReaderAndUnboundWorkspaceFailsClosed() throws {
         try withDatabase { database in
             let seeded = try seedReadableContent(in: database)
+            _ = try database.selectNewS1Conversation(now: Date(timeIntervalSince1970: 1_999))
             let otherConversation = try database.appendS1WorkspacePreviewTurn(
-                selectedConversationID: seeded.conversationID,
+                selectedConversationID: nil,
                 turn: S1ConversationPreview.makeTurn(from: "另一个没有正文的对话"),
                 now: Date(timeIntervalSince1970: 2_000)
             ).conversation
