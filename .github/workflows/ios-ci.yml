@@ -33,6 +33,7 @@ jobs:
           python3 scripts/tests/test-verify-build-artifacts.py
           python3 scripts/tests/test-candidate-set-contract.py
           python3 scripts/tests/test-build-identity-contract.py
+          python3 scripts/tests/test-app-module-import-contract.py
       - name: Static validation
         run: bash -n scripts/build-ipa.sh scripts/install-ldid.sh scripts/find-ipad-simulator.sh scripts/tests/test-install-ldid.sh scripts/tests/test-find-ipad-simulator.sh scripts/tests/test-build-ipa-contracts.sh scripts/tests/test-build-ipa-entitlements.sh
       - name: Test pinned ldid installer contract

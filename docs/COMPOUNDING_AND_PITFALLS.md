@@ -1074,3 +1074,7 @@ Humanizing only the first successful execution is insufficient. Durable recovery
 ## P-259 A visual overlay must also be an accessibility modal boundary
 
 Blocking taps with a dimming layer does not remove the covered workspace from VoiceOver. When an independent page or portrait navigation overlay is presented, every covered region must stop hit testing and leave the accessibility tree, while the overlay establishes a modal boundary and its close controls announce the action they actually perform. Page switches should also release composer focus so the software keyboard cannot obscure the newly presented surface.
+
+## P-260 File-scoped Swift imports are outside `-frontend -parse` evidence
+
+A Swift file that references a public type from `CangJieCore` must import `CangJieCore` in that same file; imports in sibling files or target dependency declarations do not enter the file's scope. `swiftc -frontend -parse` cannot detect this because it performs syntax parsing rather than module loading and name resolution, and the Windows SwiftPM package does not compile the iOS App target. Keep an explicit App-source import contract for known cross-module symbols, but treat macOS Xcode App-target compilation as the authoritative semantic check.

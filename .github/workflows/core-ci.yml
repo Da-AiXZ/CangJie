@@ -22,6 +22,8 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           persist-credentials: false
+      - name: Verify App module import contracts
+        run: python scripts/tests/test-app-module-import-contract.py
       - name: Install and audit pinned Swift toolchain
         shell: pwsh
         run: ./scripts/windows/install-swift-ci.ps1 -SwiftVersion 6.3.3

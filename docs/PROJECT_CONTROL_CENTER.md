@@ -1165,3 +1165,29 @@ Apple and device boundary:
 
 - Windows cannot type-check the iOS/SwiftUI/GRDB App target or execute App XCTest/XCUITest. The fixture bootstrap tests, Reader and scale UI assertions, Xcode build, simulator execution, signing, IPA packaging, and physical-device behavior remain unverified until an exact Apple CI and Candidate Set run.
 - No commit, push, remote CI run, IPA build, or milestone-complete claim was made by this slice. This is not yet a physical-device installation stop point.
+
+## 2026-07-20 S1 App-target semantic compile repair and CI boundary evidence
+
+This slice remains inside S1 and does not claim S1 completion, S2 Provider/model integration, a real Typed Tool loop, formal prose generation, H0-H5 completion, IPA acceptance, or physical-device acceptance.
+
+Remote evidence for commit `86bb9069b9665ecb5a02aa7ae6d7ef267ca570ac`:
+
+- Core CI run `29719583828` passed.
+- iPadOS CI run `29719583888` failed in the App target compile step before CangJie UI tests began. The first real error was `App/CangJieApp/AppDatabase.swift:514:37: error: cannot find 'S1ConversationPreview' in scope`.
+- The Keychain Isolation Probe simulator test completed successfully after the main App compile failed; this does not waive the main App failure.
+
+Root cause and repair:
+
+- `S1ConversationPreview` is public in the `CangJieCore` package, but Swift imports are file-scoped. `AppDatabase.swift` used `S1ConversationPreview.maximumDraftUTF8Bytes` without importing `CangJieCore`.
+- Added the minimal `import CangJieCore` to `App/CangJieApp/AppDatabase.swift`; no limit was duplicated or removed.
+- Added `scripts/tests/test-app-module-import-contract.py`, which scans every current App target source root recursively and fails when S1 preview symbols are used without a same-file `CangJieCore` import.
+- Wired that contract into `core-ci.yml`, `ios-ci.yml`, and `build-ipa.yml`, so the failure is caught in Windows preflight, before iPadOS simulator execution, and before a manual IPA candidate build.
+
+Windows verification after the repair:
+
+- Strict Core script passed 99 XCTest plus 15 Swift Testing tests, 114 total with zero failures, and 94.15% `CangJieCore` line coverage against the 90% gate. The first invocation was blocked only by the local `SDKROOT` trailing-separator environment shape; rerunning with the same SDK root normalized passed. No project code change was made for that environment detail.
+- All Python contract tests passed, including the new App module import contract. The suite reported 48 unittest cases passed with one platform-dependent skip, plus the two standalone candidate-set and build-identity contract checks.
+- `swiftc -frontend -parse` passed for the repaired AppDatabase source; `python -m py_compile` and `git diff --check` passed.
+- Git Bash ldid and simulator-selector tests passed; the symlink negative case was skipped because the Windows host cannot create symlinks. The entitlement and GRDB resource shell contracts were not counted as Windows evidence because the local Git Bash host could not execute them under the same macOS assumptions; they remain required in Apple CI.
+
+This is not yet a device-test stop point. The next gate is a new push and successful Core CI plus iPadOS CI for the repair commit. Only after both pass may `build-ipa.yml` be manually triggered on `macos-15`; only after the exact Candidate Set manifest, SHA-256, entitlements, signature evidence, and commit binding are verified may the user be asked to install the paired IPA files.

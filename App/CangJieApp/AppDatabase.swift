@@ -1,3 +1,4 @@
+import CangJieCore
 import Foundation
 import GRDB
 
