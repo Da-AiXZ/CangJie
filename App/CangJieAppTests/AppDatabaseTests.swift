@@ -397,13 +397,19 @@ final class AppDatabaseTests: XCTestCase {
                 now: Date(timeIntervalSince1970: 551),
                 expiresAt: Date(timeIntervalSince1970: 4_551)
             )
+            let approvalKey = [
+                "artifact.openingPlan.approve",
+                saved.approval.id.uuidString,
+                saved.approval.bindingHash
+            ].joined(separator: ".")
             let approved = try database.executeOpeningPlanApprovalTool(
                 conversationID: conversation.id,
                 approvalRequestID: saved.approval.id,
                 displayedBindingHash: saved.approval.bindingHash,
-                idempotencyKey: "opening.canonical-replay.approve",
+                idempotencyKey: approvalKey,
                 now: Date(timeIntervalSince1970: 552)
             )
+            XCTAssertEqual(approved.receipt.idempotencyKey, approvalKey)
             let messageKey = [
                 "approval-message",
                 approved.approval.id.uuidString,
