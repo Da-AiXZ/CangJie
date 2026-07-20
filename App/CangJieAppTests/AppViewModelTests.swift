@@ -117,7 +117,7 @@ final class AppViewModelTests: XCTestCase {
 
             XCTAssertEqual(viewModel.draft, "create a cultivation novel")
             XCTAssertTrue(viewModel.conversationMessages.isEmpty)
-            XCTAssertTrue(viewModel.errorMessage?.contains("BUILD-ACTIVATION") == true)
+            XCTAssertTrue(viewModel.diagnosticErrorMessage?.contains("BUILD-ACTIVATION") == true)
             XCTAssertEqual(try database.listProjects(), [])
         }
     }
@@ -274,7 +274,7 @@ final class AppViewModelTests: XCTestCase {
             XCTAssertEqual(canary.prepareCalls, canaryWritesBeforeMismatch)
             XCTAssertEqual(canary.deleteCalls, canaryDeletesBeforeMismatch)
             XCTAssertFalse(viewModel.isAgentExecutionAllowed)
-            XCTAssertTrue(viewModel.errorMessage?.contains("BUILD-ACTIVATION") == true)
+            XCTAssertTrue(viewModel.diagnosticErrorMessage?.contains("BUILD-ACTIVATION") == true)
         }
     }
     @MainActor
@@ -309,7 +309,7 @@ final class AppViewModelTests: XCTestCase {
             XCTAssertEqual(repository.currentDigestCalls, readsBeforeMismatch)
             XCTAssertEqual(repository.deleteCalls, 0)
             XCTAssertFalse(viewModel.isAgentExecutionAllowed)
-            XCTAssertTrue(viewModel.errorMessage?.contains("BUILD-ACTIVATION") == true)
+            XCTAssertTrue(viewModel.diagnosticErrorMessage?.contains("BUILD-ACTIVATION") == true)
         }
     }
 
@@ -389,7 +389,11 @@ final class AppViewModelTests: XCTestCase {
     @MainActor
     func testProvidedDatabaseSkipsDefaultFactoryAndRemainsUsable() throws {
         try withDatabase { database in
-            try database.saveDraft("existing draft", now: Date(timeIntervalSince1970: 1_000))
+            try database.saveS1ConversationDraft(
+                "existing draft",
+                selectedConversationID: nil,
+                now: Date(timeIntervalSince1970: 1_000)
+            )
             var factoryCalls = 0
 
             let viewModel = AppViewModel(
@@ -404,8 +408,8 @@ final class AppViewModelTests: XCTestCase {
 
             XCTAssertEqual(factoryCalls, 0)
             XCTAssertEqual(viewModel.draft, "existing draft")
-            XCTAssertEqual(viewModel.businessStatus, "Waiting for a novel idea")
-            XCTAssertTrue(viewModel.transientNotice?.message.hasPrefix("SQLite ready") == true)
+            XCTAssertEqual(viewModel.businessStatus, "等你说说想写什么")
+            XCTAssertTrue(viewModel.transientNotice?.message == "本地内容已准备好" == true)
 
             viewModel.draft = "updated draft"
             viewModel.saveDraft()
@@ -470,8 +474,8 @@ final class AppViewModelTests: XCTestCase {
 
             XCTAssertEqual(factoryCalls, 1)
             XCTAssertEqual(viewModel.draft, "")
-            XCTAssertEqual(viewModel.businessStatus, "Waiting for a novel idea")
-            XCTAssertTrue(viewModel.transientNotice?.message.hasPrefix("SQLite ready") == true)
+            XCTAssertEqual(viewModel.businessStatus, "等你说说想写什么")
+            XCTAssertTrue(viewModel.transientNotice?.message == "本地内容已准备好" == true)
         }
     }
 
@@ -581,7 +585,7 @@ final class AppViewModelTests: XCTestCase {
             XCTAssertFalse(approved)
             XCTAssertEqual(viewModel.openingPlanApproval, displayed)
             XCTAssertTrue(viewModel.planAwaitingApproval)
-            XCTAssertTrue(viewModel.errorMessage?.contains("AGENT-APPROVAL-STALE") == true)
+            XCTAssertTrue(viewModel.diagnosticErrorMessage?.contains("AGENT-APPROVAL-STALE") == true)
         }
     }
 
@@ -598,7 +602,7 @@ final class AppViewModelTests: XCTestCase {
             XCTAssertFalse(approved)
             XCTAssertEqual(viewModel.openingPlanApproval, displayed)
             XCTAssertTrue(viewModel.planAwaitingApproval)
-            XCTAssertTrue(viewModel.errorMessage?.contains("AGENT-APPROVAL-STALE") == true)
+            XCTAssertTrue(viewModel.diagnosticErrorMessage?.contains("AGENT-APPROVAL-STALE") == true)
         }
     }
 
@@ -647,7 +651,7 @@ final class AppViewModelTests: XCTestCase {
             XCTAssertTrue(viewModel.planAwaitingApproval)
             XCTAssertNotEqual(viewModel.openingPlanApproval?.id, displayed.id)
             XCTAssertEqual(viewModel.openingPlanApproval?.status, .pending)
-            XCTAssertTrue(viewModel.errorMessage?.contains("AGENT-APPROVAL-EXPIRED") == true)
+            XCTAssertTrue(viewModel.diagnosticErrorMessage?.contains("AGENT-APPROVAL-EXPIRED") == true)
         }
     }
 
@@ -821,7 +825,7 @@ final class AppViewModelTests: XCTestCase {
             XCTAssertEqual(try database.agentRun(idempotencyKey: approvalKey)?.status, .completed)
             XCTAssertFalse(restored.planAwaitingApproval)
             XCTAssertEqual(restored.openingPlanApproval?.status, .approved)
-            XCTAssertEqual(restored.businessStatus, "Opening plan approved; chapter planning pending")
+            XCTAssertEqual(restored.businessStatus, "开篇方向已确认，准备第一章")
             XCTAssertEqual(try database.countToolReceipts(toolID: "artifact.openingPlan.approve"), 1)
         }
     }
@@ -849,7 +853,7 @@ final class AppViewModelTests: XCTestCase {
 
             XCTAssertEqual(viewModel.businessStatus, businessStatus)
             XCTAssertEqual(viewModel.transientNotice?.kind, .lifecycle)
-            XCTAssertTrue(viewModel.transientNotice?.message.contains("checkpoint") == true)
+            XCTAssertTrue(viewModel.transientNotice?.message == "当前内容已安全保存" == true)
             XCTAssertNil(viewModel.errorMessage)
             XCTAssertEqual(try database.loadDraft()?.content, "unsent scene note")
         }
@@ -908,7 +912,7 @@ final class AppViewModelTests: XCTestCase {
 
             XCTAssertEqual(viewModel.openingPlanApproval?.status, .approved)
             XCTAssertFalse(viewModel.planAwaitingApproval)
-            XCTAssertEqual(viewModel.businessStatus, "Opening plan approved; chapter planning pending")
+            XCTAssertEqual(viewModel.businessStatus, "开篇方向已确认，准备第一章")
             XCTAssertEqual(try database.countToolReceipts(toolID: "artifact.openingPlan.approve"), 1)
             XCTAssertEqual(
                 try database.latestToolReceipt(conversationID: displayed.conversationID),
@@ -1015,7 +1019,7 @@ final class AppViewModelTests: XCTestCase {
 
             let restored = AppViewModel(database: database, keychain: StubSecretRepository())
 
-            XCTAssertEqual(restored.businessStatus, "Opening plan approved; chapter planning pending")
+            XCTAssertEqual(restored.businessStatus, "开篇方向已确认，准备第一章")
             XCTAssertNil(restored.errorMessage)
         }
     }
@@ -1058,7 +1062,7 @@ final class AppViewModelTests: XCTestCase {
         viewModel.createCheckpoint(reason: "test")
 
         XCTAssertEqual(viewModel.businessStatus, businessStatus)
-        XCTAssertTrue(viewModel.errorMessage?.contains("DB-") == true)
+        XCTAssertTrue(viewModel.diagnosticErrorMessage?.contains("DB-") == true)
         XCTAssertNil(viewModel.transientNotice)
     }
 
@@ -1258,7 +1262,7 @@ final class AppViewModelTests: XCTestCase {
 
                 XCTAssertEqual(try database.agentRun(idempotencyKey: approvalKey)?.status, terminalStatus)
                 XCTAssertEqual(restored.openingPlanApproval?.status, .approved)
-                XCTAssertEqual(restored.businessStatus, "Opening plan approved; chapter planning pending")
+                XCTAssertEqual(restored.businessStatus, "开篇方向已确认，准备第一章")
             }
         }
     }
@@ -1323,7 +1327,7 @@ final class AppViewModelTests: XCTestCase {
 
             XCTAssertEqual(restored.openingPlanApproval?.status, .pending)
             XCTAssertTrue(restored.planAwaitingApproval)
-            XCTAssertEqual(restored.businessStatus, "Waiting for opening plan approval")
+            XCTAssertEqual(restored.businessStatus, "等你确认开篇方向")
         }
     }
 
@@ -1351,7 +1355,7 @@ final class AppViewModelTests: XCTestCase {
             )
             XCTAssertNil(try database.latestAgentRun(conversationID: conversation.id))
             XCTAssertEqual(viewModel.conversationMessages, messagesBefore.map(\.displayText))
-            XCTAssertTrue(viewModel.errorMessage?.contains("AGENT-INPUT-LIMIT") == true)
+            XCTAssertTrue(viewModel.diagnosticErrorMessage?.contains("AGENT-INPUT-LIMIT") == true)
             XCTAssertFalse(viewModel.isAgentWorking)
         }
     }
@@ -1528,7 +1532,7 @@ final class AppViewModelTests: XCTestCase {
             XCTAssertEqual(restored.chapter?.activeVersion.contentHash, chapter.activeVersion.contentHash)
             XCTAssertEqual(restored.chapter?.stage, .reviewingV1)
             XCTAssertTrue(restored.chapterNeedsReview)
-            XCTAssertEqual(restored.businessStatus, "Chapter 1 revision 1 awaiting review")
+            XCTAssertEqual(restored.businessStatus, "等你看看第一章")
         }
     }
 
@@ -1591,7 +1595,7 @@ final class AppViewModelTests: XCTestCase {
             XCTAssertEqual(viewModel.chapter?.calibration.lockedParagraphIndexes, [])
             XCTAssertEqual(try database.countToolReceipts(toolID: "chapter.lockParagraph.set"), 0)
             XCTAssertEqual(try database.countToolReceipts(toolID: "chapter.accept"), 0)
-            XCTAssertTrue(viewModel.errorMessage?.contains("CHAPTER-STALE") == true)
+            XCTAssertTrue(viewModel.diagnosticErrorMessage?.contains("CHAPTER-STALE") == true)
         }
     }
 
@@ -1623,7 +1627,7 @@ final class AppViewModelTests: XCTestCase {
             XCTAssertFalse(confirmed)
             XCTAssertEqual(viewModel.chapter?.stage, .awaitingRewriteConfirmation)
             XCTAssertEqual(try database.countToolReceipts(toolID: "chapter.rewrite"), 0)
-            XCTAssertTrue(viewModel.errorMessage?.contains("CHAPTER-STALE") == true)
+            XCTAssertTrue(viewModel.diagnosticErrorMessage?.contains("CHAPTER-STALE") == true)
         }
     }
 
@@ -1736,7 +1740,7 @@ final class AppViewModelTests: XCTestCase {
             XCTAssertEqual(restored.chapter?.versions.map(\.revision), [1, 2])
             XCTAssertEqual(restored.chapter?.calibration.lockedParagraphIndexes, [1])
             XCTAssertEqual(restored.lastToolReceipt?.toolID, "chapter.accept")
-            XCTAssertEqual(restored.businessStatus, "Chapter 1 approved and frozen")
+            XCTAssertEqual(restored.businessStatus, "第一章已经确认")
         }
     }
 

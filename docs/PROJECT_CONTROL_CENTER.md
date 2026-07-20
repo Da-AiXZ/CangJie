@@ -1,9 +1,95 @@
 # CangJie Project Control Center
 
 - Authority: current operational truth
-- Updated: 2026-07-18
+- Updated: 2026-07-19
 - Repository: `F:\project\CangJie`
 - Remote: `https://github.com/Da-AiXZ/CangJie`, branch `main`
+## Agent Harness architecture decision
+
+- Decision ID: `CJ-AH-001`
+- Decision Status: `FROZEN`
+- Confirmed: 2026-07-18
+- Canonical specification: `docs/AGENT_HARNESS_ARCHITECTURE.md`
+- Implementation status: architecture frozen; H0-H5 not yet implemented or accepted.
+
+仓颉的工程主体不是某个 LLM，也不是“聊天 + Prompt + 工具列表”。权威工程基线见 `docs/AGENT_HARNESS_ARCHITECTURE.md`：
+
+```text
+LLM：可替换驾驶员，只提出下一步或 ToolProposal
+CangJie Harness：掌握主循环、真实状态、权限、预算、事务、恢复和完成判定
+Typed Tool：唯一副作用入口，返回可验证 ToolReceipt
+```
+
+正式 Runtime 为 Driver、Prompt、Context、Loop、Tool、Task、AgentTeam、Governance 和 Observability。Context/Prompt 必须版本化和可重现；任务恢复不能只恢复聊天；unknown outcome 必须先对账；子 Agent 必须隔离上下文、工具、权限和预算；正文写入使用单 Writer Lease。
+
+状态声明：**工程架构基线已建立，具体 Swift 接口随 TDD 细化；当前不代表 H0–H5 已实现。** 下一工程顺序是 H0 数据边界与可重放夹具，再推进 H1 Driver/Prompt、H2 Context、H3 Loop/Tool、H4 Task/恢复、H5 多 Agent/治理/可观测性。
+
+Clean-room 边界：只参考 Anthropic 官方公开文档与 Agent SDK 的公开接口和行为；`cc.zip` 为 private/unlicensed 非官方材料，只允许高层架构对照，严禁复制源码、Prompt、Schema、字符串、测试、注释、目录结构或接口签名。
+2026-07-18 独立架构审查曾发现三项实现阻断风险：Checkpoint 非原子、ProviderRequest 无持久生命周期、审批 proposal 无可恢复等待协议。权威文档现已改为：章节/故事状态/Usage/回执/Checkpoint 原子提交；请求发送前持久化并对账 unknown outcome；proposal 绑定精确输入/版本、可拒绝/过期/延期并在执行前重新校验。并补齐流式残缺输出、多工具 ActionBatch、ToolCatalogManifest、Writer Lease fencing token、分支/叙事时间隔离、Subagent Task DAG、会话 compaction 和外部 taint 传播。以上仍是架构修正，不是已实现能力。
+
+来源和使用边界登记：`docs/ARCHITECTURE_SOURCE_REGISTER.md`。
+
+## Product decision granularity rule
+
+Provider connection, model choice, saved credentials, multiple connections, retry, and connection failure handling are one user-facing product area: **Provider and model connection lifecycle**. `CJ-PX-001` through `CJ-PX-003` remain implementation trace IDs under this single area, not separate approval questions.
+
+## Provider and model connection lifecycle (FROZEN)
+
+- Decision status: `FROZEN`; Provider/model lifecycle confirmed 2026-07-18, no-key/deferred-setup behavior confirmed 2026-07-19.
+- A clean install with no saved or current connection still opens the central CangJie conversation. Real local actions remain available: save thoughts/drafts, browse local novels and history, read saved prose/materials, inspect local versions/task history, and manage connections. No model analysis, generation, revision, review, research, or deep material understanding may be claimed without a usable connection.
+- The first connection is requested only when the user first asks for AI-dependent work, or explicitly opens connection management. CangJie persists the triggering request and continuation point before setup. After explicit Provider/model selection it returns to the same conversation and continues that request without asking the user to repeat it.
+- The first connection starts in the central CangJie conversation. The user chooses a concrete service before entering a key. The first-release choices are `DeepSeek`, `Claude / Anthropic`, `GPT / OpenAI`, `Gemini`, `OpenRouter`, and `Custom service`; the catalog may add another explicit connector later without changing this contract.
+- After a service is chosen, its connector supplies the current official Base URL and model-list endpoint. The user enters the key, CangJie connects, retrieves every model that key can access, and the user explicitly selects the model to use. CangJie never guesses a model from a key prefix or silently picks a different model.
+- One saved model connection is exactly: `Provider + Base URL + API Key + user-selected model`. Each connection is independent and is tested, refreshed, and saved on its own.
+- Users may save multiple connections, including multiple keys for the same service. Only one connection is current at a time. The user manually chooses which saved connection is current; a change affects new work and is visible in the connection status.
+- There is no automatic task routing, quality/cost mode, Provider switching, key rotation, load balancing, or failure takeover. A request already sent remains bound to the connection and model it used. A failure offers only honest recovery actions: reconnect, refresh the model list, re-enter the key, or manually select another saved connection and retry when appropriate.
+- A custom service asks for a connection name, OpenAI-compatible Base URL, and key. CangJie requests `/models` from that Base URL when supported; if the service cannot list models, the user may enter a model name manually. Discovery failure is shown plainly and never causes probing of other hosts.
+- Keys are stored only in Keychain and shown only as a masked suffix. Logs, exports, diagnostics, error messages, and model records never contain the full key or authorization headers. Deleting a connection never deletes novels, chapters, conversations, artifacts, or results. If the connection is current or needed by an unfinished request, CangJie first requires an explicit switch or cancellation before deletion.
+
+Default official connector values maintained by the connector registry:
+
+| Service | Default Base URL | Model discovery |
+|---|---|---|
+| DeepSeek | `https://api.deepseek.com` | `GET /models` |
+| Claude / Anthropic | `https://api.anthropic.com` | `GET /v1/models` |
+| GPT / OpenAI | `https://api.openai.com/v1` | `GET /models` |
+| Gemini | `https://generativelanguage.googleapis.com/v1beta` | `GET /models` |
+| OpenRouter | `https://openrouter.ai/api/v1` | `GET /models` |
+
+These are connector defaults, not credentials or a promise that every model supports every Agent capability. The runtime still records the selected connection's capability result and reports unsupported operations honestly. The connection UI, Keychain integration, model discovery, and real request vertical slice belong to S2 and are not claimed complete merely because this product contract is frozen.
+
+## File intake, novel export, and project backup lifecycle (FROZEN)
+
+- Decision status: `FROZEN`, confirmed 2026-07-19.
+- The front end presents three separate actions: `添加资料`, `导出小说`, and `备份项目`. They are not alternate labels for one generic file operation.
+- Add materials accepts TXT, Markdown, DOCX, PDF, scanned PDF, and ZIP. It safely persists the original before classification, OCR, indexing, or external analysis; applies the frozen material-purpose and isolation rules; checkpoints large parsing/OCR/indexing jobs; allows the user to leave; suggests OCR only when needed; and treats ZIP entries as inert untrusted data, never executable scripts or instructions.
+- Export novel produces clean TXT, DOCX, or Markdown from the current mainline. Unconfirmed chapters do not silently become formal prose. Conversations, approvals, receipts, Story Memory, cost/task records, credentials, internal IDs, and diagnostics are excluded.
+- Project backup preserves complete creative state and recovery information but excludes API keys, Keychain plaintext, authorization headers, and login credentials. Restore creates a copy by default. Replacement requires a pre-replacement recovery snapshot, an impact preview, and explicit approval. Optional password protection is permitted only with an upfront warning that lost passwords cannot be recovered.
+- The product warns that deleting the App may delete local projects and prompts users to back up before moving devices. Overwrite-install and force-quit persistence claims remain candidate-specific acceptance facts, not general promises.
+- Implementation remains staged; this frozen product contract is not evidence that S3/S6 import, export, backup, OCR, or restore is already complete.
+
+## Background, offline, recovery, and notification lifecycle (FROZEN)
+
+- Decision status: `FROZEN`, confirmed 2026-07-19 as `CJ-PX-006`; this is a documentation contract, not an implementation claim and does not change the real S1 milestone.
+- Before backgrounding, screen lock, or detected network loss, persist the draft, real task stage, Provider request identity/state, received stream fragments, recorded cost, and latest safe continuation point. This recovery contract never promises unlimited background execution on iPadOS 16.6.1.
+- Recovery must distinguish completed, safely paused, definitely failed, outcome unknown, and invalid connection. Unknown outcome first performs non-creative reconciliation against the original request and local receipts/usage; it must not issue a new creative request or charge, and cannot be directly retried while still unknown.
+- Offline use includes local projects, prose, materials, drafts, novel export, and project backup. New AI requests created offline remain unsent and require user confirmation after connectivity returns. Requests already sent may automatically reconcile their original identity.
+- Interrupted streaming is only an incomplete temporary artifact and cannot enter formal chapters, canon, character state, foreshadowing/promise settlement, or completed-ahead counts.
+- Notifications are optional and limited to completion, waiting for confirmation, pause/failure, cost limits, and major-story gates. Do not request permission on first launch; explain and ask at the first long task. Refusal changes only notification delivery, not product function.
+- Ordinary task UI uses `正在做 / 接下来 / 需要你`. One novel has one prose Writer. Immediate pause and pause-after-chapter remain different operations.
+- Provider failure may reconnect the current named connection or wait for a user-selected saved connection only. Automatic Provider, model, or key switching remains forbidden.
+
+## Product stages and evidence-bound acceptance (FROZEN)
+
+- Decision status: `CJ-PX-007 / FROZEN`, confirmed 2026-07-19.
+- CangJie uses S0–S6 as user-visible product stages and H0–H5 as sequential Harness engineering gates. The current real milestone is **S1 Agent 驾驶舱定调与重构**. S0 is only the completed technical-feasibility baseline.
+- Historical candidate-hardening M1 labels and Builds 26–28 are engineering-prototype/hardening evidence, not the current complete-product milestone. Build 28 is not accepted.
+- S2 proves the first real Provider and the no-key → Provider/Key/Endpoint → model discovery → user-selected model → central Agent Typed Tool project/status → ToolReceipt → force-quit recovery loop, passes the applicable H0–H3 gates, and contains no formal prose generation.
+- S3 adds dynamic intent discovery, one high-value question at a time, authorized reference abstraction, preference evidence, work direction and opening preparation. It uses ordinary-scale materials only and advances the H4 main path without claiming complete million-character understanding.
+- S4 adds real prose, selection conversation, ambiguous-rejection diagnosis, impact preview, version diff, first-three-chapter calibration and separate continuous-creation authorization; it completes H4 and enters H5.
+- S5 formally accepts rolling serial generation, at most five unread chapters, major-decision/budget pauses, both pause semantics, branch impact, the million-character narrative index, phased large-reference-novel analysis, and complete H5.
+- S6 completes TXT/Markdown/DOCX/PDF/OCR/ZIP/million-character material handling, quality review, clean TXT/Markdown/DOCX prose export, credential-free backup/restore, accessibility, performance, migration and security audit, and a formal release candidate.
+- Every stage report states candidate nature, included and excluded scope, automation evidence and exact device evidence. Device acceptance binds version, Build, commit, SHA-256 and candidate identity to the entry path, control location, action, result location, failure signal and recovery method. Unchanged behavior uses differential acceptance, but security contracts are re-proved on the exact candidate. Green CI, static UI, documentation or code completion never passes a product stage. H0–H5 advance in order and are never packaged as empty Harness IPAs.
 
 ## Product and UI decision
 
@@ -12,15 +98,219 @@
 默认产品体验遵循：
 
 ```text
-普通用户说人话、看故事、表达感觉、决定重大事项
+普通用户说人话、看故事、表达感觉，决定重大事项或明确授权仓颉代决策
 → 统一人格“仓颉”主动理解、追问、建议和执行
 → Typed Tools 真实操作项目、设定、正文、任务和导出
 → 多 Agent 小说团队与长篇治理在后台工作
 ```
 
-中心对话是唯一必经入口。左侧是独立页面导航，点击“我的小说”等入口后只在左侧区域内部 push 到单独页面，不能变成原地展开树，也不能重建中心对话。右侧默认收起，用户名称为“这次聊出来的内容”，优先显示等你决定、已经确定、正在进行和最近修改。工作台、版本、正典、审批、Receipt、Hash 和诊断能力继续存在，但默认下沉。
+已确认的响应式工作区合同：
 
-固定三问、关键词意图、必填拒绝原因、固定三个诊断问题和段落 Lock/Unlock 仅被视为已经验证底层治理的技术原型，不再代表目标 UX。目标正文交互是连续阅读、任意选字，以及“喜欢 / 不喜欢 / 原样保留 / 方向不对 / 问仓颉”。
+- 打开 App 直接进入仓颉对话；
+- 横屏最左侧保留只显示图标的 Activity Bar，长按显示名称和用途；
+- 点击“我的小说”等入口后，在左侧自己的导航栈中进入独立页面，不能原地展开树或重建对话；
+- 有正文时横屏正文约占 2/3、右侧约占 1/3；右侧只有一个区域，用“仓颉 / 这次结果”标签切换，不增加第四列；
+- 阅读器、右侧区域和左侧页面都可开关，阅读器可最大化；
+- 竖屏一次只显示“阅读 / 仓颉 / 这次结果”中的一个主要区域；
+- 旋转、切换标签和开关面板不能丢失草稿、滚动、流式输出、章节、选区引用或任务状态。
+
+已确认的正文反馈合同：
+
+```text
+自由选中文字
+→ 问仓颉
+→ 自动带章节、版本、精确选区和前后文
+→ 能直接理解则给修改影响范围预览
+→ 不清楚才动态追问
+```
+
+第一层菜单冻结为 `复制 | 问仓颉 | 更多`。“原样保留”已从第一层主路径删除。选区只表示当前讨论焦点和修改分析起点，不自动表示喜欢、不喜欢、问题或锁定，也不能替用户确认喜欢原因。“更多”提供“这段我喜欢 / 这个感觉别丢 / 只讨论这段 / 标记为问题”等软反馈；只有明确点击“锁定文字不变”或说“这句一个字都不要动”等无歧义命令，才建立精确硬锁定。AI 对喜欢原因只能提出可纠正推测。
+
+已确认的修改影响范围与依赖重连合同：
+
+- 选区是修改起点，不是最终影响边界；
+- 修改前用人话预览句子、场景、章节、后文、已通过正文、用户人工改稿和硬锁定的影响；
+- 需要扩大范围时提供“连带改顺后面 / 只改这里但可能不连贯 / 另建版本试试 / 先别改”；
+- 尚未通过的工作内容可以选择性重生成；已通过正文不得直接覆盖，必须保留旧版本、建立分支并由用户裁决；
+- 用户人工改稿优先作为当前依据，不能被旧 AI 稿覆盖；
+- 修改按依赖顺序重连，完成后重新检查人物知识、时间、因果、线索/读者承诺和题材规则，禁止中间改了而后文继续沿用旧逻辑。
+
+所有修改仍必须经过精确版本绑定、权限、审批、预算、幂等、依赖证据和真实工具回执。
+
+已确认的视觉方向是接近 Claude Code 设计理念的克制、安静、现代、中性暖色与少量暖橙强调，但必须是仓颉自有设计系统，不得声称使用 Claude 官方色值、组件或品牌资产。旧纸墨朱红、卷轴、毛笔和印章方向已废弃。
+
+已确认的默认自主模式是**“关键事情问我”**：
+
+- 创建、保存、整理未确认内容、查询、检查、checkpoint、安全暂停/恢复和未提交草稿等安全可逆日常操作直接执行，完成后告知；
+- 正文、用户已看内容的修改和重要创作方向先展示可审阅结果，再由用户确认；
+- 普通、可逆且不改变整书方向的创作决定直接执行并告知；
+- 主角核心目标、重要人物生死/永久背叛/彻底黑化、核心关系、世界/能力硬规则、主线/卷纲/结局承诺等重大变化，只有在有效授权覆盖相应类别和小说/卷/章节范围时才可代决策；未覆盖必须在安全 checkpoint 前暂停；
+- 前三章逐章校准，三章通过后才提高自动化程度；
+- 可提供“少打扰我 / 关键事情问我 / 每一步都让我确认”，但任何模式和创作授权都不得绕过费用硬上限、任务完整性、安全、权限、版本/幂等/checkpoint、外部数据披露和不可逆删除边界。
+
+已确认的自动连载分级创作授权合同：
+
+- 连续创作授权只允许任务持续推进，不等于把所有重大决定永久交给仓颉；
+- 用户可以用自然语言按决定类别、某一卷、某些章节或其他明确范围授权，授权必须可查看、撤销、版本化并记录来源与生效范围；
+- 一次具体选择不得静默扩大成永久授权；撤销后尚未执行的重大决定重新进入暂停门；
+- 未授权重大变化的暂停卡必须说明为什么暂停、影响哪些内容、给出 2–3 个具体方向和仓颉推荐，并一次只问一个容易回答的问题；
+- 已授权重大决定执行后必须醒目标记实际选择、影响范围和所用授权；
+- 费用、任务完整性、权限、安全、外部数据披露和版本治理属于不可委托硬边界。
+
+已确认的动态意图合同：
+
+```text
+理解一点
+→ 做一点
+→ 让用户看见
+→ 再继续理解
+```
+
+- 不是固定问卷；一次只问一个会改变下一步创作决定且容易回答的主问题；
+- 正常约 2–4 个高价值问题后给画面、小样或候选，但该数字只是节奏指导，不得硬编码；
+- 用户不知道时使用具体画面、差异对比、阅读经历、反向排除或可撤销临时决定；
+- 内部区分用户原话、用户已确认、AI 推测和关键未知；推测不得静默升级；
+- 达到可行动阈值、继续追问收益低、用户疲劳/要求直接做或当前决定低风险可撤销时停止提问。
+
+已确认的对话与小说合同：
+
+- 所有对话自动持久化，但不能每聊一句就创建空书；
+- 用户明确继续、出现首个长期正式成果、需要故事记忆或开始正文时，由 Typed Tool 无表单建立小说并用大白话告知；
+- 一本小说可关联多次对话，一次对话同一时刻只有一个主要小说上下文；
+- 明显出现另一本书的念头时先建议单独保存，未经确认不得污染当前书；
+- 普通用户不看到临时项目、对象、实体绑定等技术词。
+
+已确认的“这次结果”合同：
+
+- 不是聊天记录或技术日志，只收集当前对话产生的、可阅读、采用、修改、继续执行或长期保存的真实产物；
+- 产物包括故事念头、候选方向、试写、人物成果、章节正文、修改影响范围预览与局部结果、研究结论、任务结果和重要分歧；普通追问闲聊不生成卡片；
+- 前台状态限定为“供你看看、等你决定、已经放进小说、刚刚修改、正在进行、已经暂停、已被新版本替代”；
+- 普通界面不暴露 Artifact、CanonFact、Revision Hash、Tool Receipt；
+- 用户可直接在对话中命令采用、打开、移除或总结；采用后由 Typed Tool 写入章节、故事记忆、资料、AI 任务或创作记录，且本次结果继续保留来源和版本。
+
+已确认的“我的小说”书架合同：
+
+- 最左侧小说图标打开左侧书架；横屏只改变左侧区域，竖屏以覆盖层出现，不得替换或重建中央仓颉对话、清空草稿、中断流式或重置阅读位置；
+- 书架条目只显示标题、当前大白话进度和最近时间；临时无名灵感可使用仓颉临时标题；
+- 点击书籍只 push 到左侧独立详情页并可返回；详情提供继续创作、打开正文、当前做到哪、最近成果、相关对话，以及故事记忆、资料、AI 任务、导出与备份、本书设置入口，不显示项目技术字段；
+- “聊一个新念头”只开启新对话，不弹创建表格；
+- 浏览或阅读另一本书不得偷换当前创作上下文；只有点击继续创作、从该书正文问仓颉、继续该书历史对话或明确要求切换时才绑定，并由仓颉用大白话提示已切到哪本书。
+
+已确认的“故事记忆”合同：
+
+- 故事记忆不是用户填写的设定表，主要由仓颉从对话、已采用结果、已通过正文、用户改稿、研究资料和章节结算自动维护；
+- 普通用户从左侧入口查看、纠正并用人话修改；前台固定分为“这本书现在讲什么、主要人物、世界规矩、现在写到哪里、后面不能忘的事、还没有决定”；
+- 条目状态只显示“已经确定、暂时这样写、还没决定、已被新内容替代”；人物知识只显示“现在知道、还不知道、错误地以为”；
+- “后面不能忘的事”覆盖线索、用户期待画面、人物承诺、读者承诺、当前卷目标和待回归人物；
+- 每条重要记忆可查看大白话来源；AI 推测必须标明未确认，不能静默升级；
+- 局部无冲突小改动可由 Typed Tool 直接执行并告知；与已通过正文或大量后续冲突时，先展示影响和受治理修改方案；
+- 后台 Canon、TruthScope、CharacterKnowledge、PromiseLedger、版本和证据链完整保留，但默认不暴露。
+
+已确认的“AI 任务”合同：
+
+- 中央对话是主要控制面；AI 任务页只负责状态透明、安全兜底、恢复和诊断，不成为第二套手动调度工作台；
+- 用户直接问仓颉“现在到哪了、花了多少、为什么停了、还能恢复吗”时，必须调用真实任务状态源和 Typed Tool，不能从聊天、旧缓存或模型文字猜测；
+- 普通任务页只用“正在做 / 接下来 / 需要你”组织前台信息；关联书名、上次安全保存、有依据的费用估计、已用费用、暂停原因和可恢复动作可以继续显示；内部当前步骤与已完成步骤只能进入脱敏高级详情，不显示虚假百分比和思维链；
+- 安全暂停必须先保存 checkpoint 且可恢复；结束并保留成果只停止后续步骤，不删除或批准未采用成果；放弃成果是单独谨慎操作，不得删除已采用、已通过或已冻结正文；
+- 网络断开、App 挂起、模型繁忙、预算硬上限、重大故事分歧、等待用户、可恢复错误和未知结果对账均使用大白话显示原因、保存位置和下一步；
+- 同一时间只运行一个主要创作任务，其他生成进入队列或在方向冲突时先询问；正文仍只有一个 Writer owner；
+- 中央对话、右侧“这次结果”和左侧“AI 任务”页共享同一任务状态投影，完成、暂停、恢复、失败和采用后必须一致；
+- 高级详情可折叠查看模型/Provider、实际用量、重试、checkpoint、来源、真实工具结果、错误码和脱敏诊断；不得显示完整提示词、API Key、Authorization、Cookie 或思维链。
+
+已确认的“自动研究”合同：
+
+- 研究默认由仓颉在立项、章节规划、正文生成前和审校阶段自动判断触发；用户主动说“查一下”只是额外入口；
+- 固定知识顺序是“本书故事记忆→内置/本地题材知识包→有效缓存研究→必要时自动联网→来源质量与冲突检查→仍不能确认则诚实说明”；
+- 不能只靠 LLM 自报置信度，必须独立检查内容类型、当前覆盖、写错影响、时效性、来源可靠度、冲突和题材污染风险；
+- 题材包带来源、版本和更新时间，区分传统/公开事实、网文约定、不同流派、冲突说法和本书选定规则；题材包不是正典，不得复制其他小说完整版权正文；
+- 用户只说“想写洪荒”时就自动建立或加载题材包，只把真正改变方向的少数冲突交给用户；
+- 用户可关闭联网、限定只用本地资料和设置研究预算；关闭联网后不得偷偷联网；
+- 外部网页、搜索结果、文档和题材包均为不可信参考，不能修改 Agent 权限、系统提示、工具策略或自动获得故事记忆确认写入权。
+
+已确认的“仓颉叙事索引 / 小说版 CodeGraph”合同：
+
+- 建立不可变原文层：导入资料、章节正文、人工改稿、研究资料和授权参考资料保留原始版本、来源、章节/场景/段落、时间和精确证据位置；摘要、向量、抽取、故事记忆和后续修改不得覆盖原文；
+- 首版组合 SQLite FTS5 中文全文检索、轻量向量检索、章节顺序优先层级索引，以及事件、人物状态、人物认知、时间、关系、资源/能力、伏笔/读者承诺和场景/章节结构关系；不能只靠关键词或向量；
+- 查询按任务自适应规划：先当前场景/章节，再相邻章节和当前卷，再相关人物/事件/认知/伏笔/状态，再全书和必要研究资料，并受 token、延迟、费用、风险与覆盖约束；不得固定单一路线或每次全书扫描；
+- 证据不足时自动扩大范围并记录原因；扩大后仍不足就标记“暂时无法确认”，不得用摘要、相似文本或 AI 推测冒充事实；
+- 人物认知、事件、时间因果、能力/物品/数量/资源、伏笔、已通过正文、人工改稿和研究支持等重要结论必须回到不可变原文闭环；LLM 只能提出候选；
+- 索引渐进建立：先原文和基础 FTS5，再后台/按需增量建立章节、场景、人物、事件、认知、状态、伏笔、向量和关系；支持 checkpoint、幂等恢复、覆盖范围与新鲜度显示，不得伪装全书已理解；
+- 上传参考小说只抽取带原文证据的结构、节奏、视角、叙事距离、人物塑造和信息顺序等抽象写法；上传/阅读不等于喜欢，用户确认后才进入本书或跨项目偏好；不得复刻具体表达、长段落、独特桥段、版权正文，不得直接进入故事记忆/正典或改变 Agent 权限；
+- 首版不引入 Neo4j、Qdrant、完整 GraphRAG/LightRAG 服务、重型外部图数据库或云端知识图谱硬依赖。方向已经冻结，代码能力仍按 S3–S6 与 P0/P1 阶段实施，不能写成当前已经完成。
+
+已确认的“上传材料本地优先与联网深度理解授权”合同：
+
+- 上传后自动先做免费、本地、快速基础索引：安全清点、格式识别、不可变原文、基础文本、FTS5、章节/页码/段落定位、文件哈希、重复识别和可用性状态；这个阶段不调用付费模型、不外发材料，原文保存后即可阅读和搜索；
+- 任何联网 LLM、Embedding、OCR、搜索或其他外部 Provider 深度理解，首次必须在执行前显示发送范围、明确不发送什么、Provider/模型、用途、预计费用/区间、预算上限、后续增量许可和外部数据披露，并获得明确授权；
+- 授权只覆盖声明的资料、范围、用途、Provider/模型和预算；任一项实质变化都要重新说明和授权，用户可暂停、撤销或选择只用本地；
+- 授权后按当前任务需要增量处理并保存 cursor、来源版本、发送范围、实际用量、费用和 checkpoint；新增或修改只重算受影响部分；
+- 暂停、断网、App 挂起、未知结果和失败后先对账再幂等恢复，不重复发送、不重复分析整本书、不重复写入或扣费。
+
+已确认的“统一 Evidence Index + 资料类型专用理解器”合同：
+
+- 所有资料共享不可变原文、来源/版本、精确定位、哈希、FTS5/语义候选、增量更新、checkpoint、覆盖状态和证据回链；共享的是证据协议，不是单一理解器；
+- 小说与章节正文进入 `NarrativeIndex`，处理章节顺序、场景、人物状态/认知、事件因果、关系、能力/资源和伏笔承诺；
+- 历史、制度、神话、地理等事实参考进入 `ResearchIndex`，处理来源质量、时间、冲突说法、适用范围和事实证据；
+- 用户自己的设定、笔记、世界观、人物表和项目附件进入 `ProjectMaterialIndex`，区分用户原话、候选设定、已确认约束和未决事项；
+- 用户有权使用的正反样本、个人作品和偏好材料进入 `PreferenceIndex`，只抽取带证据的抽象偏好候选，不能复刻版权表达；
+- 默认自动分类；无法可靠分类且错误会明显影响结果时才问用户。混合 ZIP 按文件分类，同一文件混合用途时按片段分类，同时保持共同原文与定位；同一授权参考小说可按明确用途建立互相隔离的 `NarrativeIndex` 结构分析视图与 `PreferenceIndex` 抽象偏好视图；
+- 所有检索受项目、资料类型、用途、确认状态、工具权限和外发授权共同隔离；参考资料不能自动成为本书设定，参考小说不能进入 `ResearchIndex` 作为事实来源，也不能跨项目、跨用途或越权召回。
+
+已确认的“第一章启动门槛”合同：
+
+- 探索期可随时生成 100–300 字画面、微型试写、候选开场、能力代价和章节结尾，无需先完成完整策划；
+- 完整第一章前只展示一张大白话“我准备这样写”，概括故事感觉、主角处境、本章事件、结尾所得、明确避免和尚未定死内容，不展示制作圣经、`CreativeContract` 或逐字段表单；
+- 点击“就这样开始”，或说“开始写第一章”“你替我决定”“直接写”等语义明确指令都构成授权；未定内容保持可撤销临时假设；
+- 后台总编剧仍形成生产级开篇基础、题材研究、前三章承诺、规则、偏好和未知，并运行计划→研究覆盖→写作→人物知识/连续性/题材纯度/AI 味检查→有限修正→checkpoint；
+- 第一章生成后只标“供你看看”，不自动进入故事记忆“已经确定”；用户通过后才冻结正文并结算人物、世界、线索和下一章。
+
+已确认的 Agent 主导校准与手动编辑合同：
+
+- 普通用户和熟练作者默认都通过“选区/引用 + 大白话 + 仓颉追问或执行”完成校准，不把产品做成编辑器优先；
+- 手动编辑只作为可发现但不打扰的高级/兜底能力，不手改也不能阻塞流程；
+- 一次手动编辑会话自动保存新版本并保留旧 AI 稿，人工文字是当前最高优先级依据，但不自动等于章节通过；
+- 编辑过程中不逐字弹窗；离开编辑、继续修改/生成、审批或启动后续任务前集中做影响分析；已通过正文仍走分支和用户裁决。
+
+已确认的用户偏好代理 / 影子用户与非模型训练合同：
+
+- 对外只称“用户偏好代理 / 影子用户”，内部可使用 `UserPreferenceProxy + BookReaderProxy`；不得承诺“完全像用户的数字分身”、人格复制或永远正确的替身；
+- 首版采用非参数化、基于证据的偏好记忆、检索、候选比较、影子用户预审、真实反馈校准和主动弃权，不训练、微调或蒸馏用户专属模型权重，不做 LoRA；未来只有独立留出集与真实用户抽样证明有效后才评估轻量排序器/偏好模型；
+- 偏好严格分为长期跨项目、本书、当前卷/章节临时意图三层；每条保存原始证据、来源、范围、支持/反证、置信度、版本、可撤销性和“AI 推测 / 用户确认”状态；
+- 学习来源包括明确表达、选择、拒绝诊断、最终通过版本、用户授权参考资料的抽象特征和交互习惯；上传不等于喜欢，阅读不等于喜欢，AI 自己生成的判断或作品不能反向强化成用户金标准；
+- 授权资料只抽取带来源、可解释、可确认/撤销的风格、结构、节奏、人物和叙事特征；禁止复刻具体表达、长段落、独特桥段或版权正文；
+- 用户偏好代理只能预测、排序、预审、建议暂停和在证据不足时弃权，不能替用户正式通过章节、合并故事记忆/正典、覆盖人工文字或决定未授权重大剧情；
+- 连续生成加入章节前计划门、章后独立硬规则/连续性审校、影子用户盲读预审和累计漂移检测；全局故事审校器与影子用户必须隔离；黄色信号缩小领先和生成窗口并提前要反馈，红色信号在安全 checkpoint 暂停；
+- 该架构已经冻结但尚未实现。P0–P5 顺序为事件/证据数据基础→被动画像→影子预审→连续生成防偏→真实反馈校准→留出集有效后评估轻量模型；不得跳过 P0 直接做数字分身演示；
+- 验收必须覆盖接受/拒绝预测、候选排序、校准、合理弃权、漂移漏报/误报、自动化覆盖和真实用户抽样；论文研究只作方法参考，其实验数字不得成为产品承诺。
+
+已确认的模糊拒绝诊断合同：
+
+```text
+这章不对劲 / 我说不上来
+→ 基于对话、已确认偏好、故事记忆和正文内部诊断
+→ 给 2–3 个具体大白话候选原因或画面对比
+→ 一次只问一个最有信息增益、最容易回答的问题
+→ 必要时用 100–300 字可撤销小样验证
+→ 达到可行动清晰度
+→ 先反映理解并展示修改影响范围
+→ 授权后执行完整修改
+```
+
+禁止不满意原因表格、专业分类和未诊断的盲目整章重抽。候选原因始终是可纠正的 AI 推测，只有用户确认后才可成为正式修改依据，不能静默进入确认偏好或故事记忆。
+
+已确认的前三章批准与连续创作授权合同：
+
+- 前三章逐章明确确认；章节结果页以正文阅读器和仓颉对话为主，只保留“就按这版继续 / 和仓颉聊聊”等轻量操作，不做复杂审批表；
+- “可以 / 继续下一章 / 按这个感觉往下写”等明确自然语言与按钮等价；“还行 / 差不多”等含糊肯定不得冻结，只追问一次继续校准还是按此继续；
+- 每章明确通过后按“冻结精确版本→结算故事记忆/人物知识/线索→checkpoint→下一章”执行，任一步没有真实回执都不能显示通过；
+- 第三章通过只获得连续创作申请资格，不自动开始第四章；仓颉先用大白话解释自动推进、费用/预算和分级创作授权机制，只申请一次连续创作授权；
+- 获得授权后默认连续准备 3 章，用户可用人话或设置调整为 1–5 章，首版最多保持 5 章尚未阅读的领先版本；普通章节不再机械逐章询问；
+- 正文严格逐章且同一时间只有一个 Writer owner，每章完成审校、临时故事记忆结算和 checkpoint 后才开始下一章；研究/审校可并行但不能争夺正文写权限；
+- 未读自动章节只标“仓颉准备的版本，等你看”，可作工作上下文但不等于用户确认；前章修改保留旧分支、做影响分析并只重生成受影响内容；
+- “写完这一章暂停”在当前章安全收尾后停；“现在暂停”立即取消当前请求，残缺输出仅作临时内容；恢复必须幂等且不重复扣费；
+- 普通可逆决定直接执行告知，重大变化按类别与范围检查授权，未覆盖时安全暂停，已覆盖时执行后醒目标记；费用、完整性、权限、安全和外部披露硬边界始终优先。
+
+工作台、版本、已确定设定、人物知识、审批、Receipt、Hash、预算、checkpoint、分支和诊断能力继续完整存在，但默认下沉。普通用户只需要说人话、看正文和决定重大事项。
 
 ## Authority order
 
@@ -29,7 +319,7 @@
 - 历史经验与防重复踩坑：`COMPOUNDING_AND_PITFALLS.md`；
 - 补充决策与历史证据：ADRs -> `M0_VALIDATION.md`。
 
-`ROADMAP.md` 已退役；历史检查点中的旧阶段名称不能覆盖当前 S1–S6 规范。
+旧路线文档已退役；历史检查点中的旧阶段名称不能覆盖当前 S1–S6 规范。
 
 ## Current milestone
 
@@ -40,12 +330,18 @@ S1 目标：
 - 首屏直接进入仓颉对话；
 - 全中文、大白话，不要求用户理解写作或工程术语；
 - 左侧独立页面和中心对话状态隔离；
-- 右侧“这次聊出来的内容”默认收起；
+- 横屏单一右侧区域用“仓颉 / 这次结果”标签切换，竖屏使用同名单焦点切换；
+- 横屏 Activity Bar 只显示图标并支持长按说明；
+- 小说图标打开左侧书架，书籍详情只在左侧 push；浏览不自动切换创作上下文；
+- 正文出现后横屏保持约 2/3 阅读器 + 约 1/3 右侧，阅读器可最大化；
+- 普通消息持久化但不制造空书；“这次结果”只呈现真实产物，不复制闲聊；
 - 技术诊断从普通路径移到开发者/高级详情；
 - 现有项目、对话、草稿、数据库、工具回执和恢复能力继续兼容；
 - 横屏、竖屏、键盘、滚动和长内容显示符合 iPad 体验。
 
-当前代码基线仍然是 Build 28 技术候选。Build 26–28 已验证的项目持久化、审批、第一章版本、恢复、安全和 CI 能力作为后续重构的回归护栏。当前固定访谈、审批详情、段落锁定和 Keychain/Candidate Set 诊断页不作为视觉参考。
+当前产品里程碑不是 Build 28。candidate-hardening 的历史 M1 与 Builds 26–28 只保留为工程原型和硬化证据；Build 28 未通过完整真机验收。其项目持久化、审批、第一章版本、恢复、安全和 CI 证据只作为后续重构的回归护栏，当前固定访谈、审批详情、段落锁定和 Keychain/Candidate Set 诊断页不作为视觉参考。
+
+用户偏好代理路线当前状态：产品合同与 P0–P5 架构已经冻结，代码尚未进入 P0。近期只能先建设可追溯的事件/证据数据基础和范围治理；不得把未来轻量模型评估写成首版已实现能力，也不得用演示性“数字分身”绕开真实反馈和权限验证。
 
 TrollStore 一次覆盖后仍可能运行旧进程、第二次覆盖才显示新界面的激活风险暂时搁置但不关闭。Build 28 的运行身份 fail-closed 防护和配对 Probe 证据继续保留；不得把第二次覆盖写成正常安装步骤。该问题不再阻塞 S1 产品驾驶舱设计和实现，但下一次正式真机候选仍需带版本身份验证。
 
@@ -138,21 +434,34 @@ Reset/recovery: how to return to the required starting state
 
 ## Immediate queue
 
-1. 先由用户确认本轮产品定调：第一核心用户、首页、左右区域、对话历史、全屏阅读层和 S1–S6 可见成果。
-2. 定调确认后，以 `PRODUCT_EXPERIENCE_BLUEPRINT.md` 为视觉契约审计现有 SwiftUI shell，列出可复用状态模型、必须替换的默认路径和新增组件。
-3. 按 TDD 实现 S1 驾驶舱：中文欢迎页、中心对话、左侧历史与独立功能页、右侧人话结果、专业字段默认折叠，以及横竖屏/键盘/滚动适配。
-4. 为 S1 验证导航身份、中心状态不重建、右侧确认后消失、长内容可滚动、草稿恢复和术语可见性。
-5. 保留现有 Build 28 工具、数据库、审批、版本和安全能力作为后台回归，不把诊断页继续放在普通用户主路径。
-6. S1 完成后构建一个明确标记为“产品驾驶舱候选”的 IPA，提供页面位置、点击路径、预期文字和外观问题清单，由用户做第一次新方向真机验收。
-7. S1 通过后按顺序推进：S2 真实 Provider 与工具 Agent -> S3 动态灵感挖掘和基础资料 -> S4 自由批注与前三章 -> S5 自动连载 -> S6 质量、增强资料与正式候选。
+1. 继续冻结剩余高影响决定；已确认横竖屏、图标导航、Agent 主导校准、手动编辑次级、人工版本治理、选区语义、修改影响与依赖重连、用户偏好代理/影子用户、三层证据画像、非参数化首版、盲读预审、黄/红漂移治理、模糊拒绝诊断、前三章逐章批准、单次连续创作授权、默认 3 章/可调 1–5 章/最多 5 章未读领先、单 Writer 逐章结算、两种暂停、自动连载分级创作授权、自主权、动态意图、对话与小说关系、“这次结果”、“我的小说”、“故事记忆”、“AI 任务”、自动研究、第一章启动门槛、不可变原文、多层叙事索引、自适应查询、证据扩大、原文闭环、渐进索引、轻量首版边界、上传资料先本地免费基础索引、联网深度理解首次明确授权、授权范围内增量处理、幂等暂停恢复，以及统一 Evidence Index + `NarrativeIndex` / `ResearchIndex` / `ProjectMaterialIndex` / `PreferenceIndex` 专用理解器和严格检索隔离，不得退回旧方案。
+2. 按已冻结路线推进 P0/P1 事件与叙事证据基础：先落统一 Evidence Index 的不可变原文、`SourceSpan`、来源/版本/哈希、免费本地基础 FTS5、章节/页码/段落定位、索引 checkpoint/覆盖状态、`MaterialAnalysisAuthorization`、`MaterialAnalysisCursor` 和费用/外发回执；再落四类资料路由、混合 ZIP 文件/片段分类与项目/类型/用途/确认/权限/外发隔离，并统一采集明确表达、选择、拒绝诊断、最终通过版本、授权参考资料抽象特征和交互习惯；随后接入授权范围内的增量深度理解、轻量向量、人物/事件/认知/状态/伏笔关系和自适应查询。不得跳过本地证据底座直接外发整书、做数字分身或“全书理解”演示，也不得提前引入蒸馏、LoRA、轻量模型、Neo4j、Qdrant 或完整 GraphRAG/LightRAG 服务。
+3. 以 `PRODUCT_EXPERIENCE_BLUEPRINT.md` 为视觉契约审计现有 SwiftUI shell，列出可复用状态模型、必须替换的默认路径和新增组件。
+4. 按 TDD 实现 S1 驾驶舱：中文欢迎页、中心对话、左侧历史与独立书架/详情页、右侧人话结果、专业字段默认折叠，以及横竖屏/键盘/滚动适配。
+5. 为 S1 验证导航身份、中央状态不重建、书架浏览不偷换创作上下文、普通消息不建空书、闲聊不生成结果卡、长内容可滚动、草稿恢复和术语可见性。
+6. 保留现有 Build 28 工具、数据库、审批、版本和安全能力作为后台回归，不把诊断页继续放在普通用户主路径。
+7. S1 完成后构建一个明确标记为“产品驾驶舱候选”的 IPA，提供页面位置、点击路径、预期文字和外观问题清单，由用户做第一次新方向真机验收。
+8. S1 通过后严格按冻结地图推进：S2 完成真实 Provider、命名连接、用户手选模型、中央 Agent Typed Tools/Receipt/强退恢复的无正文最小闭环并通过适用 H0–H3；S3 完成动态意图、一次一个高价值问题、常规规模参考资料抽象学习、偏好证据、作品方向和开篇准备并推进 H4；S4 完成真实正文、选区交流、模糊拒绝诊断、影响预览、版本差异、前三章逐章校准和单独连续创作授权，完成 H4 并进入 H5；S5 正式验收滚动自动连载、最多 5 章未读、重大决定/预算暂停、两种暂停、分支影响、百万字叙事索引、大型参考小说分阶段分析及完整 H5；S6 完成全格式与百万字资料、质量、干净正文导出、无凭证备份恢复、无障碍、性能、迁移、安全审计和正式候选。P5 仅在留出集和真实用户抽样证明净收益后评估，不是首版硬承诺。
 
 ## Change log
+
+### 2026-07-19 stage and acceptance map freeze
+
+The user froze `CJ-PX-007`: S0–S6 are the user-visible product stages, H0–H5 are sequential Harness gates, and the real milestone remains **S1 Agent 驾驶舱定调与重构**. Historical candidate-hardening M1/Builds 26–28 remain engineering evidence only; Build 28 is not accepted. S2–S6 now have explicit capability and million-character boundaries, exact Harness mappings, and evidence-bound candidate acceptance. This documentation update does not implement a later stage, create an IPA, or change `ARCHITECTURE_SOURCE_REGISTER.md`.
+
+### 2026-07-19 background/offline/recovery/notification decision freeze
+
+The user froze `CJ-PX-006`: lifecycle barriers persist draft/task/request/stream/usage/checkpoint evidence; iPadOS 16.6.1 background limits are stated honestly; recovery distinguishes five outcomes and reconciles unknown requests without new creative cost; offline-local work remains available while new offline AI requests await user confirmation; partial streams stay outside formal story state; notifications are contextual and optional; task UI uses three plain-language labels; Writer, pause, and manual Provider recovery rules remain unchanged. This does not move the project beyond **S1 Agent 驾驶舱定调与重构** and does not claim S2/H4 implementation or device acceptance.
+
+### 2026-07-19 no-key and file-lifecycle decision freeze
+
+The user confirmed two product contracts. First, CangJie remains locally usable without an API key and asks for a concrete Provider only on the first AI-dependent request; the original intent is persisted and resumed after explicit model selection, with manual recovery only. Second, the UI separates `添加资料`, `导出小说`, and `备份项目` with distinct safety, content, credential-exclusion, restore, and device-loss semantics. Both are documentation-level frozen requirements, do not change the real S1 milestone, and do not claim S2/S3/S6 implementation completion.
 
 ### 2026-07-18 普通用户优先的产品重新定调
 
 用户明确指出当前技术原型仍然假设使用者具备专业写作表达能力：固定访谈、必填拒绝原因、按段落锁定、审批工程字段和工作台式操作，把后台小说治理错误地暴露给了普通读者。新的权威定位是“给不会写小说的人使用的小说实现 Agent”：用户只提供念头、阅读反馈和重大决定，仓颉负责主动追问、建议、操作软件和调度生产级小说工程。
 
-本次重写 `IMPLEMENTATION_PLAN.md`，新增 `PRODUCT_EXPERIENCE_BLUEPRINT.md` 和 `MILESTONE_VISUAL_ACCEPTANCE.md`。旧技术能力不删除，但重新分层：中心仓颉对话为唯一必经入口；左侧进入独立页面；右侧展示本次对话产物；专业术语和治理详情默认隐藏；正文改为连续阅读和任意选字批注；“喜欢”与“原样保留”分离；无理由拒绝可以直接启动动态诊断。
+本次重写 `IMPLEMENTATION_PLAN.md`，新增 `PRODUCT_EXPERIENCE_BLUEPRINT.md` 和 `MILESTONE_VISUAL_ACCEPTANCE.md`。旧技术能力不删除，但重新分层：中心仓颉对话为唯一必经入口；左侧进入独立页面；右侧展示本次对话产物；专业术语和治理详情默认隐藏；正文改为连续阅读和任意选字反馈；选区、软反馈与明确硬锁定分离；无理由拒绝可以直接启动动态诊断。
 
 当前里程碑改为 S1 Agent 驾驶舱定调与重构。Build 28 安装激活风险被记录为暂时搁置而非解决；后续候选仍需运行身份验证，但产品开发不再围绕诊断页面继续扩张。
 
@@ -506,4 +815,353 @@ Historical device gate — executed on 2026-07-18 and superseded by the observed
 
 The ordinary-reader Agent-first rebaseline is now documented in `IMPLEMENTATION_PLAN.md`, `PRODUCT_EXPERIENCE_BLUEPRINT.md`, and `MILESTONE_VISUAL_ACCEPTANCE.md`. An independent read-only review found and this slice closed four contract defects before S1 implementation: a first-install `Continue last time` dead shortcut, inconsistent S3 exit criteria, intermediate-stage navigation entries without capability gates, and a right-drawer state-name mismatch. The S5 visible task example now explains character-information and timeline checks in ordinary language instead of exposing `CharacterKnowledge` terminology. A second ordinary-user review also closed two remaining ambiguities: S1 now persists messages with an explicit interface-preview receipt instead of pretending a real Agent exists, and S6 now carries the first-release non-goal list beside its acceptance contract.
 
-Current implementation gate remains unchanged: do not begin the S1 SwiftUI rewrite until the user confirms the product tone, default cockpit, navigation behavior, full-screen reading model, free-selection feedback model, and staged visible deliverables. Run-29 remains a partially accepted technical candidate with the single-overwrite activation defect deferred but not closed.
+## 2026-07-18 responsive workspace and feedback decision freeze
+
+The user confirmed the product tone and the responsive workspace contract for the next implementation baseline:
+
+1. Landscape uses one right-hand region with “仓颉 / 这次结果” tabs; there is no fourth column.
+2. The left Activity Bar is icon-only, and long press explains each icon's name and purpose.
+3. Landscape reading uses about two-thirds of the width and the right region about one-third; panels can close and reopen, and the reader can maximize.
+4. Portrait uses single-focus “阅读 / 仓颉 / 这次结果” switching.
+5. The primary text-feedback path is selection → ask CangJie → automatically bound quote context → local preview when understood → dynamic questioning only when needed.
+6. Superseded on 2026-07-18. The current authority is `复制 | 问仓颉 | 更多`; selection is only a discussion focus/edit-analysis start, soft feedback stays under More, and only an explicit command creates a hard text lock.
+7. The visual direction is CangJie's own restrained, quiet, modern warm-neutral system with warm-orange accents; the previous paper-ink/vermilion direction is retired.
+
+These decisions are now authoritative for S1/S4 documentation. They simplify the surface only; typed tools, exact version binding, approvals, canon, character knowledge, branches, checkpoints, budgets, idempotency, recovery and security remain mandatory.
+
+## 2026-07-18 Agent autonomy and approval decision freeze
+
+The user approved “关键事情问我” as the default autonomy mode. Safe and reversible daily actions execute without confirmation spam and report afterward; chapter text and important creative direction are shown as reviewable results before commitment; major irreversible changes, destructive deletion, new external data disclosure, and budget overruns pause for a plain-language decision. The first three chapters retain chapter-by-chapter calibration before higher automation is unlocked. Alternative user preferences may change interruption frequency but never bypass security, budget, permission, exact-version, or external-service gates.
+
+This decision is authoritative for later Agent tooling, approval UX, S2, S4 and S5 acceptance, but it does not mean every remaining product question is closed. SwiftUI implementation remains outside this documentation-only slice. Run-29 remains a partially accepted technical candidate with the single-overwrite activation defect deferred but not closed.
+
+## 2026-07-18 dynamic-intent-loop decision freeze
+
+The user confirmed a dynamic visible loop rather than a fixed interview: understand a little, do a little, let the user see something, then update understanding. Ask one easy, decision-changing question at a time; normally show a concrete image, sample or candidate after roughly 2–4 high-value questions without hard-coding the count. Use scenes, contrasts, reading experience, reverse exclusion or a reversible temporary choice when the user does not know. Persist user words, confirmed decisions, AI hypotheses and critical unknowns separately, and stop questioning when action is possible or further questions have low value.
+
+## 2026-07-18 conversation-to-novel decision freeze
+
+All conversations persist from the first message, but ordinary conversation does not create empty novels. CangJie creates and links a novel without a form only when the user clearly continues, a first durable result exists, story memory is needed, or prose generation begins. One novel may link many conversations; one conversation has one primary novel context at a time. A distinct new-book idea must be isolated before it can affect the current novel.
+
+## 2026-07-18 current-results artifact-contract decision freeze
+
+“This time's results” is a projection of useful conversational products, not chat duplication or a technical log. Only readable, adoptable, editable, executable or durable products appear. Ordinary questions do not create cards. A finite plain-language status vocabulary is mandatory, conversation commands can adopt/open/remove/summarize results, and Typed Tools file adopted content into the correct domain location while preserving traceability.
+
+## 2026-07-18 novel-shelf interaction decision freeze
+
+The novel icon opens a left-side shelf: landscape changes only the left region and portrait uses an overlay. Shelf rows contain only title, plain-language progress and recent time; unnamed ideas may receive a temporary CangJie title. Selecting a book pushes a returnable left-side detail page with Continue Creating, Open Prose, progress, recent results, related conversations and book-capability entries, without technical project fields. Browsing or reading another book never silently changes the active creation context; binding occurs only through Continue Creating, asking CangJie from that book's prose, continuing a related conversation, or an explicit switch, followed by a plain-language notice.
+
+## 2026-07-18 story-memory product-contract decision freeze
+
+The user confirmed that Story Memory is an Agent-maintained, plain-language projection rather than a settings form. CangJie derives it from conversations, adopted results, approved prose, user edits, adopted research and chapter settlement. The ordinary surface uses six fixed groups, four plain-language statuses, and “现在知道 / 还不知道 / 错误地以为” for character knowledge; important entries expose a plain-language source and AI hypotheses remain visibly unconfirmed. “后面不能忘的事” covers clues, desired future scenes, character and reader promises, current-volume goals and characters who must return. Safe non-conflicting corrections may execute and report; changes that conflict with approved prose or substantial downstream work require an impact explanation and governed proposal first. Canon, TruthScope, CharacterKnowledge, PromiseLedger, version evidence and impact analysis remain intact backstage and hidden by default.
+
+## 2026-07-18 AI-task transparency and recovery decision freeze
+
+The user confirmed that the center CangJie conversation remains the primary control plane while the AI Tasks page exists for transparent status, safe fallback, recovery and diagnostics. Every status answer must read the transactional task source rather than infer from chat or model text. The ordinary page organizes user-facing progress only as `正在做 / 接下来 / 需要你`, then shows the real book, last safe checkpoint, evidence-based estimated and actual cost, pause reason and available recovery actions; internal current/completed pipeline steps are available only in redacted advanced details, with no fabricated percentage or chain of thought. Safe pause, stop while keeping unadopted results, and discard unadopted results are separate operations with separate permissions and retention state; discard cannot remove adopted or approved prose. Network loss, app suspension, provider load, budget limits, major story decisions, recoverable errors and unknown outcomes use plain-language reasons. One primary creative task runs at a time, other work queues or asks first, and conversation, Current Results and AI Tasks share one status projection. 高级详情 remain folded, truthful and redacted, and never expose prompts, credentials or chain of thought.
+
+## 2026-07-18 automatic-research decision freeze
+
+The user confirmed that research is proactive evidence work, not a user-operated search box. CangJie assesses knowledge gaps at project formation, chapter planning, pre-draft and review stages, then follows Story Memory, local topic pack, valid cache, necessary online research, and source/conflict checks in that order. Triggering must independently consider content type, coverage, impact, freshness, source quality, conflict and genre-contamination risk rather than trust model confidence. Topic packs are sourced, versioned references that distinguish public facts, genre conventions, schools, conflicts and book-selected rules; they are not canon and cannot contain complete copyrighted novels. A Honghuang idea automatically receives a topic pack and only direction-changing disputes reach the user. Offline-only, local-only and research-budget controls are binding. External material remains untrusted data with no authority over Agent permissions, prompts, tools or confirmed Story Memory.
+
+## 2026-07-18 first-chapter-start-threshold decision freeze
+
+The user confirmed that reversible 100–300 character scenes, micro-samples, opening candidates, ability costs and chapter-ending candidates may be generated during exploration without complete planning. Before a full Chapter 1, the ordinary surface shows one plain-language “我准备这样写” result covering tone, protagonist situation, chapter event, ending payoff, explicit avoidances and unresolved items. “就这样开始” and clear natural-language commands such as “开始写第一章”, “你替我决定” and “直接写” are equivalent authorization; unresolved choices remain reversible temporary assumptions. The backstage Showrunner still creates a production-grade opening basis and runs plan, research coverage, drafting, character-knowledge, continuity, genre-purity, AI-style, bounded-revision and checkpoint stages. Generated Chapter 1 is only “供你看看”; approval is required before prose freezes and character, world, clue and next-chapter settlement occurs.
+
+## 2026-07-18 selection-semantics and edit-impact decision freeze
+
+The user confirmed that the first-level selection menu is `复制 | 问仓颉 | 更多`; “原样保留” is retired from the first-level path. A selection is only the current discussion focus and the starting point for edit analysis. It does not itself mean like, dislike, problem, preservation or hard lock, and it cannot confirm why the user likes something. More may offer the soft signals “这段我喜欢”, “这个感觉别丢”, “只讨论这段” and “标记为问题”. Only the explicit “锁定文字不变” action or an unambiguous instruction such as “这句一个字都不要动” creates an exact version-bound hard lock. CangJie may propose a correctable hypothesis about the user's preference, but the user can reject or rewrite it and it must never masquerade as confirmed preference.
+
+The user also confirmed that a selection is an edit starting point, not the final impact boundary. Before changing prose, CangJie must show a plain-language impact preview across sentence/paragraph, scene, chapter and ending, downstream chapters, approved prose, user-authored edits, hard locks, Story Memory and plans. When the real dependency scope expands, the ordinary choices are “连带改顺后面 / 只改这里但可能不连贯 / 另建版本试试 / 先别改”. Unapproved working content may be selectively regenerated. Approved prose must keep its old version and move through a user-decided branch; user-authored edits outrank stale generated prose. Execution reconnects dependencies in order and then rechecks character knowledge, time, causality, clues/reader promises and genre rules. “只讨论这段” limits conversation focus only and never hides real dependencies.
+
+## 2026-07-18 agent-first-calibration and secondary-manual-edit decision freeze
+
+The user confirmed that both ordinary users and experienced authors default to selection/reference plus plain-language conversation and Agent-executed revision. Manual editing is discoverable but secondary and never required. A manual-edit session creates a new version, preserves the prior AI draft and makes human text the current highest-priority source without approving the chapter. Impact analysis is deferred until leaving edit mode or starting revision, generation, approval or later work, rather than interrupting every keystroke.
+
+## 2026-07-18 reference-profile and interaction-learning decision freeze
+
+The user confirmed two governed learning paths: sourced, abstract and revocable reference profiles extracted only from material the user is authorized to use; and gradual interaction-preference memory with separate one-time, book and cross-project scopes plus separate AI-hypothesized and user-confirmed states. Neither path trains or fine-tunes Provider model weights. The first release uses local reviewable memory, retrieval and ContextCompiler assembly, and must not reproduce copyrighted expression or imply that uploads train a personal model.
+
+## 2026-07-18 ambiguous-rejection diagnosis decision freeze
+
+The user confirmed that “this chapter feels wrong / I cannot explain why” starts diagnosis rather than a professional reason form or blind full-chapter redraw. CangJie reads the conversation, confirmed preferences, Story Memory and prose, proposes two or three concrete plain-language hypotheses or scene contrasts, asks one highest-information easy question at a time, and may use a reversible 100–300-character sample. Once actionable clarity is reached, it reflects the current understanding, previews the real edit impact and only then performs the authorized revision. Diagnostic candidates remain AI hypotheses until the user confirms them.
+
+## 2026-07-18 three-chapter approval and continuous-creation authorization decision freeze
+
+The user confirmed chapter-by-chapter approval for the first three chapters without making a complex approval form the primary surface. The reader and CangJie conversation expose lightweight “就按这版继续 / 和仓颉聊聊” actions, while explicit natural language such as “可以”, “继续下一章” and “按这个感觉往下写” is equivalent approval. Ambiguous praise such as “还行 / 差不多” requires one clarification and cannot freeze prose. Each approved chapter must bind and freeze the exact version, settle Story Memory, character knowledge, clues/promises, checkpoint, and only then unlock the next chapter. Chapter 3 approval does not start serial generation: CangJie explains automation, cost/budget and graded creative delegation, requests one continuous-creation authorization, and after authorization stops asking mechanically after every ordinary chapter.
+
+## 2026-07-18 graded-creative-delegation decision freeze
+
+The user confirmed graded creative delegation for continuous creation. CangJie directly executes and reports ordinary, reversible decisions that do not change the book's direction. Major changes—including the protagonist's core goal, an important character's death, permanent betrayal or complete corruption, core relationships, hard world or ability rules, main plot, volume plan and ending promises—must first resolve a versioned grant by decision category and novel/volume/chapter scope. A covered decision may execute but requires a conspicuous notice with the actual choice, affected content and grant provenance. An uncovered decision must pause before a safe checkpoint and show a plain-language card with the reason, impact, two or three concrete directions, CangJie's recommendation and one easy question; it cannot throw an empty decision at the user. Users may inspect, grant, narrow and revoke delegation in natural language, and one decision never implies permanent authority. Cost hard limits, task integrity, permissions, safety, external-data disclosure and version/idempotency/checkpoint governance are non-delegable in every autonomy mode.
+
+## 2026-07-18 continuous-generation sequencing decision freeze
+
+The user confirmed that continuous creation defaults to three prepared chapters, is adjustable in plain language or settings from one to five, and may keep at most five unread leading versions in the first release. Prose generation is strictly chapter-ordered with one Writer owner: a chapter must finish review, temporary Story Memory settlement and checkpoint before the next chapter starts; research and read-only review may run in parallel only when they cannot acquire prose-write ownership. Unread chapters are labeled “仓颉准备的版本，等你看”, may serve as working context and never count as user-confirmed truth. Earlier-chapter changes preserve the old branch, run impact analysis and selectively regenerate affected work. “写完这一章暂停” finishes and checkpoints the current chapter before stopping; “现在暂停” cancels the current request and keeps incomplete output only as temporary material. Resume is idempotent and must not duplicate generation, tool effects or charges.
+
+## 2026-07-18 user-preference-proxy and shadow-reader decision freeze
+
+The user confirmed the user-preference-proxy / shadow-user architecture. Public language must not promise a fully distilled digital clone; internal components may be named `UserPreferenceProxy` and `BookReaderProxy`. The first release is non-parametric and evidence-based: scoped preference memory, retrieval, candidate ranking, blind shadow review, calibration from real user feedback and explicit abstention. It does not train, fine-tune, distill or LoRA-adapt user-specific weights. Long-term cross-project preferences, book preferences and current-volume/chapter intent are strictly separated, and each record carries original evidence, support/counterevidence, scope, confidence, version, revocability and confirmation state. Uploading or reading material is not evidence of liking it, AI-generated judgments cannot become self-reinforcing gold labels, and copyrighted expression must not be reproduced.
+
+The proxy may predict, rank, review, abstain and recommend a pause; it cannot approve chapters, merge Story Memory/canon, write prose or decide unauthorized major plot changes. Continuous creation adds a pre-chapter plan gate, independent hard-rule/continuity review, a blind `BookReaderProxy` review, cumulative drift detection, a yellow reduced-window response and a red checkpoint pause. P0–P5 are now frozen as evidence foundation, passive profile, shadow review, continuous-generation integration, calibration, and only then optional lightweight-model evaluation after held-out and real-user evidence. Acceptance covers accept/reject prediction, ranking, calibration, abstention quality, drift false negatives/positives, automation and real-user sampling. Research papers supply methods only; their experimental figures are not product promises.
+## 2026-07-18 narrative-index and novel-codegraph decision freeze
+
+The user formally confirmed the “仓颉叙事索引 / 小说版 CodeGraph” direction. This is a local, explainable narrative-evidence architecture rather than a generic GraphRAG product. Its immutable source layer preserves imported material, chapter prose, user edits, research and authorized references with source/version/span provenance; summaries, embeddings, extractions and later revisions may point to that layer but never replace it. The first-release retrieval stack combines SQLite FTS5, lightweight vector similarity, chapter-order-first hierarchy and structured novel relations for events, character state and knowledge, time, relationships, resources/abilities, foreshadowing/promises and scene/chapter dependencies.
+
+Queries are planned adaptively by task, risk, token, latency, cost and index coverage. They start locally, expand through adjacent narrative order and relevant domain relations, then reach the full book and necessary research only when evidence remains insufficient. Every expansion is auditable; unresolved questions must abstain rather than guess. High-impact conclusions return to immutable source spans, and an LLM may propose but cannot close the evidence loop alone. Indexing is progressive and resumable: source plus basic FTS5 first, then incremental structural/vector/relationship extraction with checkpoint, idempotency, coverage and freshness reporting. An incomplete index must never be presented as complete-book understanding.
+
+Authorized reference novels support only sourced abstract traits such as structure, pacing, viewpoint, narrative distance, characterization and information order. Uploading or reading is not liking; a trait enters book or cross-project preference only after user confirmation. Distinctive wording, long passages, unique plot devices and copyrighted prose may not be reproduced, and reference material has no Story Memory/canon or Agent-permission authority. The first release explicitly stays with SQLite/GRDB, FTS5, lightweight local vectors, structured relationship tables and `ContextCompiler`; it does not introduce Neo4j, Qdrant, a complete GraphRAG/LightRAG service, a heavy external graph database or a cloud-knowledge-graph dependency.
+
+Status boundary: the product and architecture contract is frozen; implementation remains staged work, not a completed capability claim.
+
+Still-unfrozen implementation choices: embedding model/provider and offline fallback; Chinese FTS5 tokenizer/segmentation; lightweight vector storage and ANN strategy; exact subtypes and classifier thresholds inside the four frozen material classes; model binding within each specialized indexer; query-plan scoring and budget algorithm; index scheduling and freshness priorities; exact `ReferenceProfileTrait` schema; authorization default lifetime and revocation behavior for already-derived remote results; future criteria for reevaluating external graph/vector components; and whether/when a lightweight preference model earns P5 evaluation.
+
+## 2026-07-18 local-first material indexing, authorization and evidence-index routing decision freeze
+
+The user confirmed that every uploaded material first receives a free, local and fast basic index. This stage preserves immutable source, extracts available text, builds basic FTS5 and chapter/page/paragraph positions, records hashes, duplicates and usability, and never calls a paid model or sends content to an external Provider. Readability and local search must not wait for whole-book deep analysis.
+
+The first networked deep-understanding operation must disclose the exact file/chapter/page/span or sample scope, what is excluded, Provider/model, purpose, expected cost or range, budget ceiling, subsequent incremental permission and external-data exposure, then obtain explicit user authorization. Authorization is purpose-, scope-, Provider/model- and budget-bound; material expansion or a material change to any bound requires new authorization. After authorization, CangJie processes only the current-task or changed range, stores cursor/source version/disclosure scope/usage/cost/checkpoint, and resumes idempotently after pause, disconnect, suspension, crash or unknown result without resending, reanalyzing the whole book or charging twice.
+
+The previously reserved Evidence Index direction is now formally frozen. All material types share immutable source, provenance/version/span location, hash, full-text and semantic candidate retrieval, incremental update, checkpoint, coverage and evidence backlink contracts, while specialized understanding and query planning remain type-specific: novels use `NarrativeIndex`; factual references use `ResearchIndex`; user-owned project notes and settings use `ProjectMaterialIndex`; positive/negative examples and preference evidence use `PreferenceIndex`. Classification is automatic where reliable, asks the user only when uncertainty matters, and splits mixed ZIPs by file or mixed documents by span. The same authorized reference novel may expose purpose-isolated `NarrativeIndex` structure and `PreferenceIndex` abstract-preference views over one immutable source, without sharing confirmation or adoption state. Retrieval is isolated by project, material type, purpose, confirmation state, tool permission and external-disclosure authorization. Reference material never becomes book setting automatically, and reference fiction never enters `ResearchIndex` as factual evidence.
+
+Status boundary: these contracts are frozen architecture and acceptance requirements, but code implementation remains staged work. Do not claim the four indexers, classifier or authorization flow are already present until their milestone evidence passes.
+## 2026-07-18 Harness contract supplement
+
+This is a documentation correction based on the complete approved history in 1.md. It is part of the current S1/H0-H5 baseline and is not an implementation-complete claim.
+
+### Driver Cockpit Snapshot
+
+每次模型接手任务时，仓颉会给它一份精简的“驾驶舱状态”，例如：
+
+```text
+你是仓颉，一款网络小说创作Agent。
+当前用户正在使用iPad版仓颉。
+
+当前所在位置：
+仓颉对话
+
+当前项目：
+《暂定名》
+类型：洪荒流
+状态：正在讨论开篇
+已经确认：主角是先天人族
+尚未确认：主角初始目标
+正在运行的任务：无
+等待用户确认的结果：1项
+
+你可以使用：
+创建和查看小说项目
+读取项目资料
+整理用户已经确认的想法
+搜索资料
+创建待审阅设定
+生成章节计划
+开始、暂停和继续创作
+查看任务进度
+展示正文和本次结果
+导出小说
+
+你不能：
+读取API Key原文
+绕过用户确认修改已通过正文
+把参考小说当成当前书的事实
+绕过费用上限
+直接删除不可恢复数据
+```
+
+它不需要接收整个数据库，只需要接收：
+
+```text
+当前任务真正需要的状态
+可用工具
+当前权限
+仍未解决的问题
+相关故事记忆
+```
+
+这样模型才会知道：
+
+```text
+自己是谁
+当前在哪
+现在正在做什么
+已经做到了哪里
+接下来能做什么
+什么事情不能自己决定
+```
+
+---
+
+The snapshot is compiled by the Harness and is not a second source of truth. Provider/model, capability, permission, budget, disclosure and version bindings remain explicit and auditable.
+
+### Capability modes and permission boundary
+
+The runtime must expose complete driving, restricted driving and writing-only modes based on capability evidence. Typed Tools enforce the five permission levels; a model can propose an action, but only the host can commit it.
+
+### Approved rejection example
+
+例如模型错误调用：
+
+```text
+generation.start
+```
+
+但当前还没有通过前三章，工具层应直接返回：
+
+```text
+拒绝执行
+原因：前三章校准尚未完成
+当前状态：第一章等待用户确认
+可以执行：打开第一章、继续讨论、创建新版本
+```
+
+模型再向用户解释：
+
+> 现在还不能开始连续创作，因为第一章还在等你确认。我可以先把第一章打开，或者根据你刚才的意见再调整一次。
+
+因此：
+
+> **模型可以提出行动，但最终执行权属于仓颉工具和状态机。**
+
+驾驶员即使操作失误，高达自身的安全系统也会阻止它撞墙。
+
+---
+
+The real milestone remains **S1: Agent cockpit direction and refactor**. H0-H5 are architecture gates awaiting implementation and acceptance.
+
+## 2026-07-19 S1 multi-conversation workspace slice evidence
+
+Status boundary: this is an **implementation slice inside S1**, not completion of S1. S2 has not started; no Provider, model, Tool Call, Agent Loop, formal prose generation, H0-H5 gate completion, IPA acceptance, or physical-device acceptance is claimed.
+
+Implemented behavior in this slice:
+
+- App initialization and foreground recovery use the read-only `restoreS1ConversationWorkspace()` projection. The durable `s1WorkspaceState.selectedConversationID` is the current selection; `updatedAt` ordering is only history ordering and never silently chooses the active conversation.
+- `selectedConversationID == nil` is a real unsent-new-conversation state. Selecting “新对话” preserves its draft in `unboundDraft` and creates no empty `Conversation`, `NovelProject`, Agent run, Artifact, Approval, Chapter, receipt, usage record, or model request.
+- Each bound Conversation has an independent `s1ConversationDraft`. Switching among existing Conversations and the unsent new-conversation state restores the matching messages and draft without writing the newly displayed draft back into the previous Conversation.
+- First send validates the message and atomically creates the Conversation, inserts the user message and exact fixed receipt, derives the history title, persists the selection, clears only the consumed unbound draft, updates the monotonic Conversation timestamp, and returns the complete Workspace snapshot. A failure rolls all of those effects back together.
+- Sending in an existing Conversation clears only that Conversation's draft. It does not clear a separately preserved unsent new-conversation draft.
+- Delayed autosave and checkpoint writes carry the expected Conversation selection and fail closed if durable selection changed before the write boundary.
+- S1 checkpoints now bind `scopeKey` and optional `conversationID`. The same payload in `s1:new` and `s1:conversation:<UUID>` cannot be mistaken for the same checkpoint, while checkpoint sequence remains monotonic within the durable task.
+- The retired `draft(id='m0')` slot remains a compatibility mirror only. Workspace tables are the S1 truth source and UI restoration never reads `m0` to decide the selected Conversation.
+- The left rail now shows the real Conversation history, a “新对话” action, title, updated time, durable current-selection highlight, and Conversation switching. `Novel Projects` still pushes inside the left rail's independent `NavigationStack`; it does not replace or recreate the central conversation view.
+- The exact honest receipt remains: `界面预览版：这句话已保存。当前只验证界面和导航，真正的模型对话从 S2 接入。` It proves local persistence only and must not be presented as model understanding or Agent execution.
+- Draft autosave remains lifecycle- and Build-Activation-governed, rejects content beyond 65,536 UTF-8 bytes at the database boundary, and preserves the last recoverable draft on failure. Sent messages remain limited to 32,768 UTF-8 bytes; unsafe directional controls are rejected and multiline display projection prevents forged role-label presentation.
+
+Post-review integrity closure on 2026-07-19:
+
+- Legacy `saveDraft` and `checkpointDraft` now update only the retired `m0` compatibility surface. They cannot infer the active Conversation or write `s1WorkspaceState` / `s1ConversationDraft`; all S1 writes must enter through the selection-bound scoped APIs.
+- Checkpoint decoding rejects malformed non-empty Conversation identifiers, unknown scope keys, and any `s1:conversation:<UUID>` / `conversationID` mismatch instead of silently degrading identity to `nil`.
+- The checkpoint-to-Conversation foreign key uses delete restriction rather than `SET NULL`, and an additive retention trigger protects databases that may already have applied the earlier migration shape. A retained checkpoint therefore cannot lose its audit identity when a Conversation deletion is attempted.
+- Regression coverage now includes legacy mirror isolation, malformed and mismatched checkpoint identity, restricted Conversation deletion, and ViewModel selection failure preserving the complete visible Workspace state.
+
+Verification recorded on Windows on 2026-07-19:
+
+- `swift test --enable-code-coverage`: 70 tests, 0 failures.
+- `S1ConversationPreviewTests`: 10 tests, 0 failures inside the full SwiftPM run.
+- Windows `CangJieCore` executable coverage: 2,370 / 2,427 lines = 97.6514%; 500 / 512 functions = 97.6563%; 912 / 956 regions = 95.3975%.
+- `swiftc -frontend -parse` passed for the changed App, App XCTest, and XCUITest Swift files.
+- `git diff --check` passed. Focused scans of touched files found no BOM, U+FFFD, three-question-mark corruption run, CRLF drift, credential pattern, tracked database, IPA, signing material, or coverage artifact.
+- SwiftPM still reports the pre-existing non-test warning that it cannot create `.build\debug` as a symbolic link on this Windows filesystem.
+- Windows cannot type-check the iOS/SwiftUI/GRDB app target or execute App XCTest/XCUITest. The new migration, runtime UI behavior, IPA packaging, and physical-device behavior therefore remain unverified until the later exact-candidate Apple build and S1 device gate.
+
+No commit, push, remote CI run or milestone-complete claim was made by this slice.
+
+## 2026-07-19 S1 left-rail novel shelf and checkpoint-retention closure
+
+Status boundary: this closes another implementation slice inside S1 only. It does not start S2 and does not claim Provider/model integration, a Typed Tool model loop, formal prose generation, H0-H5 completion, an IPA candidate, Xcode execution, or physical-device acceptance.
+
+Implemented and reviewed behavior:
+
+- `Novel Projects` pushes a dedicated shelf page inside the left region's independent `NavigationStack`; selecting a persisted novel pushes a left-region detail page and both levels provide an explicit back action. The center Conversation, current selection, visible messages, and scoped draft remain mounted and unchanged.
+- For `persisted-novel-shelf` specifically, the empty shelf creates no placeholder project, while the debug-only, explicitly requested non-empty-shelf fixture seeds a real Conversation, exact S1 preview receipt, scoped draft, and `NovelProject` through production persistence APIs.
+- `CANGJIE_UI_TEST_FIXTURE=persisted-novel-shelf` is recognized only in `#if DEBUG`; an absent fixture leaves normal startup untouched. An unknown fixture, or any requested fixture with a missing or malformed `CANGJIE_UI_TEST_DATABASE_SCOPE`, fails closed into the unavailable-state ViewModel and cannot fall back to the normal application database.
+- Legacy `checkpointDraft` deduplication now compares payloads only inside `legacy:m0`; an identical payload already present in `s1:new` or `s1:conversation:<UUID>` cannot be reused as a legacy checkpoint. Sequence allocation remains monotonic for the task.
+- A realistic previous-database fixture proves the incremental retention migration against an already-applied `s1-checkpoint-scope-v1` schema whose foreign key still uses `ON DELETE SET NULL`. Opening the database installs the additive delete-restriction trigger and preserves checkpoint scope and Conversation identity. This is migration-compatibility evidence, not evidence that a production writer created the legacy database state.
+- If the old `SET NULL` behavior has already produced `scopeKey=s1:conversation:<UUID>` with `conversationID=NULL`, migration throws `AppDatabaseError.invalidCheckpointScope`. The migration identifier is not committed, the checkpoint is neither repaired nor deleted, and the original damaged record remains available for a later explicit recovery path.
+- Review found and corrected accidental ASCII-question-mark corruption in the new Chinese UI fixture before closure. A changed-file corruption scan now guards the slice.
+
+Verification recorded on Windows on 2026-07-19:
+
+- `swiftc -frontend -parse` passed for the combined changed App, App XCTest, and XCUITest Swift set.
+- `swift test --enable-code-coverage`: 70 tests, 0 failures.
+- `git diff --check`: passed.
+- Changed-file scan: no BOM, U+FFFD, CRLF drift, run of four ASCII question marks, credential pattern, or newly modified database/IPA/signing artifact.
+- The repository still contains pre-existing mixed-line-ending/BOM files and historical artifacts under `artifacts/`; they were reported but not normalized, overwritten, or deleted by this slice.
+- Windows cannot type-check the iOS/SwiftUI/GRDB App target or run App XCTest/XCUITest. The migration and non-empty shelf UI tests still require the later exact Apple/Xcode candidate gate; this is not yet a reason to request physical-device installation.
+
+No commit, push, remote CI run, or milestone-complete claim was made.
+
+## 2026-07-19 S1 Activity Bar and truthful capability projection slice
+
+Status boundary: this closes an additional implementation slice inside **S1 Agent 驾驶舱定调与重构** only. It does not start S2 and does not claim Provider/model integration, a Typed Tool model loop, formal prose generation, H0-H5 completion, an IPA candidate, Xcode execution, or physical-device acceptance.
+
+Implemented behavior:
+
+- A narrow icon-only Activity Bar now projects exactly the S1 capabilities that are real and useful: `仓颉`, `我的小说`, `AI 任务`, and `设置`, in a stable order defined by `S1ActivityBarContract`. `阅读与修改`, `故事记忆`, `资料`, device diagnostics, build identity, and other unavailable or internal surfaces remain hidden.
+- Every visible Activity Bar item exposes a Chinese accessibility label, a plain-language purpose hint, a selected/unselected value, and a long-press explanation. Navigation selection belongs to the left navigation surface only; the center Conversation remains mounted as a sibling and retains its selected Conversation, messages, and scoped draft while left pages change.
+- `我的小说` and its detail page stay inside the left region's navigation stack. `AI 任务` presents a truthful S1 empty state rather than simulated work. `设置` contains only a real persisted `显示更新时间` setting, and the setting changes both the visible timestamp projection and the VoiceOver label.
+- The ordinary right-side control is named `显示这次结果 / 收起这次结果`. Its S1 empty state explains that no real model result exists yet and no longer exposes `Artifact`, `Tool Receipt`, revision hashes, bindings, or internal Agent reports.
+- Unimplemented novel-detail actions are hidden instead of being presented as dead `后续阶段接入` entries. The fixed S1 preview receipt remains unchanged and no Activity Bar action creates a project, starts a task, or manufactures a result.
+
+Verification recorded on Windows on 2026-07-19:
+
+- `swiftc -frontend -parse` passed for the combined changed App, App XCTest, XCUITest, Activity Bar contract, and Conversation preview Swift files.
+- `swift test --enable-code-coverage`: 73 tests, 0 failures; `S1ActivityBarContractTests`: 3 tests, 0 failures.
+- Windows `CangJieCore` executable coverage: 93.32% regions, 95.45% functions, and 95.96% lines; `S1ActivityBarContract.swift` has 100% line and function coverage.
+- `git diff --check` passed. Focused scans of the four Activity Bar slice files found no BOM, U+FFFD, CRLF drift, run of four ASCII question marks, or real credential material.
+- SwiftPM still reports the pre-existing Windows warning that it cannot create `.build\debug` as a symbolic link.
+- Windows cannot type-check the iOS/SwiftUI/GRDB App target or execute App XCTest/XCUITest. The Activity Bar layout, context menu, Toggle behavior, and iPad interaction therefore remain pending the later exact Apple/Xcode candidate gate; this slice alone is not a reason to request physical-device installation.
+
+No commit, push, remote CI run, milestone-complete claim, or physical-device acceptance claim was made.
+
+
+## 2026-07-19 S1 ordinary-language and accessibility hardening evidence
+
+Status boundary: this is another implementation slice inside **S1: Agent cockpit direction and refactor**. It does not claim S1 completion, S2 start, a real Provider/model connection, a Typed Tool Loop, formal prose generation, H0-H5 completion, IPA acceptance, or physical-device acceptance.
+
+Implemented and checked in this slice:
+
+- Ordinary status text now comes from `S1OrdinarySurfaceContract`; raw approval, chapter, revision and runtime stages are no longer copied directly into the top-level user status.
+- `AppViewModel` now keeps engineering diagnostics separately in `diagnosticErrorMessage` and `diagnosticNoticeMessage`, while `errorMessage` and `TransientNotice.message` project plain Chinese recovery guidance. Database, Keychain, checkpoint, stale approval/chapter and network codes remain available for diagnosis but are not displayed on the ordinary surface.
+- Non-fixed task/result empty states no longer expose S1/S2 phase names. The exact fixed receipt remains byte-for-byte unchanged: `界面预览版：这句话已保存。当前只验证界面和导航，真正的模型对话从 S2 接入。`.
+- `AgentRuntimeOrdinaryCopy` is the tested projection used when the governed runtime appends normal, recovery and replay messages to the ordinary Conversation. It hides revision numbers, binding hashes, Tool Receipts, exact rewrite-scope metadata and V1/V2 diff vocabulary without deleting any underlying governance object.
+- Opening-plan approval, chapter version integrity, hashes, receipts, idempotency and state-machine checks remain intact; only their ordinary-language projection changed.
+- Landscape independent pages and the portrait navigation overlay now hide covered workspace regions from hit testing and the accessibility tree, establish a modal accessibility boundary, announce `关闭导航` for close actions, and release composer focus before page/result transitions.
+- `isLeftPagePresented`, an unused third navigation state source, was removed so left-region selection remains owned by the established Activity Bar/overlay state.
+
+TDD and verification evidence:
+
+- RED evidence was captured for the missing diagnostic/notice projection functions and for the missing `AgentRuntimeOrdinaryCopy` contract before implementation.
+- `swift test --enable-code-coverage`: **89 tests, 0 failures**.
+- LLVM coverage for `CangJieCore`: regions **88.59%**, functions **93.63%**, lines **94.14%**.
+- `swiftc -frontend -parse`: **25 changed/untracked Swift files passed**.
+- `git diff --check`: passed.
+- Changed/untracked Swift and Markdown scan: **32 files**, UTF-8, no BOM, LF, no U+FFFD and no consecutive corruption marker.
+- Changed/untracked credential and generated-artifact scan found no API key, private key, IPA, database, provisioning profile or signing material.
+- Windows cannot execute XCUITest or an iPad build, so the new UI assertions are source contracts awaiting the later macOS/IPA gate. This slice is **not** a device-test stop point.
+- No commit, push or remote CI action was performed.
+
+## 2026-07-19 S1 persisted Reader and scale-fixture evidence
+
+Status boundary: this is another implementation and local-verification slice inside S1 only. It does not claim S1 completion, S2 start, Provider/model integration, a Typed Tool model loop, formal prose generation, H0-H5 completion, an IPA candidate, Xcode execution, or physical-device acceptance.
+
+Implemented and reviewed behavior:
+
+- A requested DEBUG fixture now requires both an explicit fixture name and a valid UUID `CANGJIE_UI_TEST_DATABASE_SCOPE`. A missing or malformed scope returns the unavailable-state `AppViewModel`; it cannot fall back to the normal application database. No fixture request still leaves ordinary startup untouched.
+- `persisted-novel-shelf` uses production persistence APIs for the Conversation, exact S1 preview receipt, scoped draft, and `NovelProject` state it creates. Its multi-call seed remains protected primarily by the unique isolated XCUITest scope rather than being described as one atomic production transaction.
+- `persisted-readable-two-books` and `persisted-scale-and-restore` are Debug-only, explicitly requested database-compatibility fixtures. Their constrained direct SQL creates deterministic records inside a fresh isolated scope; the fresh-scope check and complete complex seed now share the same write transaction.
+- Those complex fixtures prove database/schema compatibility, ordinary application reopen, Reader and Conversation restoration, the latest-200-message projection window, and UI projection. They do not prove that the production writer can create the same state.
+- Formal production-writer reopen evidence remains separate: `AppDatabaseTests.testProductionChapterToolReaderProjectionSurvivesActualDatabaseReopen` creates chapter and Reader state through production APIs before reopening the real SQLite database, while `S1CockpitViewModelTests.testS1PreviewProductionWindowRestoresMessages041Through240AfterDatabaseReopen` creates 240 messages through the production preview path before reopening and restoring messages 041 through 240.
+- Complex fixture seeding is fresh-only and insert-once, not idempotent. Fixture-owned business entities are inserted once, while the migration-created `s1WorkspaceState.default` singleton is updated to select the fixture Conversation; the bootstrap as a whole is therefore not described as insert-only.
+- The scale UI helper now claims only what it proves: the final projected message is reachable, messages 239 and 240 occupy indices 198 and 199, and the 200-message window exposes no index 200. It no longer claims a physical ScrollView bottom-boundary assertion.
+
+Windows verification completed on 2026-07-19:
+
+- The CI-equivalent strict Core script passed 99 XCTest plus 15 Swift Testing tests, 114 total with zero failures, strict concurrency, warnings-as-errors, and 94.15% `CangJieCore` line coverage against the 90% gate.
+- All six Python build/candidate-set contract scripts passed: 47 unittest cases passed, one platform-dependent case was skipped, and both standalone candidate-set and build-identity contract checks reported success.
+- `swiftc -frontend -parse` passed for all 41 changed or untracked Swift files, including the three new fixture bootstrap failure-closure tests.
+- `git diff --check` passed. All 48 changed or untracked files passed UTF-8, BOM, NUL, U+FFFD, repeated-question-mark, CRLF-drift, credential-pattern, and generated-artifact scans.
+- Independent code and documentation reviews found no P0-P2 defect. The code review's single P3 comment-accuracy finding was corrected so the scale fixture distinguishes inserted fixture-owned rows from the updated workspace singleton. The documentation review found no false production-writer, idempotency, or Apple-verification claim; its missing-Control-Center-evidence finding is resolved by this section.
+
+Apple and device boundary:
+
+- Windows cannot type-check the iOS/SwiftUI/GRDB App target or execute App XCTest/XCUITest. The fixture bootstrap tests, Reader and scale UI assertions, Xcode build, simulator execution, signing, IPA packaging, and physical-device behavior remain unverified until an exact Apple CI and Candidate Set run.
+- No commit, push, remote CI run, IPA build, or milestone-complete claim was made by this slice. This is not yet a physical-device installation stop point.

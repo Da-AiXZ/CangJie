@@ -1,7 +1,288 @@
+import CangJieCore
 import Foundation
 import GRDB
 
 extension AppDatabase {
+    func restoreS1ConversationWorkspace() throws -> S1ConversationWorkspaceSnapshot {
+        try queue.read { db in
+            try Self.s1ConversationWorkspaceSnapshot(in: db)
+        }
+    }
+
+    func saveS1ConversationDraft(
+        _ content: String,
+        selectedConversationID: UUID?,
+        now: Date = Date()
+    ) throws {
+        guard content.utf8.count <= S1ConversationPreview.maximumDraftUTF8Bytes else {
+            throw AppDatabaseError.draftInputLimitExceeded
+        }
+
+        try queue.write { db in
+            try Self.requireCurrentS1WorkspaceSelection(selectedConversationID, in: db)
+            if let selectedConversationID {
+                try db.execute(
+                    sql: """
+                        INSERT INTO s1ConversationDraft (conversationID, content, updatedAt)
+                        VALUES (?, ?, ?)
+                        ON CONFLICT(conversationID) DO UPDATE SET
+                            content = excluded.content,
+                            updatedAt = excluded.updatedAt
+                        """,
+                    arguments: [
+                        selectedConversationID.uuidString,
+                        content,
+                        now.timeIntervalSince1970
+                    ]
+                )
+            } else {
+                try db.execute(
+                    sql: """
+                        UPDATE s1WorkspaceState
+                        SET unboundDraft = ?, updatedAt = ?
+                        WHERE id = 'default'
+                        """,
+                    arguments: [content, now.timeIntervalSince1970]
+                )
+            }
+            // Compatibility mirror only. S1 workspace tables are the source of truth.
+            try Self.upsertDraft(content, now: now, in: db)
+        }
+    }
+
+    func selectNewS1Conversation(
+        now: Date = Date()
+    ) throws -> S1ConversationWorkspaceSnapshot {
+        try queue.write { db in
+            try db.execute(
+                sql: """
+                    UPDATE s1WorkspaceState
+                    SET selectedConversationID = NULL, updatedAt = ?
+                    WHERE id = 'default'
+                    """,
+                arguments: [now.timeIntervalSince1970]
+            )
+            return try Self.s1ConversationWorkspaceSnapshot(in: db)
+        }
+    }
+
+    func selectS1Conversation(
+        _ conversationID: UUID,
+        now: Date = Date()
+    ) throws -> S1ConversationWorkspaceSnapshot {
+        try queue.write { db in
+            guard try Int.fetchOne(
+                db,
+                sql: "SELECT COUNT(*) FROM agentConversation WHERE id = ?",
+                arguments: [conversationID.uuidString]
+            ) == 1 else {
+                throw AppDatabaseError.invalidAgentSession
+            }
+            try db.execute(
+                sql: """
+                    UPDATE s1WorkspaceState
+                    SET selectedConversationID = ?, updatedAt = ?
+                    WHERE id = 'default'
+                    """,
+                arguments: [conversationID.uuidString, now.timeIntervalSince1970]
+            )
+            return try Self.s1ConversationWorkspaceSnapshot(in: db)
+        }
+    }
+
+    func appendS1WorkspacePreviewTurn(
+        selectedConversationID: UUID?,
+        turn: S1ConversationPreviewTurn,
+        now: Date = Date()
+    ) throws -> S1PreviewConversationAppendResult {
+        let validatedTurn = try Self.validateS1PreviewTurn(turn)
+
+        return try queue.write { db in
+            try Self.requireCurrentS1WorkspaceSelection(selectedConversationID, in: db)
+
+            let conversation: AgentConversation
+            if let selectedConversationID {
+                guard let row = try Row.fetchOne(
+                    db,
+                    sql: "SELECT * FROM agentConversation WHERE id = ?",
+                    arguments: [selectedConversationID.uuidString]
+                ), let restored = Self.decodeConversation(row) else {
+                    throw AppDatabaseError.invalidAgentSession
+                }
+                conversation = restored
+            } else {
+                conversation = AgentConversation(
+                    id: UUID(),
+                    title: "New conversation",
+                    createdAt: now,
+                    updatedAt: now
+                )
+                try db.execute(
+                    sql: "INSERT INTO agentConversation (id, title, createdAt, updatedAt) VALUES (?, ?, ?, ?)",
+                    arguments: [
+                        conversation.id.uuidString,
+                        conversation.title,
+                        conversation.createdAt.timeIntervalSince1970,
+                        conversation.updatedAt.timeIntervalSince1970
+                    ]
+                )
+            }
+
+            let persistedTurn = try Self.persistS1PreviewTurn(
+                conversationID: conversation.id,
+                currentTitle: conversation.title,
+                turn: validatedTurn,
+                now: now,
+                minimumTimestamp: conversation.updatedAt.timeIntervalSince1970,
+                in: db
+            )
+            let updatedConversation = AgentConversation(
+                id: conversation.id,
+                title: persistedTurn.conversationTitle,
+                createdAt: conversation.createdAt,
+                updatedAt: persistedTurn.messages.last?.createdAt ?? conversation.updatedAt
+            )
+
+            try db.execute(
+                sql: "DELETE FROM s1ConversationDraft WHERE conversationID = ?",
+                arguments: [conversation.id.uuidString]
+            )
+            if selectedConversationID == nil {
+                try db.execute(
+                    sql: """
+                        UPDATE s1WorkspaceState
+                        SET selectedConversationID = ?, unboundDraft = '', updatedAt = ?
+                        WHERE id = 'default'
+                        """,
+                    arguments: [conversation.id.uuidString, updatedConversation.updatedAt.timeIntervalSince1970]
+                )
+            } else {
+                try db.execute(
+                    sql: """
+                        UPDATE s1WorkspaceState
+                        SET selectedConversationID = ?, updatedAt = ?
+                        WHERE id = 'default'
+                        """,
+                    arguments: [conversation.id.uuidString, updatedConversation.updatedAt.timeIntervalSince1970]
+                )
+            }
+            // Keep the retired m0 slot as a compatibility mirror until legacy callers are removed.
+            try Self.upsertDraft("", now: updatedConversation.updatedAt, in: db)
+            let workspace = try Self.s1ConversationWorkspaceSnapshot(in: db)
+
+            return S1PreviewConversationAppendResult(
+                conversation: updatedConversation,
+                messages: persistedTurn.messages,
+                workspace: workspace
+            )
+        }
+    }
+
+    func appendS1PreviewTurn(
+        conversationID: UUID,
+        turn: S1ConversationPreviewTurn,
+        now: Date = Date()
+    ) throws -> [AgentMessage] {
+        let validatedTurn = try Self.validateS1PreviewTurn(turn)
+
+        return try queue.write { db in
+            guard let row = try Row.fetchOne(
+                db,
+                sql: "SELECT title, updatedAt FROM agentConversation WHERE id = ?",
+                arguments: [conversationID.uuidString]
+            ) else {
+                throw AppDatabaseError.invalidAgentSession
+            }
+            let conversationTitle: String = row["title"]
+            let conversationUpdatedAt: Double = row["updatedAt"]
+
+            return try Self.persistS1PreviewTurn(
+                conversationID: conversationID,
+                currentTitle: conversationTitle,
+                turn: validatedTurn,
+                now: now,
+                minimumTimestamp: conversationUpdatedAt,
+                in: db
+            ).messages
+        }
+    }
+
+    private static func validateS1PreviewTurn(
+        _ turn: S1ConversationPreviewTurn
+    ) throws -> S1ConversationPreviewTurn {
+        let validatedTurn = try S1ConversationPreview.makeTurn(from: turn.userText)
+        guard validatedTurn == turn else {
+            throw AppDatabaseError.invalidS1PreviewTurn
+        }
+        return validatedTurn
+    }
+
+    private struct PersistedS1PreviewTurn {
+        let messages: [AgentMessage]
+        let conversationTitle: String
+    }
+
+    private static func persistS1PreviewTurn(
+        conversationID: UUID,
+        currentTitle: String,
+        turn: S1ConversationPreviewTurn,
+        now: Date,
+        minimumTimestamp: TimeInterval,
+        in db: Database
+    ) throws -> PersistedS1PreviewTurn {
+        let existingMessageCount = try Int.fetchOne(
+            db,
+            sql: "SELECT COUNT(*) FROM agentMessage WHERE conversationID = ?",
+            arguments: [conversationID.uuidString]
+        ) ?? 0
+        let latestCreatedAt = try Double.fetchOne(
+            db,
+            sql: "SELECT MAX(createdAt) FROM agentMessage WHERE conversationID = ?",
+            arguments: [conversationID.uuidString]
+        )
+        let conversationTitle = existingMessageCount == 0
+            ? S1ConversationPreview.makeHistoryTitle(fromValidatedUserText: turn.userText)
+            : currentTitle
+        let effectiveTimestamp = max(
+            minimumTimestamp,
+            max(now.timeIntervalSince1970, latestCreatedAt ?? now.timeIntervalSince1970)
+        )
+        let effectiveDate = Date(timeIntervalSince1970: effectiveTimestamp)
+        let userMessage = AgentMessage(
+            id: UUID(),
+            role: .user,
+            content: turn.userText,
+            createdAt: effectiveDate
+        )
+        let systemMessage = AgentMessage(
+            id: UUID(),
+            role: .system,
+            content: turn.systemReceipt,
+            createdAt: effectiveDate
+        )
+
+        for message in [userMessage, systemMessage] {
+            try db.execute(
+                sql: "INSERT INTO agentMessage (id, conversationID, role, content, idempotencyKey, createdAt) VALUES (?, ?, ?, ?, NULL, ?)",
+                arguments: [
+                    message.id.uuidString,
+                    conversationID.uuidString,
+                    message.role.rawValue,
+                    message.content,
+                    message.createdAt.timeIntervalSince1970
+                ]
+            )
+        }
+        try db.execute(
+            sql: "UPDATE agentConversation SET title = ?, updatedAt = ? WHERE id = ?",
+            arguments: [conversationTitle, effectiveTimestamp, conversationID.uuidString]
+        )
+        return PersistedS1PreviewTurn(
+            messages: [userMessage, systemMessage],
+            conversationTitle: conversationTitle
+        )
+    }
+
     func ensureDefaultConversation(now: Date = Date()) throws -> AgentConversation {
         try queue.write { db in
             let conversation: AgentConversation
@@ -94,6 +375,21 @@ extension AppDatabase {
                 sql: "SELECT * FROM agentMessage WHERE conversationID = ? ORDER BY createdAt ASC, rowid ASC",
                 arguments: [conversationID.uuidString]
             ).compactMap(Self.decodeAgentMessage)
+        }
+    }
+
+    func s1PreviewMessageWindow(
+        conversationID: UUID,
+        maximumMessageCount: Int = 200,
+        maximumUTF8Bytes: Int = 512 * 1_024
+    ) throws -> S1PreviewMessageWindow {
+        try queue.read { db in
+            try Self.s1PreviewMessageWindow(
+                conversationID: conversationID,
+                maximumMessageCount: maximumMessageCount,
+                maximumUTF8Bytes: maximumUTF8Bytes,
+                in: db
+            )
         }
     }
 
@@ -347,6 +643,138 @@ extension AppDatabase {
             try Self.insertToolReceipt(receipt, in: db)
             return ArtifactToolResult(artifact: artifact, receipt: receipt)
         }
+    }
+
+    private static func requireCurrentS1WorkspaceSelection(
+        _ expectedConversationID: UUID?,
+        in db: Database
+    ) throws {
+        guard let row = try Row.fetchOne(
+            db,
+            sql: "SELECT selectedConversationID FROM s1WorkspaceState WHERE id = 'default'"
+        ) else {
+            throw AppDatabaseError.invalidAgentSession
+        }
+        let rawSelectedID: String? = row["selectedConversationID"]
+        let persistedConversationID = try rawSelectedID.map { rawID in
+            guard let id = UUID(uuidString: rawID) else {
+                throw AppDatabaseError.invalidAgentSession
+            }
+            return id
+        }
+        guard persistedConversationID == expectedConversationID else {
+            throw AppDatabaseError.invalidAgentSession
+        }
+    }
+
+    private static func s1ConversationWorkspaceSnapshot(
+        in db: Database
+    ) throws -> S1ConversationWorkspaceSnapshot {
+        guard let workspaceRow = try Row.fetchOne(
+            db,
+            sql: "SELECT selectedConversationID, unboundDraft FROM s1WorkspaceState WHERE id = 'default'"
+        ) else {
+            throw AppDatabaseError.invalidAgentSession
+        }
+
+        let rawSelectedID: String? = workspaceRow["selectedConversationID"]
+        let selectedConversation: AgentConversation?
+        if let rawSelectedID {
+            guard let selectedID = UUID(uuidString: rawSelectedID),
+                  let conversationRow = try Row.fetchOne(
+                    db,
+                    sql: "SELECT * FROM agentConversation WHERE id = ?",
+                    arguments: [rawSelectedID]
+                  ),
+                  let conversation = decodeConversation(conversationRow) else {
+                throw AppDatabaseError.invalidAgentSession
+            }
+            guard conversation.id == selectedID else {
+                throw AppDatabaseError.invalidAgentSession
+            }
+            selectedConversation = conversation
+        } else {
+            selectedConversation = nil
+        }
+
+        let conversations = try Row.fetchAll(
+            db,
+            sql: "SELECT * FROM agentConversation ORDER BY updatedAt DESC, rowid DESC"
+        ).compactMap(decodeConversation)
+        let draft: String
+        let messageWindow: S1PreviewMessageWindow
+        if let selectedConversation {
+            draft = try String.fetchOne(
+                db,
+                sql: "SELECT content FROM s1ConversationDraft WHERE conversationID = ?",
+                arguments: [selectedConversation.id.uuidString]
+            ) ?? ""
+            messageWindow = try s1PreviewMessageWindow(
+                conversationID: selectedConversation.id,
+                maximumMessageCount: 200,
+                maximumUTF8Bytes: 512 * 1_024,
+                in: db
+            )
+        } else {
+            draft = workspaceRow["unboundDraft"]
+            messageWindow = S1PreviewMessageWindow(
+                messages: [],
+                hasEarlierMessages: false
+            )
+        }
+
+        return S1ConversationWorkspaceSnapshot(
+            selectedConversation: selectedConversation,
+            conversations: conversations,
+            draft: draft,
+            messageWindow: messageWindow
+        )
+    }
+
+    private static func s1PreviewMessageWindow(
+        conversationID: UUID,
+        maximumMessageCount: Int,
+        maximumUTF8Bytes: Int,
+        in db: Database
+    ) throws -> S1PreviewMessageWindow {
+        guard maximumMessageCount > 0, maximumUTF8Bytes > 0 else {
+            throw AppDatabaseError.invalidAgentSession
+        }
+        let fetchLimit = maximumMessageCount == Int.max
+            ? maximumMessageCount
+            : maximumMessageCount + 1
+        let newestRows = try Row.fetchAll(
+            db,
+            sql: """
+                SELECT * FROM agentMessage
+                WHERE conversationID = ?
+                ORDER BY createdAt DESC, rowid DESC
+                LIMIT ?
+                """,
+            arguments: [conversationID.uuidString, fetchLimit]
+        )
+        let boundedRows = newestRows.prefix(maximumMessageCount)
+        var newestMessages: [AgentMessage] = []
+        newestMessages.reserveCapacity(boundedRows.count)
+        var accumulatedBytes = 0
+        var omittedForByteBudget = false
+
+        for row in boundedRows {
+            guard let message = decodeAgentMessage(row) else { continue }
+            let messageBytes = message.content.utf8.count
+            let remainingByteBudget = maximumUTF8Bytes - accumulatedBytes
+            guard messageBytes <= remainingByteBudget else {
+                omittedForByteBudget = true
+                break
+            }
+            newestMessages.append(message)
+            accumulatedBytes += messageBytes
+        }
+
+        return S1PreviewMessageWindow(
+            messages: Array(newestMessages.reversed()),
+            hasEarlierMessages: newestRows.count > maximumMessageCount || omittedForByteBudget
+        )
     }
 
     private static func decodeConversation(_ row: Row) -> AgentConversation? {

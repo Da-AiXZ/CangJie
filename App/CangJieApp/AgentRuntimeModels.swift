@@ -14,6 +14,34 @@ struct AgentConversation: Identifiable, Equatable {
     let updatedAt: Date
 }
 
+struct S1PreviewConversationAppendResult: Equatable {
+    let conversation: AgentConversation
+    let messages: [AgentMessage]
+    let workspace: S1ConversationWorkspaceSnapshot?
+
+    init(
+        conversation: AgentConversation,
+        messages: [AgentMessage],
+        workspace: S1ConversationWorkspaceSnapshot? = nil
+    ) {
+        self.conversation = conversation
+        self.messages = messages
+        self.workspace = workspace
+    }
+}
+
+struct S1PreviewMessageWindow: Equatable {
+    let messages: [AgentMessage]
+    let hasEarlierMessages: Bool
+}
+
+struct S1ConversationWorkspaceSnapshot: Equatable {
+    let selectedConversation: AgentConversation?
+    let conversations: [AgentConversation]
+    let draft: String
+    let messageWindow: S1PreviewMessageWindow
+}
+
 struct AgentMessage: Identifiable, Codable, Equatable {
     let id: UUID
     let role: AgentMessageRole
@@ -21,11 +49,19 @@ struct AgentMessage: Identifiable, Codable, Equatable {
     let createdAt: Date
 
     var displayText: String {
+        let speaker: S1ConversationSpeaker
         switch role {
-        case .user: return "You: " + content
-        case .assistant: return "Agent: " + content
-        case .system: return "System: " + content
+        case .user:
+            speaker = .user
+        case .assistant:
+            speaker = .assistant
+        case .system:
+            speaker = .system
         }
+        let displayedContent = role == .assistant
+            ? AgentRuntimeOrdinaryCopy.projectPersistedAssistantMessage(content)
+            : content
+        return S1ConversationPreview.displayText(speaker: speaker, content: displayedContent)
     }
 }
 

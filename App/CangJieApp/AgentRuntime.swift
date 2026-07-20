@@ -3,11 +3,7 @@ import Foundation
 
 final class AgentRuntime {
     static let maximumInputUTF8Bytes = 32_768
-    static let interviewQuestions = [
-        "What is the one-sentence hook that makes this novel impossible to confuse with another?",
-        "Who is the protagonist before the first major change, and what do they want right now?",
-        "What concrete cost or danger makes the first victory matter?"
-    ]
+    static let interviewQuestions = AgentRuntimeCanonicalMessage.strategicQuestions
 
     private let database: AppDatabase
     private let authorizer: any AgentExecutionAuthorizing
@@ -108,7 +104,7 @@ final class AgentRuntime {
                 idempotencyKey: "project.create." + userMessage.id.uuidString,
                 now: now
             )
-            try appendAssistant("Project created: " + tool.project.title, now: now)
+            try appendAssistant(AgentRuntimeCanonicalMessage.projectCreated(title: tool.project.title), now: now)
             try appendAssistant(Self.interviewQuestions[0], now: now)
             try authorizer.authorize(.durableMutation)
             try database.saveAgentSession(
@@ -126,7 +122,7 @@ final class AgentRuntime {
         }
 
         guard !projects.isEmpty else {
-            try appendAssistant("Tell me the idea or ask me to create a novel, and I will lead the next step.", now: now)
+            try appendAssistant(AgentRuntimeCanonicalMessage.askForNovelIdea, now: now)
             try finish(run: run, status: .waitingUser, stage: "awaitingProjectIntent", now: now)
             return AgentTurnResult(snapshot: try restore(now: now), status: "Waiting for a novel idea")
         }
@@ -147,7 +143,7 @@ final class AgentRuntime {
             switch approvalState.approval.status {
             case .pending:
                 try appendAssistant(
-                    "The opening plan is waiting for your exact approval. Review the bound revision, budget, expiration, and expected change before we continue.",
+                    AgentRuntimeCanonicalMessage.openingPlanAwaitingConfirmation,
                     now: now
                 )
                 try finish(run: run, status: .waitingUser, stage: "openingPlan.approval", now: now)
@@ -215,7 +211,7 @@ final class AgentRuntime {
             conversationID: conversation.id
         )
         try appendAssistant(
-            "I have compiled the opening plan. Review its exact approval card before chapter planning.",
+            AgentRuntimeCanonicalMessage.openingPlanPrepared,
             now: now
         )
             try finish(run: run, status: .waitingUser, stage: "openingPlan.approval", now: now)
@@ -326,7 +322,7 @@ final class AgentRuntime {
             let intent = ChapterAgentTemplates.intent(for: text, stage: .notStarted)
             guard intent == .generate else {
                 try appendAssistant(
-                    "Chapter planning is unlocked. Say ‘生成第一章’, ‘开始生成第一章’, ‘继续’, or ‘generate chapter’ to begin the governed Chapter 1 calibration.",
+                    AgentRuntimeCanonicalMessage.chapterPlanningUnlocked,
                     now: now
                 )
                 try finish(run: run, status: .waitingUser, stage: "chapter.1.notStarted", now: now)
@@ -350,7 +346,7 @@ final class AgentRuntime {
         switch snapshot.stage {
         case .notStarted:
             guard intent == .generate else {
-                try appendAssistant("Chapter 1 is ready to generate when you say ‘生成第一章’ or ‘继续’.", now: now)
+                try appendAssistant(AgentRuntimeCanonicalMessage.chapterGenerationReady, now: now)
                 try finish(run: run, status: .waitingUser, stage: "chapter.1.notStarted", now: now)
                 return AgentTurnResult(snapshot: try restore(now: now), status: "Chapter 1 generation ready")
             }
@@ -363,7 +359,7 @@ final class AgentRuntime {
                 return try rejectChapter(snapshot: snapshot, reason: text, run: run, now: now)
             default:
                 try appendAssistant(
-                    "Review Chapter 1 revision \(snapshot.activeVersion.revision). You may accept and freeze it, or reject it and enter diagnosis. I will not reroll it without a diagnosis.",
+                    AgentRuntimeCanonicalMessage.chapterReviewReminder(revision: snapshot.activeVersion.revision),
                     now: now
                 )
                 try finish(run: run, status: .waitingUser, stage: "chapter.1.\(snapshot.stage.rawValue)", now: now)
@@ -374,7 +370,7 @@ final class AgentRuntime {
         case .awaitingRewriteConfirmation:
             guard intent == .confirmRewrite else {
                 try appendAssistant(
-                    "The diagnosis and exact rewrite scope are ready. Confirm that scope before I create revision 2; a generic regenerate request will not bypass this gate.",
+                    AgentRuntimeCanonicalMessage.rewriteConfirmationRequired,
                     now: now
                 )
                 try finish(run: run, status: .waitingUser, stage: "chapter.1.awaitingRewriteConfirmation", now: now)
@@ -385,7 +381,7 @@ final class AgentRuntime {
             return try rewriteChapter(snapshot: snapshot, run: run, now: now)
         case .approvedFrozen:
             try appendAssistant(
-                "Chapter 1 revision \(snapshot.activeVersion.revision) is approved and frozen. Its versions, diagnosis, and tool receipts remain available for audit.",
+                AgentRuntimeCanonicalMessage.approvedChapterAudit(revision: snapshot.activeVersion.revision),
                 now: now
             )
             try finish(run: run, status: .completed, stage: "chapter.1.approvedFrozen", now: now)
@@ -420,7 +416,7 @@ final class AgentRuntime {
             now: now
         )
         try appendAssistant(
-            "Chapter 1 revision 1 has been generated and evidence-reviewed. Review the exact revision, then accept and freeze it or reject it for diagnosis.",
+            AgentRuntimeCanonicalMessage.firstChapterReady,
             idempotencyKey: "chapter-message.generate." + result.version.id.uuidString,
             now: now
         )
@@ -451,7 +447,7 @@ final class AgentRuntime {
         )
         let question = ChapterAgentTemplates.diagnosisQuestions[0]
         try appendAssistant(
-            "I will not reroll the chapter. We will diagnose it one high-information question at a time.\n\n" + question,
+            AgentRuntimeCanonicalMessage.diagnosisStarted(question: question),
             idempotencyKey: "chapter-message.diagnosis.\(version.id.uuidString).1",
             now: now
         )
@@ -474,7 +470,7 @@ final class AgentRuntime {
         let question = ChapterDiagnosisProtocol.orderedQuestions[questionIndex]
         if ChapterAgentTemplates.isBlindRegenerationRequest(text) || ChapterAgentTemplates.isLowInformationDiagnosisAnswer(text) {
             try appendAssistant(
-                "A direct reroll would hide the root cause and is not allowed. Please answer the current diagnosis question with one concrete observation:\n\n" + question,
+                AgentRuntimeCanonicalMessage.diagnosisNeedsMoreDetail(question: question),
                 now: now
             )
             try finish(run: run, status: .waitingUser, stage: "chapter.1.diagnosing.question.\(questionIndex + 1)", now: now)
@@ -537,7 +533,7 @@ final class AgentRuntime {
         now: Date
     ) throws {
         try appendAssistant(
-            "Diagnosis complete. Review the exact rewrite scope before revision 2 is created.\n\n\(summary)\n\nRewrite scope:\n\(scope)\n\nSay \u{2018}\u{786e}\u{8ba4}\u{91cd}\u{5199}\u{2019} to authorize only this scope.",
+            AgentRuntimeCanonicalMessage.diagnosisComplete(summary: summary, scope: scope),
             idempotencyKey: "chapter-message.rewrite-scope." + scopeHash,
             now: now
         )
@@ -581,7 +577,7 @@ final class AgentRuntime {
             now: now
         )
         try appendAssistant(
-            "Chapter 1 revision \(result.version.revision) is ready. Locked paragraphs were verified byte-for-byte. Review the V1/V2 diff, then accept and freeze this final calibration candidate.",
+            AgentRuntimeCanonicalMessage.rewrittenChapterReady(revision: result.version.revision),
             idempotencyKey: "chapter-message.rewrite." + result.version.id.uuidString,
             now: now
         )
@@ -609,7 +605,7 @@ final class AgentRuntime {
             now: now
         )
         try appendAssistant(
-            "Chapter 1 revision \(version.revision) is approved and frozen. The exact content hash, version history, and receipts have been preserved.",
+            AgentRuntimeCanonicalMessage.chapterConfirmed(revision: version.revision),
             idempotencyKey: "chapter-message.accept." + version.id.uuidString + "." + version.contentHash,
             now: now
         )
@@ -634,7 +630,7 @@ final class AgentRuntime {
                 throw AppDatabaseError.invalidToolReceiptReference
             }
             try appendAssistant(
-                "Chapter 1 revision 1 has been generated and evidence-reviewed. Review the exact revision, then accept and freeze it or reject it for diagnosis.",
+                AgentRuntimeCanonicalMessage.firstChapterReady,
                 idempotencyKey: "chapter-message.generate." + result.version.id.uuidString,
                 now: now
             )
@@ -645,7 +641,7 @@ final class AgentRuntime {
                 throw AppDatabaseError.invalidToolReceiptReference
             }
             try appendAssistant(
-                "I will not reroll the chapter. We will diagnose it one high-information question at a time.\n\n" + ChapterDiagnosisProtocol.orderedQuestions[0],
+                AgentRuntimeCanonicalMessage.diagnosisStarted(question: ChapterDiagnosisProtocol.orderedQuestions[0]),
                 idempotencyKey: "chapter-message.diagnosis.\(result.version.id.uuidString).1",
                 now: now
             )
@@ -690,7 +686,7 @@ final class AgentRuntime {
                 throw AppDatabaseError.invalidToolReceiptReference
             }
             try appendAssistant(
-                "Chapter 1 revision \(result.version.revision) is ready. Locked paragraphs were verified byte-for-byte. Review the V1/V2 diff, then accept and freeze this final calibration candidate.",
+                AgentRuntimeCanonicalMessage.rewrittenChapterReady(revision: result.version.revision),
                 idempotencyKey: "chapter-message.rewrite." + result.version.id.uuidString,
                 now: now
             )
@@ -701,7 +697,7 @@ final class AgentRuntime {
                 throw AppDatabaseError.invalidToolReceiptReference
             }
             try appendAssistant(
-                "Chapter 1 revision \(result.version.revision) is approved and frozen. The exact content hash, version history, and receipts have been preserved.",
+                AgentRuntimeCanonicalMessage.chapterConfirmed(revision: result.version.revision),
                 idempotencyKey: "chapter-message.accept." + result.version.id.uuidString + "." + result.version.contentHash,
                 now: now
             )
@@ -827,7 +823,7 @@ final class AgentRuntime {
 
     private func appendApprovalSuccessMessage(for approval: ApprovalRequest, now: Date) throws {
         try appendAssistant(
-            "Opening plan approved and persisted. Chapter planning is now unlocked.",
+            AgentRuntimeCanonicalMessage.openingPlanConfirmed,
             idempotencyKey: Self.approvalMessageIdempotencyKey(requestID: approval.id, bindingHash: approval.bindingHash),
             now: now
         )
@@ -880,17 +876,20 @@ final class AgentRuntime {
     private static func chapterStatusMessage(_ snapshot: ChapterRuntimeSnapshot) -> String {
         switch snapshot.stage {
         case .notStarted:
-            return "Chapter 1 has not started."
+            return AgentRuntimeCanonicalMessage.chapterStatusNotStarted
         case .reviewingV1, .reviewingV2:
-            return "Chapter 1 revision \(snapshot.activeVersion.revision) is waiting for your review."
+            return AgentRuntimeCanonicalMessage.chapterStatusReviewing(revision: snapshot.activeVersion.revision)
         case .diagnosing:
-            return "Chapter 1 is in diagnosis question \(snapshot.nextDiagnosisQuestionIndex + 1) of \(ChapterDiagnosisProtocol.orderedQuestionIDs.count)."
+            return AgentRuntimeCanonicalMessage.chapterStatusDiagnosing(
+                question: snapshot.nextDiagnosisQuestionIndex + 1,
+                total: ChapterDiagnosisProtocol.orderedQuestionIDs.count
+            )
         case .awaitingRewriteConfirmation:
-            return "The diagnosis is complete and the exact rewrite scope is waiting for confirmation."
+            return AgentRuntimeCanonicalMessage.chapterStatusAwaitingRewriteConfirmation
         case .rewriting:
-            return "The confirmed Chapter 1 rewrite is resumable from its idempotent tool binding."
+            return AgentRuntimeCanonicalMessage.chapterStatusRewriting
         case .approvedFrozen:
-            return "Chapter 1 revision \(snapshot.activeVersion.revision) is approved and frozen."
+            return AgentRuntimeCanonicalMessage.chapterStatusConfirmed(revision: snapshot.activeVersion.revision)
         }
     }
 

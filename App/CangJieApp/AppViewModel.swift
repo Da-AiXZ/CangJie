@@ -34,10 +34,16 @@ private struct AgentBusinessMilestone: Equatable {
 
 @MainActor
 final class AppViewModel: ObservableObject {
-    @Published var draft = ""
-    @Published private(set) var businessStatus = "Initializing..."
+    @Published var draft = "" {
+        didSet {
+            persistDraftChange()
+        }
+    }
+    @Published private(set) var businessStatus = "正在准备…"
     @Published private(set) var transientNotice: TransientNotice?
+    @Published private(set) var diagnosticNoticeMessage: String?
     @Published private(set) var errorMessage: String?
+    @Published private(set) var diagnosticErrorMessage: String?
     @Published var apiKeyInput = ""
     @Published private(set) var hasStoredKey = false
     @Published private(set) var keychainProbeDigest: String?
@@ -47,9 +53,13 @@ final class AppViewModel: ObservableObject {
     @Published var streamOutput = ""
     @Published var isStreaming = false
     @Published private(set) var projects: [NovelProject] = []
-    @Published var isLeftPagePresented = false
+    @Published private(set) var novelProgressByProjectID: [UUID: String] = [:]
     @Published var isArtifactDrawerPresented = false
     @Published var conversationMessages: [String] = []
+    @Published private(set) var hasEarlierConversationMessages = false
+    @Published private(set) var conversations: [AgentConversation] = []
+    @Published private(set) var selectedConversationID: UUID?
+    @Published private(set) var readableContent: S1ReadableContentProjection?
     @Published var isAgentWorking = false
     @Published private(set) var interviewQuestion = AgentRuntime.interviewQuestions[0]
     @Published private(set) var planBody = ""
@@ -62,8 +72,19 @@ final class AppViewModel: ObservableObject {
     @Published private(set) var buildActivationMessage = "Checking executable identity..."
     @Published private(set) var buildIdentity: BuildIdentity
 
+    private enum ErrorDomain: CaseIterable {
+        case persistent
+        case composer
+    }
+
+    private var errorMessagesByDomain: [ErrorDomain: String] = [:]
+
     var status: String { errorMessage ?? businessStatus }
     var isAgentExecutionAllowed: Bool { buildIdentity.isAgentExecutionAllowed }
+    var isComposerAvailable: Bool {
+        database != nil && lifecyclePermitsMutations && isAgentExecutionAllowed
+    }
+    var hasReadableContent: Bool { readableContent != nil }
     var chapterNeedsReview: Bool {
         chapter?.stage == .reviewingV1 || chapter?.stage == .reviewingV2
     }
@@ -90,6 +111,11 @@ final class AppViewModel: ObservableObject {
     private var noticeDismissTask: Task<Void, Never>?
     private var projectedBusinessMilestone: AgentBusinessMilestone?
     private var lifecyclePermitsMutations = true
+    private var isDraftAutosaveSuppressed = false
+    private let draftAutosaveDelayNanoseconds: UInt64
+    private var draftAutosaveTask: Task<Void, Never>?
+    private var pendingDraftAutosave: S1DraftAutosaveContract.Request?
+    private var draftAutosaveGeneration: UInt64 = 0
 
     init(
         database: AppDatabase? = nil,
@@ -99,12 +125,15 @@ final class AppViewModel: ObservableObject {
         bundleInfo: [String: Any]? = BuildIdentityStamp.generated.infoDictionary,
         compiledBuildStamp: BuildIdentityStamp = .generated,
         buildActivationStore: any BuildActivationStore = UserDefaultsBuildActivationStore(),
-        bundleIdentityLoader: (any BundleBuildIdentityLoading)? = nil
+        bundleIdentityLoader: (any BundleBuildIdentityLoading)? = nil,
+        taskID suppliedTaskID: UUID? = nil,
+        draftAutosaveDelayNanoseconds: UInt64 = 350_000_000
     ) {
         self.keychain = keychain
         self.isolationCanaryRepository = isolationCanaryRepository
         self.buildActivationStore = buildActivationStore
         self.compiledBuildStamp = compiledBuildStamp
+        self.draftAutosaveDelayNanoseconds = draftAutosaveDelayNanoseconds
         let resolvedLoader = bundleIdentityLoader
             ?? StaticBundleBuildIdentityLoader(infoDictionary: bundleInfo)
         self.bundleIdentityLoader = resolvedLoader
@@ -120,56 +149,94 @@ final class AppViewModel: ObservableObject {
         )
         executionAuthorizer = authorizer
 
-        let defaultsKey = "m0TaskID"
-        if let stored = UserDefaults.standard.string(forKey: defaultsKey),
-           let id = UUID(uuidString: stored) {
-            taskID = id
+        if let suppliedTaskID {
+            taskID = suppliedTaskID
         } else {
-            let id = UUID()
-            taskID = id
-            UserDefaults.standard.set(id.uuidString, forKey: defaultsKey)
+            let defaultsKey = "m0TaskID"
+            if let stored = UserDefaults.standard.string(forKey: defaultsKey),
+               let id = UUID(uuidString: stored) {
+                taskID = id
+            } else {
+                let id = UUID()
+                taskID = id
+                UserDefaults.standard.set(id.uuidString, forKey: defaultsKey)
+            }
         }
 
-        let databaseState: (database: AppDatabase?, draft: String, notice: String?, error: String?)
+        let emptyWorkspace = S1ConversationWorkspaceSnapshot(
+            selectedConversation: nil,
+            conversations: [],
+            draft: "",
+            messageWindow: S1PreviewMessageWindow(messages: [], hasEarlierMessages: false)
+        )
+        let databaseState: (
+            database: AppDatabase?,
+            workspace: S1ConversationWorkspaceSnapshot,
+            projects: [NovelProject],
+            novelProgressByProjectID: [UUID: String],
+            readableContent: S1ReadableContentProjection?,
+            notice: String?,
+            error: String?
+        )
         if !initialIdentity.isAgentExecutionAllowed {
-            databaseState = (nil, "", nil, nil)
+            databaseState = (nil, emptyWorkspace, [], [:], nil, nil, nil)
         } else {
             do {
                 let resolved = try database ?? databaseFactory()
-                let restoredDraft = try resolved.loadDraft()?.content ?? ""
+                let workspace = try resolved.restoreS1ConversationWorkspace()
+                let projects = try resolved.listProjects()
+                let progressResult: ([UUID: String], String?)
+                do {
+                    progressResult = (
+                        Self.progressDescriptions(from: try resolved.loadS1NovelProgressFacts()),
+                        nil
+                    )
+                } catch {
+                    progressResult = ([:], "Novel progress restore failed (DB-NOVEL-PROGRESS)")
+                }
+                let readableContent = try resolved.restoreS1ReadableContent(
+                    selectedConversationID: workspace.selectedConversation?.id
+                )
                 let restoredNotice: String
-                if let checkpoint = try resolved.latestCheckpoint(taskID: taskID) {
-                    restoredNotice = Self.payloadHash(for: restoredDraft) == checkpoint.payloadHash
+                if let checkpoint = try resolved.latestS1ConversationCheckpoint(
+                    taskID: taskID,
+                    selectedConversationID: workspace.selectedConversation?.id
+                ) {
+                    restoredNotice = Self.payloadHash(for: workspace.draft) == checkpoint.payloadHash
                         ? "Restored checkpoint #\(checkpoint.sequence)"
                         : "Draft is newer than the latest checkpoint"
                 } else {
                     restoredNotice = "SQLite ready; no checkpoint yet"
                 }
-                databaseState = (resolved, restoredDraft, restoredNotice, nil)
+                databaseState = (
+                    resolved,
+                    workspace,
+                    projects,
+                    progressResult.0,
+                    readableContent,
+                    restoredNotice,
+                    progressResult.1
+                )
             } catch {
-                databaseState = (nil, "", nil, "SQLite initialization failed (DB-INIT)")
+                databaseState = (nil, emptyWorkspace, [], [:], nil, nil, "SQLite initialization failed (DB-INIT)")
             }
         }
 
         self.database = databaseState.database
-        var runtimeInitializationError: Error?
-        if let resolvedDatabase = databaseState.database {
-            do {
-                runtime = try AgentRuntime(database: resolvedDatabase, authorizer: authorizer)
-            } catch {
-                runtime = nil
-                runtimeInitializationError = error
-                authorizer.update(allowed: false)
-                buildIdentity = BuildIdentity(
-                    infoDictionary: resolvedLoader.loadInfoDictionary(),
-                    compiled: compiledBuildStamp
-                )
-            }
-        } else {
-            runtime = nil
+        runtime = nil
+        selectedConversationID = databaseState.workspace.selectedConversation?.id
+        conversations = databaseState.workspace.conversations
+        draft = databaseState.workspace.draft
+        conversationMessages = databaseState.workspace.messageWindow.messages.map(\.displayText)
+        hasEarlierConversationMessages = databaseState.workspace.messageWindow.hasEarlierMessages
+        projects = databaseState.projects
+        novelProgressByProjectID = databaseState.novelProgressByProjectID
+        readableContent = databaseState.readableContent
+        diagnosticErrorMessage = databaseState.error
+        errorMessage = databaseState.error.map { S1OrdinarySurfaceContract.errorDescription(for: $0) }
+        if let databaseError = databaseState.error {
+            errorMessagesByDomain[.persistent] = databaseError
         }
-        draft = databaseState.draft
-        errorMessage = databaseState.error
 
         if buildIdentity.isAgentExecutionAllowed {
             let token = compiledBuildStamp.activationToken
@@ -182,24 +249,12 @@ final class AppViewModel: ObservableObject {
             buildActivationMessage = buildIdentity.diagnosticText
         }
 
-        if let runtime {
-            do {
-                let snapshot = try runtime.restore()
-                apply(runtimeSnapshot: snapshot)
-                businessStatus = Self.businessStatus(for: snapshot)
-            } catch {
-                businessStatus = "Agent unavailable"
-                publishError("Agent restore failed (AGENT-RESTORE)")
-            }
-        } else if runtimeInitializationError != nil {
-            businessStatus = buildIdentity.isAgentExecutionAllowed
-                ? "Agent unavailable; retry after returning to the App"
-                : "Update activation required; Agent mutations are paused"
-            publishError("Agent runtime initialization was blocked (AGENT-INIT)")
+        if databaseState.database != nil {
+            businessStatus = "当前只验证界面、导航和本地保存，尚未接入真正的模型任务"
         } else {
             businessStatus = buildIdentity.isAgentExecutionAllowed
-                ? "Agent unavailable"
-                : "Update activation required; Agent mutations are paused"
+                ? "暂时无法打开对话"
+                : "这个版本还没有完全启用，暂时不能改动内容"
         }
 
         if let notice = databaseState.notice {
@@ -219,14 +274,32 @@ final class AppViewModel: ObservableObject {
         }
         do {
             let refreshedProjects = try database.listProjects()
+            let refreshedProgress = Self.progressDescriptions(
+                from: try database.loadS1NovelProgressFacts()
+            )
             projects = refreshedProjects
-            let noun = refreshedProjects.count == 1 ? "project" : "projects"
+            novelProgressByProjectID = refreshedProgress
             publishTransientNotice(
                 kind: .projectRefresh,
-                message: "Projects refreshed | \(refreshedProjects.count) \(noun) | \(Date().formatted(date: .omitted, time: .standard))"
+                message: "书架已刷新 | \(refreshedProjects.count) 本小说 | \(Date().formatted(date: .omitted, time: .standard))"
             )
         } catch {
             publishError("Project list failed (DB-PROJECT-LIST)")
+        }
+    }
+
+    func readableContentForBrowsing(
+        projectID: UUID
+    ) -> S1ReadableContentProjection? {
+        guard let database else {
+            publishError("Project reader failed (DB-PROJECT-READER)")
+            return nil
+        }
+        do {
+            return try database.loadS1ReadableContent(projectID: projectID)
+        } catch {
+            publishError("Project reader failed (DB-PROJECT-READER)")
+            return nil
         }
     }
 
@@ -239,7 +312,7 @@ final class AppViewModel: ObservableObject {
               displayed.bindingHash == displayedBindingHash,
               displayed.status == .pending,
               !planBody.isEmpty else {
-            businessStatus = "Opening plan changed; review the latest approval card"
+            businessStatus = S1OrdinarySurfaceContract.progressDescription(.openingPlanChanged)
             publishError("Displayed approval is no longer current (AGENT-APPROVAL-STALE)")
             return false
         }
@@ -251,20 +324,20 @@ final class AppViewModel: ObservableObject {
                 displayedBindingHash: displayedBindingHash
             )
             apply(runtimeSnapshot: result.snapshot)
-            businessStatus = result.status
+            businessStatus = Self.businessStatus(for: result.snapshot)
             return openingPlanApproval?.id == requestID
                 && openingPlanApproval?.bindingHash == displayedBindingHash
                 && openingPlanApproval?.status == .approved
         } catch let error as AppDatabaseError {
             switch error {
             case .approvalRequiresReapproval:
-                businessStatus = "Opening plan changed; review and approve the latest revision"
+                businessStatus = S1OrdinarySurfaceContract.progressDescription(.openingPlanChanged)
                 publishError("Displayed approval is stale (AGENT-APPROVAL-STALE)")
             case .approvalExpired:
-                businessStatus = "Opening plan approval expired; review the renewed approval card"
+                businessStatus = S1OrdinarySurfaceContract.progressDescription(.openingPlanExpired)
                 publishError("Plan approval expired (AGENT-APPROVAL-EXPIRED)")
             case .approvalBudgetExceeded:
-                businessStatus = "Opening plan approval paused by the budget gate"
+                businessStatus = "本次操作已暂停，请先检查费用设置"
                 publishError("Plan approval exceeds budget (AGENT-APPROVAL-BUDGET)")
             default:
                 publishError("Plan approval failed (AGENT-APPROVAL)")
@@ -449,9 +522,124 @@ final class AppViewModel: ObservableObject {
         do {
             let result = try runtime.handleUserMessage(text)
             apply(runtimeSnapshot: result.snapshot)
-            businessStatus = result.status
+            businessStatus = Self.businessStatus(for: result.snapshot)
         } catch {
             publishError("Agent turn failed (AGENT-TURN)")
+        }
+    }
+
+    func sendS1PreviewMessage() {
+        let turn: S1ConversationPreviewTurn
+        do {
+            turn = try S1ConversationPreview.makeTurn(from: draft)
+        } catch S1ConversationPreviewError.emptyInput {
+            return
+        } catch S1ConversationPreviewError.inputTooLarge {
+            publishError("消息太长，尚未发送（S1-INPUT-LIMIT）", domain: .composer)
+            return
+        } catch S1ConversationPreviewError.unsafeDirectionalControl {
+            publishError("消息包含会改变文字显示方向的控制字符，尚未发送（S1-INPUT-DIRECTION）", domain: .composer)
+            return
+        } catch {
+            publishError("消息无法保存（S1-INPUT）", domain: .composer)
+            return
+        }
+
+        guard requireActiveBuildForAgentMutation() else { return }
+        guard flushPendingDraftAutosave() else { return }
+        guard let database else {
+            publishError("消息无法保存（DB-WRITE）", domain: .composer)
+            return
+        }
+
+        isAgentWorking = true
+        defer { isAgentWorking = false }
+        do {
+            let result = try database.appendS1WorkspacePreviewTurn(
+                selectedConversationID: selectedConversationID,
+                turn: turn
+            )
+            guard let workspace = result.workspace else {
+                throw AppDatabaseError.invalidAgentSession
+            }
+            applyS1ConversationWorkspace(workspace)
+            clearErrors(in: .composer)
+            businessStatus = S1ConversationPreview.systemReceipt
+        } catch {
+            publishError("消息无法保存（S1-SAVE）", domain: .composer)
+        }
+    }
+
+    func startNewS1Conversation() {
+        guard requireActiveBuildForMutation(.durableMutation) else { return }
+        guard flushPendingDraftAutosave() else { return }
+        guard let database else {
+            publishError("Conversation selection failed (S1-SELECT)")
+            return
+        }
+        do {
+            applyS1ConversationWorkspace(try database.selectNewS1Conversation())
+        } catch {
+            publishError("Conversation selection failed (S1-SELECT)")
+        }
+    }
+
+    func selectS1Conversation(_ conversationID: UUID) {
+        guard requireActiveBuildForMutation(.durableMutation) else { return }
+        guard flushPendingDraftAutosave() else { return }
+        guard let database else {
+            publishError("Conversation selection failed (S1-SELECT)")
+            return
+        }
+        do {
+            applyS1ConversationWorkspace(try database.selectS1Conversation(conversationID))
+        } catch {
+            publishError("Conversation selection failed (S1-SELECT)")
+        }
+    }
+
+    private func applyS1ConversationWorkspace(_ workspace: S1ConversationWorkspaceSnapshot) {
+        selectedConversationID = workspace.selectedConversation?.id
+        conversations = workspace.conversations
+        conversationMessages = workspace.messageWindow.messages.map(\.displayText)
+        hasEarlierConversationMessages = workspace.messageWindow.hasEarlierMessages
+        setDraftWithoutAutosave(workspace.draft)
+        refreshS1ReadableContent()
+    }
+
+    private static func progressDescriptions(
+        from factsByProjectID: [UUID: S1NovelProgressFacts]
+    ) -> [UUID: String] {
+        factsByProjectID.mapValues(S1NovelProgressProjection.description(for:))
+    }
+
+    private func refreshS1NovelProgress() {
+        guard let database else {
+            novelProgressByProjectID = [:]
+            return
+        }
+        do {
+            novelProgressByProjectID = Self.progressDescriptions(
+                from: try database.loadS1NovelProgressFacts()
+            )
+        } catch {
+            novelProgressByProjectID = [:]
+            publishError("Novel progress restore failed (DB-NOVEL-PROGRESS)")
+        }
+    }
+
+    private func refreshS1ReadableContent() {
+        guard let database else {
+            readableContent = nil
+            return
+        }
+        do {
+            readableContent = try database.restoreS1ReadableContent(
+                selectedConversationID: selectedConversationID
+            )
+        } catch {
+            readableContent = nil
+            publishError("Readable chapter restore failed (DB-CHAPTER-READ)")
         }
     }
 
@@ -476,6 +664,7 @@ final class AppViewModel: ObservableObject {
     private func apply(runtimeSnapshot snapshot: AgentRuntimeSnapshot) {
         conversationMessages = snapshot.messages.map(\.displayText)
         projects = snapshot.projects
+        refreshS1NovelProgress()
         interviewQuestion = snapshot.session.currentQuestion.isEmpty
             ? AgentRuntime.interviewQuestions[0]
             : snapshot.session.currentQuestion
@@ -489,36 +678,156 @@ final class AppViewModel: ObservableObject {
         projectedBusinessMilestone = Self.businessMilestone(for: snapshot)
     }
 
+    private func persistDraftChange() {
+        guard !isDraftAutosaveSuppressed, lifecyclePermitsMutations, database != nil else { return }
+        guard draft.utf8.count <= S1ConversationPreview.maximumDraftUTF8Bytes else {
+            invalidatePendingDraftAutosave()
+            publishError("草稿太长，当前修改尚未自动保存（S1-DRAFT-LIMIT）", domain: .composer)
+            return
+        }
+        cancelDraftAutosaveTimer()
+        let request = S1DraftAutosaveContract.makeRequest(
+            content: draft,
+            selectedConversationID: selectedConversationID,
+            after: draftAutosaveGeneration
+        )
+        draftAutosaveGeneration = request.generation
+        pendingDraftAutosave = request
+        guard revalidateBuildActivation() else { return }
+        let delay = draftAutosaveDelayNanoseconds
+        draftAutosaveTask = Task { @MainActor [weak self] in
+            do {
+                try await Task.sleep(nanoseconds: delay)
+            } catch {
+                return
+            }
+            guard !Task.isCancelled, let self else { return }
+            self.draftAutosaveTask = nil
+            _ = self.persistDraftAutosave(request)
+        }
+    }
+
+    @discardableResult
+    private func persistDraftAutosave(
+        _ request: S1DraftAutosaveContract.Request,
+        failureMessage: String = "Draft autosave failed (DB-DRAFT-AUTOSAVE)"
+    ) -> Bool {
+        guard let database, pendingDraftAutosave == request else { return false }
+        guard S1DraftAutosaveContract.canPersist(
+            request,
+            currentContent: draft,
+            currentSelectedConversationID: selectedConversationID,
+            currentGeneration: draftAutosaveGeneration,
+            lifecyclePermitsMutations: lifecyclePermitsMutations,
+            buildIsActive: buildIdentity.isAgentExecutionAllowed
+        ) else { return false }
+        guard revalidateBuildActivation() else { return false }
+        guard S1DraftAutosaveContract.canPersist(
+            request,
+            currentContent: draft,
+            currentSelectedConversationID: selectedConversationID,
+            currentGeneration: draftAutosaveGeneration,
+            lifecyclePermitsMutations: lifecyclePermitsMutations,
+            buildIsActive: buildIdentity.isAgentExecutionAllowed
+        ) else { return false }
+
+        do {
+            try executionAuthorizer.performAuthorized(.durableMutation) {
+                try database.saveS1ConversationDraft(
+                    request.content,
+                    selectedConversationID: request.selectedConversationID
+                )
+            }
+            if pendingDraftAutosave == request {
+                pendingDraftAutosave = nil
+                cancelDraftAutosaveTimer()
+            }
+            return true
+        } catch AppDatabaseError.draftInputLimitExceeded {
+            publishError("草稿太长，当前修改尚未自动保存（S1-DRAFT-LIMIT）", domain: .composer)
+        } catch AgentExecutionAuthorizationError.buildNotActive {
+            _ = revalidateBuildActivation()
+        } catch {
+            publishError(failureMessage)
+        }
+        return false
+    }
+
+    @discardableResult
+    private func flushPendingDraftAutosave() -> Bool {
+        cancelDraftAutosaveTimer()
+        guard let request = pendingDraftAutosave else { return true }
+        return persistDraftAutosave(request)
+    }
+
+    private func stageCurrentDraftForImmediateSave() -> S1DraftAutosaveContract.Request? {
+        guard draft.utf8.count <= S1ConversationPreview.maximumDraftUTF8Bytes else {
+            invalidatePendingDraftAutosave()
+            publishError("草稿太长，当前修改尚未自动保存（S1-DRAFT-LIMIT）", domain: .composer)
+            return nil
+        }
+        cancelDraftAutosaveTimer()
+        let request = S1DraftAutosaveContract.makeRequest(
+            content: draft,
+            selectedConversationID: selectedConversationID,
+            after: draftAutosaveGeneration
+        )
+        draftAutosaveGeneration = request.generation
+        pendingDraftAutosave = request
+        return request
+    }
+
+    private func cancelDraftAutosaveTimer() {
+        draftAutosaveTask?.cancel()
+        draftAutosaveTask = nil
+    }
+
+    private func invalidatePendingDraftAutosave() {
+        cancelDraftAutosaveTimer()
+        pendingDraftAutosave = nil
+        draftAutosaveGeneration &+= 1
+    }
+
+    private func setDraftWithoutAutosave(_ value: String) {
+        invalidatePendingDraftAutosave()
+        isDraftAutosaveSuppressed = true
+        defer { isDraftAutosaveSuppressed = false }
+        draft = value
+    }
+
     func saveDraft() {
         guard requireActiveBuildForMutation(.durableMutation) else { return }
-        guard let database else {
+        guard database != nil else {
             publishError("Draft save failed (DB-WRITE)")
             return
         }
-        do {
-            try database.saveDraft(draft)
-            publishTransientNotice(
-                kind: .storage,
-                message: "Draft saved | \(Date().formatted(date: .omitted, time: .standard))"
-            )
-        } catch {
-            publishError("Draft save failed (DB-WRITE)")
-        }
+        guard let request = stageCurrentDraftForImmediateSave() else { return }
+        guard persistDraftAutosave(
+            request,
+            failureMessage: "Draft save failed (DB-WRITE)"
+        ) else { return }
+        publishTransientNotice(
+            kind: .storage,
+            message: "Draft saved | \(Date().formatted(date: .omitted, time: .standard))"
+        )
     }
 
     func createCheckpoint(reason: String) {
         guard requireActiveBuildForMutation(.durableMutation) else { return }
+        cancelDraftAutosaveTimer()
         guard let database else {
             publishError("Checkpoint write failed (DB-CHECKPOINT)")
             return
         }
         do {
-            let checkpoint = try database.checkpointDraft(
+            let checkpoint = try database.checkpointS1ConversationDraft(
                 content: draft,
+                selectedConversationID: selectedConversationID,
                 taskID: taskID,
                 reason: reason,
                 payloadHash: Self.payloadHash(for: draft)
             )
+            invalidatePendingDraftAutosave()
             publishTransientNotice(
                 kind: .lifecycle,
                 message: "Draft protected by checkpoint #\(checkpoint.sequence) (\(reason))"
@@ -537,8 +846,8 @@ final class AppViewModel: ObservableObject {
         case .active:
             lifecyclePermitsMutations = true
             guard revalidateBuildActivation() else { return }
-            guard ensureRuntimeAvailable() else { return }
-            restoreRuntimeProjection()
+            guard flushPendingDraftAutosave() else { return }
+            restoreS1PreviewProjection()
             refreshProbeState(publishSuccess: false)
             refreshIsolationCanary(publishSuccess: false)
         @unknown default:
@@ -548,6 +857,7 @@ final class AppViewModel: ObservableObject {
 
     private func suspendGovernedWork(reason: String) {
         pauseGovernedWork()
+        cancelDraftAutosaveTimer()
         guard lifecyclePermitsMutations else {
             executionAuthorizer.update(allowed: false)
             return
@@ -561,6 +871,7 @@ final class AppViewModel: ObservableObject {
     }
 
     private func pauseGovernedWork() {
+        cancelDraftAutosaveTimer()
         streamGeneration = nil
         streamTask?.cancel()
         streamTask = nil
@@ -582,7 +893,7 @@ final class AppViewModel: ObservableObject {
             pauseGovernedWork()
             clearCachedSecurityEvidence()
             buildActivationMessage = refreshed.diagnosticText
-            businessStatus = "Update activation required; Agent mutations are paused"
+            businessStatus = "这个版本还没有完全启用，暂时不能改动内容"
             publishError("Running executable identity does not match the installed bundle (BUILD-ACTIVATION)")
             return false
         }
@@ -597,6 +908,27 @@ final class AppViewModel: ObservableObject {
         return true
     }
 
+
+    private func restoreS1PreviewProjection() {
+        guard let database else { return }
+        do {
+            let workspace = try database.restoreS1ConversationWorkspace()
+            applyS1ConversationWorkspace(workspace)
+            projects = try database.listProjects()
+            refreshS1NovelProgress()
+            planBody = ""
+            planAwaitingApproval = false
+            openingPlanApproval = nil
+            interviewStep = 0
+            lastToolReceipt = nil
+            latestAgentRun = nil
+            chapter = nil
+            projectedBusinessMilestone = nil
+            businessStatus = "对话和草稿已恢复。当前只验证界面、导航和本地保存，尚未接入真正的模型任务"
+        } catch {
+            publishError("Conversation restore failed (S1-RESTORE)")
+        }
+    }
 
     private func ensureRuntimeAvailable() -> Bool {
         if runtime != nil { return true }
@@ -832,7 +1164,7 @@ final class AppViewModel: ObservableObject {
         do {
             let result = try runtime.handleUserMessage(command)
             apply(runtimeSnapshot: result.snapshot)
-            businessStatus = result.status
+            businessStatus = Self.businessStatus(for: result.snapshot)
             return result.snapshot
         } catch let error as AppDatabaseError {
 #if DEBUG
@@ -868,7 +1200,12 @@ final class AppViewModel: ObservableObject {
 
     private func publishTransientNotice(kind: TransientNotice.Kind, message: String) {
         noticeDismissTask?.cancel()
-        let notice = TransientNotice(id: UUID(), kind: kind, message: message)
+        diagnosticNoticeMessage = message
+        let notice = TransientNotice(
+            id: UUID(),
+            kind: kind,
+            message: S1OrdinarySurfaceContract.noticeDescription(for: message)
+        )
         transientNotice = notice
         noticeDismissTask = Task { [weak self] in
             try? await Task.sleep(nanoseconds: 2_500_000_000)
@@ -877,12 +1214,25 @@ final class AppViewModel: ObservableObject {
         }
     }
 
-    private func publishError(_ message: String) {
-        if let current = errorMessage, current != message {
-            errorMessage = current + "; " + message
+    private func publishError(_ message: String, domain: ErrorDomain = .persistent) {
+        if let current = errorMessagesByDomain[domain], current != message {
+            errorMessagesByDomain[domain] = current + "; " + message
         } else {
-            errorMessage = message
+            errorMessagesByDomain[domain] = message
         }
+        refreshPublishedErrorMessage()
+    }
+
+    private func clearErrors(in domain: ErrorDomain) {
+        errorMessagesByDomain[domain] = nil
+        refreshPublishedErrorMessage()
+    }
+
+    private func refreshPublishedErrorMessage() {
+        let diagnostics = ErrorDomain.allCases.compactMap { errorMessagesByDomain[$0] }
+        diagnosticErrorMessage = diagnostics.isEmpty ? nil : diagnostics.joined(separator: "; ")
+        let messages = diagnostics.map { S1OrdinarySurfaceContract.errorDescription(for: $0) }
+        errorMessage = messages.isEmpty ? nil : messages.joined(separator: "；")
     }
 
     private static func businessMilestone(for snapshot: AgentRuntimeSnapshot) -> AgentBusinessMilestone {
@@ -905,54 +1255,58 @@ final class AppViewModel: ObservableObject {
 
     private static func businessStatus(for snapshot: AgentRuntimeSnapshot) -> String {
         if let chapter = snapshot.chapter {
+            let progress: S1OrdinaryProgress
             switch chapter.stage {
             case .notStarted:
-                return "Opening plan approved; Chapter 1 generation ready"
+                progress = .chapterReady
             case .reviewingV1, .reviewingV2:
-                return "Chapter 1 revision \(chapter.activeVersion.revision) awaiting review"
+                progress = .reviewingChapter
             case .diagnosing:
-                return "Chapter 1 diagnosis in progress"
+                progress = .understandingChapterFeedback
             case .awaitingRewriteConfirmation:
-                return "Waiting for exact rewrite-scope confirmation"
+                progress = .waitingForRewritePlan
             case .rewriting:
-                return "Chapter 1 rewrite in progress"
+                progress = .rewritingChapter
             case .approvedFrozen:
-                return "Chapter 1 approved and frozen"
+                progress = .chapterApproved
             }
+            return S1OrdinarySurfaceContract.progressDescription(progress)
         }
 
         if let approval = snapshot.openingPlanApproval {
+            let progress: S1OrdinaryProgress
             switch approval.status {
             case .pending:
-                return "Waiting for opening plan approval"
+                progress = .waitingForOpeningPlan
             case .approved:
-                return "Opening plan approved; chapter planning pending"
+                progress = .openingPlanApproved
             case .invalidated:
-                return "Opening plan changed; re-approval required"
+                progress = .openingPlanChanged
             case .expired:
-                return "Opening plan approval expired; re-approval required"
+                progress = .openingPlanExpired
             }
+            return S1OrdinarySurfaceContract.progressDescription(progress)
         }
 
         if let stage = snapshot.latestRun?.currentStage {
             if stage.hasPrefix("openingPlan.approval") {
-                return "Waiting for opening plan approval"
+                return S1OrdinarySurfaceContract.progressDescription(.waitingForOpeningPlan)
             }
             if stage.hasPrefix("openingPlan.approved") {
-                return "Opening plan approved; chapter planning pending"
+                return S1OrdinarySurfaceContract.progressDescription(.openingPlanApproved)
             }
             if stage.hasPrefix("strategicInterview") {
-                return "Strategic interview in progress"
+                return S1OrdinarySurfaceContract.progressDescription(.understandingIdea)
             }
             if stage == "awaitingProjectIntent" {
-                return "Waiting for a novel idea"
+                return S1OrdinarySurfaceContract.progressDescription(.waitingForIdea)
             }
         }
 
-        if snapshot.session.focusedProjectID != nil || !snapshot.projects.isEmpty {
-            return "Strategic interview in progress"
-        }
-        return "Waiting for a novel idea"
+        let progress: S1OrdinaryProgress = snapshot.session.focusedProjectID != nil || !snapshot.projects.isEmpty
+            ? .understandingIdea
+            : .waitingForIdea
+        return S1OrdinarySurfaceContract.progressDescription(progress)
     }
 
     private static func probeDigest(for text: String) -> String {

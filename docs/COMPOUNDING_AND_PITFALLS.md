@@ -1,6 +1,6 @@
 # CangJie Compounding and Pitfalls Log
 
-Updated: 2026-07-18. Update after every slice or milestone with evidence.
+Updated: 2026-07-19. Update after every slice or milestone with evidence.
 
 ## P-001 M0 shell was mistaken for product UX
 Feasibility screen is not the Agent product. Label every IPA as feasibility, development slice, candidate, or accepted milestone; report included/excluded/verification/next.
@@ -242,7 +242,7 @@ A transient acknowledgement can be semantically correct while its separators are
 
 ## P-060 Valid UTF-8 can still be unreadable mojibake
 
-A replacement-character or `????` scan does not catch text that was decoded and re-encoded through the wrong code page, because strings such as mojibake remain technically valid UTF-8. Review user-facing Chinese source semantically, scan for known mojibake markers, and keep representative Chinese intent/template tests. When rewriting paragraph text, operate on decoded content while preserving the original raw LF, CRLF, or CR separator bytes so fixing encoding does not weaken byte-exact locks.
+A replacement-character or literal question-mark-run scan does not catch text that was decoded and re-encoded through the wrong code page, because strings such as mojibake remain technically valid UTF-8. Review user-facing Chinese source semantically, scan for known mojibake markers, and keep representative Chinese intent/template tests. When rewriting paragraph text, operate on decoded content while preserving the original raw LF, CRLF, or CR separator bytes so fixing encoding does not weaken byte-exact locks.
 
 ## P-061 Terminal chapter state needs database-level canonical evidence
 
@@ -434,9 +434,9 @@ Canon, plans, approvals, knowledge boundaries, receipts, hashes, budgets, and br
 
 Fixed interviews, exact approval cards, paragraph locks, diagnosis forms, Keychain CRUD, Candidate Set, and runtime probes can prove persistence, versioning, security, and recovery. They do not prove that a new user understands the product or feels that an Agent is leading. Every candidate must identify whether it validates infrastructure, product interaction, or both.
 
-## P-106 Preference evidence and byte-exact protection are different contracts
+## P-106 Selection, preference evidence, soft preservation, and hard lock are different contracts
 
-“喜欢” means the user wants more of this feeling and becomes positive preference evidence. “原样保留” means the selected bytes cannot change in the authorized rewrite. Never make every liked passage immutable, and never weaken an explicit preserve selection into a soft style hint.
+A text selection only identifies the current discussion focus and the starting point for analysis. “这段我喜欢” records positive evidence; “这个感觉别丢” records a soft preservation intent; “只讨论这段” limits the current conversation focus; “标记为问题” records negative evidence without requiring a reason. None of them makes bytes immutable. Only an explicit “锁定文字不变” action or an unambiguous command such as “这句一个字都不要动” creates a version-bound byte-exact lock. AI may hypothesize why the user likes something, but that hypothesis must remain correctable and separate from confirmed preference. Never infer a hard constraint or a preference reason from selection alone.
 
 ## P-107 Rejection reasons must be optional for ordinary users
 
@@ -501,3 +501,576 @@ If S1 accepts text before a real Provider exists, the build must not leave users
 ## P-122 The final milestone still needs an explicit non-goal list
 
 A release-candidate stage without visible exclusions invites scope drift into platform publishing, multi-device sync, infinite background work, budget bypass, third-party code execution, and copyrighted corpus ingestion. Keep the first-release exclusions next to S6 acceptance, not only in a distant architecture section.
+
+## P-123 A result drawer must not become a fourth landscape column
+
+The confirmed landscape contract is one icon-only Activity Bar, one reader area at about two-thirds width, and one right-hand area at about one-third width. “仓颉” and “这次结果” switch inside that same right-hand area, exactly as portrait switches focus. Adding separate conversation and result columns would crush the reader and contradict the user-approved model.
+
+## P-124 Structured sentiment labels and hard preservation do not belong in the first layer
+
+Putting “喜欢 / 不喜欢” or “原样保留” in the first layer turns ordinary reading into annotation and locking work. The confirmed first layer is `复制 | 问仓颉 | 更多`. The primary path is free text selection → ask CangJie → automatic chapter/version/selection/context binding → plain-language impact preview when understood → dynamic questioning only when ambiguity remains. Keep the four soft signals and the rarely used hard lock under More. The mere existence of a selection must not create preference, problem, preservation or lock state.
+
+## P-125 Brand naming does not justify an unapproved historical theme
+
+The earlier paper, ink, vermilion, scroll and seal direction was inferred from the name “仓颉” rather than confirmed by the user. The approved direction is restrained, quiet, modern, warm-neutral, with limited warm-orange emphasis and a design philosophy similar to Claude Code. It must remain CangJie's own system and must never claim Claude official colors, components or brand assets.
+
+## P-126 Icon-only navigation requires discoverability and accessibility
+
+An icon-only Activity Bar saves space but becomes guesswork if icons are unexplained. Every visible icon needs a long-press name-and-purpose hint, a stable accessibility label, a selected state, and a real capability behind it. Do not solve discoverability by restoring permanent text that squeezes the reader.
+
+## P-127 Portrait is a focus switch, not a shrunken landscape
+
+Landscape panels may coexist, but portrait must show one primary surface at a time: 阅读, 仓颉 or 这次结果. Switching orientation or focus must preserve the same conversation draft, stream, chapter, scroll position, quote selection, task and approval state. Never compress the landscape columns into unusable portrait panes.
+
+## P-128 An Agent must not turn ordinary work into confirmation labor
+
+The earlier approval-heavy direction risked replacing forms with a stream of “are you sure?” dialogs. The confirmed default is “关键事情问我”: execute safe, reversible daily work and report afterward; show chapter text and important creative direction as reviewable results; pause only for major irreversible changes, destructive deletion, new external data disclosure, or budget overruns. “写完这一章暂停”应在当前章安全收尾后保存 checkpoint；“现在暂停”应立即取消当前请求并保留最近完整 checkpoint，不能把两种命令或“结束并保留成果”混成一个含糊的 pause，也不能再弹确认。
+
+## P-129 Fewer prompts must not weaken production governance
+
+Reducing visible approvals changes interruption frequency, not authorization or integrity rules. Typed tools, exact-version binding, idempotency, budgets, checkpoints, receipts, branch preservation, secret boundaries, and external-service consent remain mandatory in every autonomy mode. The first three chapters still require chapter-by-chapter calibration before higher automation is unlocked.
+## P-130 More questions do not make the Agent more intelligent
+
+A fixed interview can look thorough while exhausting the user and delaying the first useful creative signal. The required loop is understand a little, do a little, show something, then update understanding. Ask one easy question only when its answer changes the next decision; roughly 2–4 high-value questions before a scene, sample, or candidate is guidance rather than a coded quota. Stop when action is possible, further information gain is low, the user is tired or asks to proceed, or the decision is low-risk and reversible.
+
+## P-131 AI hypotheses are not user decisions
+
+Store user wording, confirmed decisions, AI hypotheses, and critical unknowns as separate versioned states. A plausible inference may guide a reversible sample, but it must never silently become a durable preference, story fact, or confirmed direction. Every projection and Typed Tool write must preserve that boundary.
+
+## P-132 Persisting a conversation does not justify creating an empty novel
+
+All conversations should survive restart from the first message, but automatically creating an unnamed project for every idea clutters the shelf and lies about commitment. Create and link a novel only when the user clearly continues, a first durable result exists, story memory becomes necessary, or prose generation starts. Do it without a form, explain it in plain language, and isolate distinct new-book ideas before they can affect the current novel.
+
+## P-133 “This time's results” must not degrade into a chat dump or engineering log
+
+The result surface exists to collect useful products that can be read, adopted, edited, executed, or saved for later. Ordinary questions, explanations, greetings, and every model message must remain in chat instead of spawning cards. Use a small stable plain-language status vocabulary and never expose Artifact, CanonFact, Revision Hash, Tool Receipt, or similar internal terms on the ordinary path.
+
+## P-134 Adopting a result must not require manual transfer
+
+A conversational command such as adopt, open, remove, or summarize should act on the bound result. Typed Tools must file adopted content into the correct chapter, story memory, source material, AI task, or creation record while preserving source conversation, version, replacement relation, receipt, and idempotency internally. Filing a result does not erase it from the current conversation's trace.
+
+## P-135 Browsing a shelf is not permission to switch the active novel
+
+The novel icon owns a left-side shelf and returnable detail stack; landscape changes only the left region and portrait overlays it. Rows show only title, plain-language progress, and recent time, while details expose useful book actions without project fields. Opening details or reading another book is inspection, not a context switch. Bind that book only through Continue Creating, asking CangJie from its prose, continuing one of its related conversations, or an explicit switch, then announce the new active book in plain language. This prevents cross-book contamination and preserves the center conversation, draft, stream, and reading position.
+
+## P-136 Story memory is an Agent-maintained projection, not a settings form
+
+A novice reader should not have to populate or reconcile a professional lore database before writing. Build Story Memory from conversations, adopted results, approved prose, user edits, research and chapter settlement, then project it through six plain-language groups and four stable statuses. Character knowledge becomes “现在知道 / 还不知道 / 错误地以为”, important entries expose a human-readable source, and AI hypotheses remain visibly unconfirmed. Keep CanonFact, TruthScope, CharacterKnowledge, PromiseLedger, evidence and versions as the governed backend rather than deleting them or exposing them raw.
+
+## P-137 A story-memory correction is not permission to rewrite history silently
+
+A small non-conflicting correction may execute through a Typed Tool and report afterward, but a change that contradicts approved prose or affects many later chapters, character knowledge states, promises or plans must first produce a plain-language impact explanation and governed change proposal. Preserve the old evidence and replacement relationship, then create a new version or branch only after the required user decision. A convenient memory editor must never become an unversioned shortcut around canon governance.
+
+## P-138 The task page is not a second control plane
+
+Keep the center CangJie conversation as the ordinary user's command surface. The AI Tasks page exists to make real execution visible, recoverable and diagnosable, not to force users to manually operate a scheduler. Every status answer and every task page field must come from the same transactional task source; chat history, cached prose and model claims are not status evidence. Project one versioned state into conversation, Current Results and AI Tasks so all three converge after run, pause, recovery, completion, failure or adoption. Never invent progress percentages or expose chain of thought to create an illusion of transparency.
+
+## P-139 Pause, stop-with-results, and discard are different operations
+
+A safe pause persists a checkpoint and preserves recovery. Stopping while keeping results ends future steps but retains generated, unadopted prose, plans and results without approving them. Discarding results is a separate, cautious operation that names the affected unadopted material and requests explicit confirmation when needed; it cannot delete adopted, approved or frozen content. Model task lifecycle and result-retention state separately, bind both to task version, usage, idempotency and checkpoint evidence, and use plain-language reasons for network loss, app suspension, provider load, budget limits, major story decisions and unknown outcomes. One primary creative task and one Writer owner prevent conflicting concurrent edits; additional work queues or asks first. Advanced diagnostics must remain redacted and never expose prompts, credentials or chain of thought.
+
+## P-140 Research is proactive evidence work, not a user-operated search box
+
+Ordinary users do not know which world rule is uncertain, stale or likely to contaminate a genre. Run knowledge-gap assessment during project formation, chapter planning, pre-draft and review, then use Story Memory, a versioned local topic pack, valid cache, necessary online research and source/conflict checks in that order. User-requested search remains an extra entry, not the trigger policy. For example, a 洪荒 (Honghuang) idea should automatically receive a sourced topic pack, while only disputes that truly change the story direction are surfaced to the user. Avoid both passive under-research and blind per-term searching; record why research ran, which layer answered, what it cost and what remains unresolved.
+
+## P-141 A topic pack is not canon and external material is never authority
+
+A topic pack must separate public or traditional facts, common web-fiction conventions, different schools, conflicting claims and the rule selected for this book, with sources, version, update time and scope. It may inform proposals but cannot silently become confirmed Story Memory or copy complete copyrighted novels. Web pages, search results, imported documents and packs are untrusted data: they cannot change Agent permissions, system prompts, tool policy or confirmation state. Extraction, provenance, conflict checks and governed adoption remain mandatory.
+
+## P-142 LLM confidence is not a research trigger policy
+
+A model saying “I know this” is neither evidence of coverage nor permission to skip research. Evaluate content type, existing coverage, consequence of error, freshness, source reliability, conflicts and genre-contamination risk independently. Treat “关闭联网 / offline-only”, “只用本地资料 / local-only”, and “研究预算 / research budget” as hard policy boundaries, and require an honest unresolved result when reliable confirmation is unavailable.
+
+## P-143 Exploration samples do not require full opening planning
+
+A 100–300 character scene, micro-sample, candidate opening, ability cost or chapter ending is a reversible probe for discovering taste. Requiring a completed outline, production bible or field-by-field approval before showing any prose recreates the professional-author form barrier. Store exploration output as evidence and a reviewable result, not as a full Chapter 1 or confirmed setting.
+
+## P-144 One plain-language readiness result is enough to authorize Chapter 1
+
+Before full Chapter 1, show one “我准备这样写” result covering story feel, protagonist situation, chapter event, ending payoff, explicit avoidances and unresolved choices. Do not expose CreativeContract, canon, opening-contract or beat-sheet terminology. A button and semantically clear conversation commands such as “直接写” or “你替我决定” must produce equivalent scoped authorization. Unresolved choices stay reversible temporary assumptions while the backstage Showrunner still prepares production-grade plans, research and constraints.
+
+## P-145 Generated prose is not approved prose
+
+Model completion, opening the reader, asking for a revision or retaining a result does not freeze a chapter. A generated Chapter 1 remains “供你看看” and cannot enter confirmed Story Memory or become immutable downstream truth until the user approves it. In plain-language product terms, “通过后才冻结”: only approval may freeze the exact version and settle character state, world rules, clues, reader promises and the next-chapter basis. Test the before/after boundary across conversation, Current Results, Story Memory, task state and version storage.
+
+## P-146 A selection anchor is not the rewrite boundary
+
+The user's highlighted words are evidence about where the problem became visible, not proof that the dependency ends there. Before editing, inspect the adjacent paragraph, scene motivation and result, chapter ending, downstream chapters, approved prose, user edits, Story Memory and plans. Show the real scope in plain language and offer “连带改顺后面 / 只改这里但可能不连贯 / 另建版本试试 / 先别改”. “只讨论这段” limits the conversation focus only; it must never suppress dependency warnings.
+
+## P-147 Human edits outrank stale generated prose
+
+Once the user has manually revised text, that provenance becomes the current authority for subsequent analysis and regeneration. A later model run must not reconstruct the scene from an older AI draft and overwrite the user's words or the state derived from them. Include human-edit provenance in context compilation, impact analysis, diffs and selective-regeneration tests. Replacing user text requires explicit scope and authorization.
+
+## P-148 Mid-story edits require dependency reconnection
+
+Changing a sentence in the middle of a story without reconnecting its consequences leaves characters knowing obsolete facts, timelines using old durations, later actions following removed causes, promises paying off against deleted setups, or genre rules reverting. Regenerate only affected working content, branch rather than overwrite approved prose, then reconnect in dependency order and rerun character-knowledge, time, causality, promise and genre-rule checks. A locally fluent patch is not complete if the downstream logic still belongs to the previous version.
+
+## P-149 Human-edit priority does not make manual editing the primary UX
+
+Human-authored text must outrank stale generated prose after the user chooses to edit, but that governance rule does not justify an editor-first product. The normal calibration path remains selection/reference, plain-language conversation, diagnosis, impact preview and Agent execution. A user who never manually edits must still be able to complete the first three chapters.
+
+## P-150 Manual edits create versions, not implicit approval
+
+Saving user edits must create a new version and preserve the prior AI draft. The edited text becomes the current source for later reasoning, but it does not mean the user has approved the whole chapter, frozen it or settled Story Memory. Keep editing provenance, chapter approval and canon settlement as separate state transitions.
+
+## P-151 Do not interrupt every keystroke with impact dialogs
+
+Per-character or per-sentence confirmation makes the fallback editor unusable and teaches users to avoid it. Autosave the edit session, then run one consolidated impact assessment when the user leaves editing, asks CangJie to revise, continues generation, approves the chapter or starts downstream work. Fail closed only when the deferred analysis finds a protected or high-impact conflict.
+
+## P-152 Reference learning is not copyright imitation
+
+A user-authorized novel, excerpt or personal work may support a sourced profile of abstract traits such as pacing, structure, narration, characterization and reading effect. It is not permission to reproduce distinctive wording, long passages, unique plot machinery or a reconstructable copyrighted corpus. Store traits and narrow provenance, not a clone target.
+
+## P-153 Preference memory is not model fine-tuning
+
+The first release does not train model weights or create a private fine-tuned Provider model. It stores reviewable local evidence, scopes and confirmations, retrieves relevant traits and compiles them into task context. UI and marketing must say this plainly; “upload a book and train your model” is both technically false and likely to create copyright and trust failures.
+
+## P-154 One interaction is not a permanent preference
+
+A user saying “ask less and show a sample” once may be a momentary need, not a lifelong working style. Record one-time, book-level and cross-project scopes separately, keep AI hypotheses distinct from user confirmation, and require evidence or explicit adoption before broadening scope. Every learned preference needs review, correction and revocation.
+
+## P-155 Ambiguous rejection requires diagnosis, not a reason form
+
+“This chapter feels wrong” is valid reader evidence. Asking the user to classify viewpoint, pacing, causality, payoff or style simply transfers expert work back to the person CangJie is meant to help. Use the conversation, confirmed preferences, Story Memory and prose to propose two or three concrete plain-language possibilities, then ask one easy, high-information question.
+
+## P-156 Do not redraw a whole chapter before reaching actionable clarity
+
+Blindly changing the prompt and regenerating the chapter wastes money, destroys useful passages and produces no learning about the mismatch. If understanding is still ambiguous, use a reversible 100–300-character diagnostic sample. Only after CangJie can reflect a sufficiently actionable understanding and show the real dependency impact should it request authorization for full revision or selective regeneration.
+
+## P-157 Diagnostic candidates are hypotheses, not user-confirmed facts
+
+A plausible diagnosis can still be wrong. Store each candidate with supporting and opposing evidence and a state such as hypothesized, user-confirmed, user-rejected or unresolved. A candidate must not become a permanent preference, confirmed Story Memory or rewrite rule merely because the model generated it or the user chose a sample without confirming the inferred reason.
+## P-158 Chapter approval is an intent contract, not an approval form
+
+A complex field-by-field approval page makes ordinary readers operate the governance engine. Keep the chapter in the continuous reader, offer only lightweight “就按这版继续 / 和仓颉聊聊”, and treat explicit natural-language approval as equivalent typed-tool intent. Buttons are convenience, not the only valid authorization channel.
+
+## P-159 Ambiguous praise is not approval
+
+“还行” and “差不多” may mean reluctant acceptance, unresolved discomfort or a wish to keep talking. Freezing on that evidence silently converts uncertainty into canon. Ask one low-burden clarification—continue calibration or proceed with this version—and do not freeze, settle or unlock the next chapter until the answer is explicit.
+
+## P-160 Chapter approval is an ordered transaction
+
+A success message before version freeze, Story Memory/character-knowledge/clue settlement and checkpoint can leave the UI ahead of durable truth. Bind the exact chapter version, freeze it, settle derived state, persist the checkpoint, and only then unlock the next chapter. A partial failure must remain recoverable and must not claim “这章确定了”.
+
+## P-161 Chapter 3 approval is not continuous-creation authorization
+
+The user may like the first three chapters but still want to stop, read, edit or control cost. Passing the calibration gate only makes continuous creation eligible. Keep the book readable and editable, explain automation, budget and major-event pause behavior in plain language, and request one separate authorization before generating Chapter 4.
+
+## P-162 One continuous authorization should remove routine approval spam
+
+After the user knowingly authorizes continuous creation, asking “continue?” after every ordinary chapter defeats the purpose of an Agent. Continue within the approved lookahead and budget, execute ordinary reversible decisions and report them, while preserving checkpoint, pause, revocation and scoped major-story-decision gates. Continuous creation is not blanket authority over every major story change. Never use this convenience to bypass budget, integrity, permission, safety, external-disclosure or version-governance hard limits.
+
+## P-163 Major story decisions need scoped delegation, not one universal rule
+
+“All major events must always ask” makes the Agent timid, while “automatic mode decides everything” removes user authorship. Classify decisions by consequence, then resolve versioned delegation by category and novel, volume or chapter scope. Ordinary reversible decisions execute and report; a major change executes only when an explicit current grant covers both category and scope. One accepted choice never implies permanent delegation.
+
+## P-164 A pause card must reduce decision burden
+
+A bare “major decision detected, please decide” gives the hardest creative work back to an ordinary reader. Pause before a safe checkpoint, explain why the choice matters and what it affects, offer two or three concrete directions, recommend one with a reason, and ask one easy high-information question. The card should help the user recognize a preference rather than invent a professional answer.
+
+## P-165 Delegation scope must be visible, revocable and versioned
+
+Natural-language grants such as “you decide character deaths in this volume” need explicit category, book/volume/chapter scope, source evidence, effective version and revocation history. Users must be able to inspect, narrow and revoke them in plain language. Revocation gates future decisions; already executed changes remain traceable and use normal branch and impact governance.
+
+## P-166 Authorized major decisions still require conspicuous reporting
+
+Delegation removes a blocking question, not accountability. After CangJie executes an authorized major change, conversation, Current Results and AI Tasks should conspicuously identify the actual choice, affected content and grant used. Silent execution makes later disagreement impossible to diagnose and turns scoped trust into hidden authorship.
+
+## P-167 Creative autonomy cannot override hard safety and budget boundaries
+
+Creative delegation governs story judgment only. Cost hard limits, task integrity, tool permissions, security policy, external-data disclosure consent, destructive deletion protection and version/idempotency/checkpoint requirements are non-delegable. No “less interruption” mode, volume-wide grant or blanket creative instruction can bypass them.
+
+## P-168 Continuous creation needs a bounded unread lead
+
+An unbounded generation queue wastes money and compounds drift before the user can react. Default to three prepared chapters, accept a plain-language or settings value from one to five, and hard-stop when five unread leading versions exist. “Batch target” and “unread lead limit” are different controls and must not be conflated.
+
+## P-169 One Writer owner and chapter settlement prevent cross-chapter races
+
+Starting Chapter N+1 while Chapter N prose, review, temporary Story Memory and checkpoint are still unsettled lets later text depend on facts that may disappear. Enforce strict chapter order and one prose-write owner. Research and read-only review may run concurrently only when they cannot mutate prose or steal ownership.
+
+## P-170 Unread working chapters are useful context, not user-confirmed truth
+
+Later drafting may need an unread chapter as working context, but the UI and governance must label it “仓颉准备的版本，等你看”. It cannot become approved prose or confirmed Story Memory until the user actually approves it. A prior-chapter edit preserves the old branch, analyzes dependencies and regenerates only affected work.
+
+## P-171 “Finish this chapter then pause” and “pause now” are different commands
+
+The first completes review, temporary settlement and checkpoint, then refuses the next Writer lease. The second cancels the active request immediately and treats partial output as temporary incomplete material, not a chapter. Conflating them either ignores urgency or destroys a nearly complete chapter the user wanted preserved.
+
+## P-172 Resume requires idempotency and usage reconciliation
+
+Every resume path must bind TaskRun, chapter/version, idempotency key, UsageRecord and the latest complete checkpoint. Partial provider outcomes require reconciliation before retry. A visually successful resume that duplicates prose, tool side effects or charges is still a production failure.
+
+## P-173 Freeze the anti-drift proxy only with explicit role and authority boundaries
+
+The architecture is now confirmed under the public names “用户偏好代理 / 影子用户” and the internal components `UserPreferenceProxy + BookReaderProxy`, so leaving it as an open research question would contradict the product contract. Confirmation does not justify vague power. Freeze its evidence flow, scope, abstention behavior, privacy boundary, evaluation plan and lack of approval/canon/major-plot authority before implementation. An attractive label must never expand permissions by documentation momentum.
+
+## P-174 A preference proxy is not a digital clone
+
+“Shadow user” is a product metaphor for evidence-based prediction, not a promise to reproduce the user’s mind, personality or every future judgment. Public wording must say user preference proxy or shadow user, explain uncertainty and allow correction. Claims such as “a complete digital version of you” create impossible expectations and conceal legitimate abstention.
+
+## P-175 Start non-parametric; earn the right to evaluate a learned model
+
+Sparse, changing and scope-dependent feedback is a poor foundation for immediate distillation, LoRA or user-specific fine-tuning. The first release should use reviewable evidence memory, retrieval, candidate comparison, blind review, calibration and abstention. Follow the frozen P0–P5 order: event/evidence foundation, passive profile, shadow review, continuous-generation integration, real-feedback calibration, then optional lightweight-model evaluation. A lightweight ranker or preference model may be evaluated only after a strong non-parametric baseline, an independent held-out set and real-user samples show stable net benefit. Model novelty is not a substitute for evidence quality.
+
+## P-176 AI judgments cannot manufacture their own gold labels
+
+If the system writes a chapter, predicts that the user will like it and then stores that prediction as preference evidence, it creates a self-reinforcing loop detached from the user. Calibration labels must come from real user expression, choices, rejection diagnosis, final approved versions, corrections or revocations. AI prose, shadow reviews and confidence scores may be evidence about system behavior, never proof of user preference.
+
+## P-177 Preference scopes must not bleed into each other
+
+A preference that is stable across books, a rule chosen for one novel and a temporary wish for one scene have different authority. Store the three scopes—长期跨项目偏好, 本书偏好, and 当前卷/章节临时意图—separately with original evidence, support, counterevidence, confidence, version, revocability and confirmation state. Retrieval must resolve the narrowest applicable scope, and temporary evidence must never silently rewrite the broader profile.
+
+## P-178 The shadow user cannot exercise authorship authority
+
+Prediction quality does not grant approval rights. The proxy may rank candidates, predict acceptance or rejection, pre-review, abstain and recommend a pause. It cannot approve a chapter, merge Story Memory or canon, overwrite user-authored text, acquire Writer ownership or decide an unauthorized major plot change. Typed-tool policy must reject those actions even if a prompt asks for them.
+
+## P-179 Preference review must be blind and separate from story correctness review
+
+A `BookReaderProxy` that sees the global continuity report first may merely repeat it and appear more accurate than it is. Run hard-rule, character-knowledge, time, causality, promise and genre review independently from the shadow reader. The shadow reader receives the planned user-evidence snapshot but not the other reviewer’s conclusion; conflicts go to Showrunner governance. This separation is required for honest evaluation as well as better diagnosis.
+
+## P-180 Uploading or reading is not the same as liking
+
+A user may upload material to criticize it, study it or avoid it. Extract only sourced, explainable abstract traits from material the user is authorized to use, and keep them unconfirmed until the user adopts them or later evidence supports them. Never copy distinctive expression, long passages, unique plot devices or full copyrighted text, and never infer a permanent preference from mere exposure.
+
+## P-181 Drift control needs graduated responses
+
+A binary “continue or stop” gate either interrupts too often or reacts too late. Combine single-chapter and cumulative drift evidence. A yellow signal（黄色缩小窗口）should reduce unread lead, shrink the next generation window and seek earlier real feedback; a red signal（红色安全暂停）should pause at a safe checkpoint with evidence and recovery options. Both thresholds need versioning, false-positive/false-negative measurement and task-state effects—not decorative colors or one unverified LLM score.
+
+## P-182 Research metrics are method references, not product promises
+
+Paper benchmarks, win rates and long-context claims are produced under specific datasets, prompts and evaluation conditions. Use them to choose candidate methods and design experiments, but do not paste their numbers into CangJie acceptance criteria or marketing. Product claims require CangJie’s own held-out evaluation of accept/reject prediction, candidate ranking, calibration, reasonable abstention, drift false negatives/positives, automation evidence and real-user sampling.
+## P-183 Summaries and embeddings cannot replace immutable source text
+
+A summary, vector, extracted event or Story Memory projection is a derived view that may be incomplete, stale or wrong. Imported material, chapter prose, human edits, research and authorized references need immutable source versions with source, chapter/scene/paragraph, time and exact span provenance. Reindexing or revision may add a new version, never overwrite the evidence needed to reproduce an older conclusion or branch.
+
+## P-184 A novel index cannot rely on keywords or vectors alone
+
+Keyword search misses paraphrase and semantic retrieval can surface convincing but narratively wrong matches. Long fiction also depends on chapter order, event progression, character state and knowledge, time, relationships, resources, abilities, foreshadowing and promises. Combine FTS5, lightweight vectors, chapter hierarchy and structured narrative relations, and keep every layer tied to source evidence and version identity.
+
+## P-185 Chapter order and narrative relations belong in query planning
+
+The nearest semantic match may come from a distant chapter after the character has learned something or a resource has changed. Plan searches from current scene and chapter through adjacent order before widening along relevant character/event/knowledge/promise relations. A flat top-k search can create knowledge leaks and timeline errors even when every returned paragraph is individually real.
+
+## P-186 Insufficient evidence must widen the search before the system guesses
+
+When local context cannot support a conclusion, expand in a recorded sequence from scene to chapter, current volume and neighbors, relevant narrative relations, the full book and only then necessary research. The planner must record why it widened and what versions it covered. If allowed evidence remains insufficient, return “暂时无法确认”; do not convert model confidence, a summary or a similar passage into fact.
+
+## P-187 High-impact conclusions must return to original text
+
+Character knowledge, event occurrence, chronology, causality, abilities, items, quantities, resources, foreshadowing, approved-prose boundaries, human edits and research support are too consequential to close from an LLM extraction alone. Use extraction to propose candidates, then verify against immutable source spans. A conclusion without valid source evidence is a hypothesis, not canon, approval evidence or a safe rewrite dependency.
+
+## P-188 Narrative indexing must be progressive, resumable and honest about coverage
+
+Blocking import until every embedding and relationship is built makes large novels unusable and fragile on iPad. Persist readable source and basic FTS5 first, then incrementally extract scenes, characters, events, knowledge, state, promises, vectors and relations with checkpoints and idempotency. Show what is searchable, what is still processing, coverage and freshness; never market a partial index as complete-book understanding.
+
+## P-189 Reference novels create candidate abstract traits, not automatic preferences
+
+Authorized reference material may provide sourced evidence for structure, pacing, viewpoint, narrative distance, characterization and information order. Uploading, reading or indexing it does not prove the user likes those traits. Keep extracted traits pending until user confirmation, preserve scope and revocation, and never let reference evidence enter Story Memory/canon or Agent permissions by itself.
+
+## P-190 Do not reproduce copyrighted expression through the index
+
+An immutable evidence layer is not permission to expose, reconstruct or imitate distinctive wording, long passages, unique plot devices or a copyrighted corpus. Store only what the user is authorized to provide, constrain quotations and outputs, derive explainable abstract traits, and test that retrieval cannot become a backdoor for verbatim reproduction. Evidence provenance supports audit; it does not erase copyright boundaries.
+
+## P-191 Do not introduce heavy graph infrastructure before the local contract needs it
+
+Neo4j, Qdrant, full GraphRAG/LightRAG services and cloud knowledge-graph dependencies add deployment, migration, privacy, recovery and offline failure modes that the first iPad release does not need. Start with SQLite/GRDB, FTS5, lightweight local vectors, structured relationship tables and `ContextCompiler`. Evaluate heavier components only against measured scale and quality failures, not architecture fashion.
+
+## P-192 An index name or research result is not a product capability claim
+
+Calling the design a “novel CodeGraph” explains the intended behavior; it does not prove the index is complete, correct or implemented. Likewise, GraphRAG papers and retrieval benchmarks provide methods, not CangJie acceptance numbers. Keep decision freeze, implementation status, coverage evidence and user-facing claims separate, and require the N1–N28 acceptance suite before claiming whole-book narrative or material understanding.
+
+## P-193 Local basic indexing must not become a paid or external operation
+
+Uploading a file should first produce a readable immutable source, usable text, basic FTS5, page/chapter/paragraph locations, hashes, duplicate detection and an honest usability state on-device. Requiring a paid model or sending content away before those basics work adds privacy, cost and availability failure modes to a task the device can perform. Keep this stage free of Provider calls and external disclosure, and never block reading on whole-book deep understanding.
+
+## P-194 First networked deep understanding requires informed authorization
+
+A generic “allow AI analysis” toggle is not enough. Before the first external LLM, embedding, OCR, search or other Provider call, show exactly which files, chapters, pages, spans or samples will be sent, what will not be sent, the Provider/model, purpose, expected cost or range, budget ceiling and whether later incremental processing is allowed. Tool policy must reject the call without explicit authorization; UI wording alone is not a security boundary.
+
+## P-195 Material authorization must not expand silently
+
+Permission for one source range, purpose, Provider/model and budget does not cover a different book, broader chapter set, new use, new external service or higher spending. Bind authorization to versioned scope and make pause, revocation and local-only mode effective at the tool layer. Any material change must trigger a new plain-language disclosure and authorization rather than being hidden inside settings or a task retry.
+
+## P-196 Incremental analysis must not reprocess the whole book
+
+Reanalyzing every chapter after one new chapter or paragraph edit wastes money, battery, network and time, and makes recovery hard to audit. Persist source versions, dependency ranges and a `MaterialAnalysisCursor`; invalidate and rebuild only affected indexes and derived records. Whole-book reanalysis is a separate explicit operation, not the default interpretation of “continue” or “refresh”.
+
+## P-197 Pause and resume need idempotent disclosure and cost reconciliation
+
+A checkpoint that remembers only a progress label can resend the same material or charge twice after an unknown response. Record disclosure scope, request/idempotency identity, Provider/model, source version, completed ranges, usage, cost and write state. On disconnect, suspension, crash or cancellation, reconcile unknown outcomes before retrying and resume from the last durable boundary without duplicate external transfer, analysis, index writes or charges.
+
+## P-198 A unified evidence layer does not mean one universal understanding model
+
+The shared `EvidenceIndex` contract should unify immutable source, provenance, version, span, hash, FTS/semantic candidates, incremental updates, checkpoints and evidence backlinks. Narrative sequence and character knowledge, factual source conflict, user project intent and preference evidence require different schemas and query planning. Forcing every material through one generic extractor produces plausible but category-wrong answers and hides where authority actually comes from.
+
+## P-199 Material routing must classify mixed archives below the ZIP level
+
+A ZIP may contain a novel draft, a setting note, a historical PDF and examples the user dislikes. Giving the archive one label contaminates every downstream index. Classify by file after security inventory, split a mixed file by `SourceSpan` when necessary, and ask one easy question only when reliable automatic classification is impossible and the mistake would materially change results. Every derived view must still point to the same immutable source.
+
+## P-200 Retrieval isolation is a correctness and permission boundary
+
+A semantically similar passage is not automatically eligible evidence. Every query must constrain project, material type, purpose, confirmation state, Agent/tool permission and external-disclosure authorization before ranking results. Cross-project, cross-purpose or unconfirmed hits may be useful candidates only when explicitly allowed; otherwise they must be excluded, not merely down-ranked.
+
+## P-201 Reference material is neither book canon nor factual authority
+
+A setting reference can inspire a candidate but cannot silently become “this book is definitely like this”. The same authorized reference novel may support a purpose-isolated `NarrativeIndex` structure view and `PreferenceIndex` abstract-preference view over one immutable source, but those views must not share confirmation or adoption state. Fiction must never enter `ResearchIndex` as evidence for historical, institutional, mythological or scientific facts. Keep `ProjectMaterialIndex`, `PreferenceIndex`, `NarrativeIndex` and `ResearchIndex` adoption rules separate, require user confirmation where appropriate, and preserve copyright boundaries.
+## P-202 A model with a long prompt is not the product Agent
+
+Do not build CangJie as chat history plus a giant prompt and a bag of tools. The host Harness owns the loop, state, permissions, budget, transactions, recovery and completion proof; the model only proposes the next action. Frozen architecture reference: `CJ-AH-001` (`FROZEN`, 2026-07-18); `P-203` records its execution-evidence corollary.
+
+## P-203 Model narration is not execution evidence
+
+A sentence such as “created”, “saved”, “paused” or “finished” is never a state transition. Only a validated Typed Tool transaction and `ToolReceipt` may change the UI to completed. Feed the receipt back to the model before the loop continues.
+
+## P-204 More context can reduce correctness
+
+Never send the whole book, all conversations, every material or every tool schema by default. Compile task-specific slots from authoritative evidence, save the selection reason and manifest hash, and return to immutable source spans for high-risk conclusions.
+
+## P-205 Do not copy private or leaked implementation material
+
+`cc.zip` is private/unlicensed and not an official Claude Code source release. Use only non-expressive high-level clean-room observations. Never copy or closely paraphrase source, Prompt, Schema, strings, tests, comments, directory structure or interface signatures.
+
+## P-206 Recovering chat is not recovering an Agent task
+
+A production resume restores the TaskRun, Provider request state, ToolCall, Artifact, UsageRecord, ChapterVersion, CanonTransaction and checkpoint. If an expensive request has unknown outcome, reconcile first and never silently resend.
+## P-207 A checkpoint pointer must be part of the protected transaction
+
+Never commit chapter/canon state and write the recovery checkpoint afterward. ChapterVersion, story state, character knowledge, promise ledger, UsageRecord, idempotency result, ToolReceipt, asset references and the checkpoint record/current pointer must commit atomically. Use content-addressed prewrites and a transactional outbox for effects SQLite cannot own.
+
+## P-208 Approval is a durable protocol, not a button event
+
+Persist proposal identity, input/version hashes, prerequisites, scope, risk and expiry. Approval, denial, expiry and deferral all return structured results. Revalidate permission, budget, target version, Writer Lease and prerequisites immediately before execution.
+
+## P-209 A Writer Lease without a fencing token can still double-write
+
+A recovered stale Writer must never commit after a new Writer takes ownership. Every prose/canon commit validates the monotonic fencing token in the same transaction; old tokens remain invalid forever.
+
+## P-210 Branch and narrative time are Context isolation keys
+
+Every story retrieval carries book, branch, lineage, chapter version and as-of scene/time. Replacing an upstream chapter invalidates dependent Context manifests, plans, reviews and unread chapters. Similarity alone may never cross these boundaries.
+
+## P-211 Minimal tool context requires governed discovery
+
+Do not send every tool Schema, but do not hide capabilities from the model. Build a versioned ToolCatalogManifest and a white-listed capability lookup that cannot expand permission, disclosure or budget.
+
+## P-212 Clean-room language must match the actual process
+
+Because early research touched a private/unlicensed package, do not claim legal clean-room certification. Isolate the package from implementation, give implementers only public-source/original specifications, keep a source register and scan for copied names, strings, Prompts, Schemas and structural similarity.
+
+## P-213 An API key does not reliably identify its provider
+
+A key prefix, length, or character format may overlap, change, or be arbitrary for a proxy/custom service. At most, a format match can produce a local candidate hint. It cannot authorize automatic Provider selection. Require the user to choose the Provider first, bind the credential to that identity and allowed host set, and send it only to that destination. Never fan the same key out to multiple Providers or candidate Base URLs to discover where it works. Custom OpenAI-compatible services also require a Base URL and model discovery or an explicit model name. Keys must stay out of logs, exports, diagnostics, error receipts, and network traces.
+
+## P-214 Model selection must be real but not hidden behind routing modes
+
+The user should not be forced to guess a model before connecting a service, but after connection CangJie must show the models that the selected key can actually access and let the user choose one. Do not replace that choice with quality/cost/speed modes, hidden per-task routing, or a silently substituted model. If a custom service cannot list models, make the limitation explicit and allow a manually entered model name.
+
+## P-215 Multiple connections are user-managed, not an automatic failover system
+
+A saved connection is `Provider + Base URL + credential + selected model`. Users may keep several Providers or several keys for one Provider, but only one is current and switching is manual. A request stays on the connection it started with; on failure, offer reconnect, refresh, re-enter key, or manual switch-and-retry. Never rotate keys, load-balance, or silently take over a task. Deleting a connection must not delete story data and requires an explicit switch or cancellation if it is current or needed by unfinished work.
+
+## P-216 Do not turn one product area into a questionnaire
+
+A coherent user-visible behavior should be decided as one product contract. Splitting Provider connection, model choice, profile storage, task binding, retry, and failover into many sequential approval questions creates decision fatigue and makes the product owner repeat the same intent. Keep internal trace IDs for engineering, but present one bundled design review for each meaningful product area. Ask again only when a genuinely different user-facing tradeoff appears.
+## P-217 Driver Cockpit Snapshot must not become a whole-database Prompt
+
+A model that receives only chat history, or receives the whole book and every tool on every turn, loses the current UI location, branch, version, approval and budget boundary. Compile a minimal, version-bound Driver Cockpit Snapshot with identity, location, project/branch/chapter version, confirmed and unconfirmed state, TaskRun/checkpoint, approvals, allowed and forbidden actions, tools, capability, budget, disclosure scope and evidence.
+
+## P-218 Capability labels require runtime evidence
+
+Provider names, key prefixes and marketing claims do not prove Tool Call, cancellation, streaming, usage or recoverability. Probe the connection and expose complete driving, restricted driving and writing-only modes. Missing capabilities must constrain or reject tools; hidden model replacement is not an acceptable fix.
+
+## P-219 Five-level permission must be enforced by the host
+
+If the five permission levels exist only in a Prompt, an erroneous model call can still reach a side effect. The registry, state machine, authorization, budget, version checks and Typed Tool layer must enforce Levels 1-5; Level 5 is always denied.
+
+## P-220 Semantic Tool names are not execution proof
+
+The approved semantic surface (project, conversation, material, research, story memory, artifact, chapter, generation, branch, export, budget and task) must remain typed and receipt-backed. A tool name, JSON-shaped model output or a "done" sentence cannot change real state without proposal, validation, commit, verification and receipt.
+
+## P-221 A prerequisite rejection must not pollute the project
+
+例如模型错误调用：
+
+```text
+generation.start
+```
+
+但当前还没有通过前三章，工具层应直接返回：
+
+```text
+拒绝执行
+原因：前三章校准尚未完成
+当前状态：第一章等待用户确认
+可以执行：打开第一章、继续讨论、创建新版本
+```
+
+模型再向用户解释：
+
+> 现在还不能开始连续创作，因为第一章还在等你确认。我可以先把第一章打开，或者根据你刚才的意见再调整一次。
+
+因此：
+
+> **模型可以提出行动，但最终执行权属于仓颉工具和状态机。**
+
+驾驶员即使操作失误，高达自身的安全系统也会阻止它撞墙。
+
+---
+
+A regression test must prove that the rejected `generation.start` creates no task, chapter version, story-memory write, Writer Lease, fee settlement or checkpoint mutation.
+
+## P-222 Multiple connections are manual user assets, not a failover pool
+
+Multiple Providers and multiple keys are allowed, but a request remains bound to its selected ModelConnection. Failure may offer reconnect, refresh, re-enter key, manual switch or manual retry only. Never rotate keys, load-balance, auto-switch or silently take over.
+
+## P-223 No API key must not become a blocked or fake home screen
+
+A missing `ModelConnection` is a valid local product state. Do not replace the central conversation with a mandatory Provider form or disable the whole App. Local thought/draft persistence, local browsing/reading, history, and connection management remain usable. Conversely, never word a local save receipt as model understanding, generation, revision, research, or review. AI-dependent work stays visibly pending until a real user-selected connection exists.
+
+## P-224 Connection setup must preserve and resume the triggering intent
+
+If the first AI-dependent request opens connection setup, losing the original message, draft, project binding, or continuation point makes infrastructure become the product. Persist the triggering intent before setup; after explicit Provider, Key/Endpoint, model discovery, and model selection, return to the same conversation and continue it. Failure permits retry, correction, refresh, or user-selected manual switching only, never automatic Provider switching, key polling, load balancing, or takeover.
+
+## P-225 Adding materials, exporting prose, and backing up a project are not one file feature
+
+`添加资料` imports untrusted reference inputs; `导出小说` projects clean current-mainline prose; `备份项目` preserves complete recoverable project state. A generic import/export screen blurs purpose, leaks internal records into manuscripts, or produces backups that cannot restore. Keep the three entry points, schemas, receipts, warnings, and acceptance tests separate.
+
+## P-226 Archives and documents are data, never executable authority
+
+Save source material before processing, apply type/purpose isolation, and checkpoint large parsing/OCR/indexing work. A scanned PDF needs OCR only when text extraction requires it. A ZIP is an inert container: validate paths, size and type, then read supported entries as untrusted material. Never execute scripts, macros, commands, prompts, or instructions from an archive or document, and never let them change Agent permissions.
+
+## P-227 A clean manuscript export is not a project backup
+
+TXT/DOCX/Markdown novel export contains current-mainline reader-ready prose, with unconfirmed chapters excluded by default or visibly marked as drafts. It excludes conversations, approvals, ToolReceipts, Story Memory, costs, task state, credentials, internal IDs, and diagnostics. A project backup separately contains the creative state and recovery metadata, but never API keys, Keychain plaintext, authorization headers, or login credentials.
+
+## P-228 Restore and persistence claims require fail-safe identity and exact device evidence
+
+Restore creates a copy by default. Replacing the current project requires a recovery snapshot, impact preview, and explicit confirmation. Password-protected backups must warn that forgotten passwords are unrecoverable. Deleting the App may remove local projects, so device migration requires a backup prompt. Do not generalize overwrite-install or force-quit persistence from a different build; state only what the exact candidate passed on device.
+## P-229 Persistence before suspension is not a promise of background execution
+
+Before backgrounding, screen lock, or detected network loss, persist the composer draft, real TaskRun stage, Provider request identity/state, received stream cursor and fragments, UsageRecord/cost, and latest safe checkpoint. This gives the user a truthful recovery boundary; it does not mean iPadOS 16.6.1 will grant unlimited background runtime. UI, marketing, and acceptance receipts must separate “saved safely” from “kept running.”
+
+## P-230 Offline AI requests must not auto-send when connectivity returns
+
+Local projects, prose, materials, drafts, novel export, and project backup remain usable offline. A new AI intent created offline is durable waiting work, not a sent ProviderRequest. Connectivity restoration must not silently disclose data or incur cost: ask the user before sending it. Only a request already sent before disconnection may be automatically reconciled against its original identity, disclosure scope, model connection, idempotency key, stream, usage, and receipts.
+
+## P-231 Interrupted stream bytes are not committed story state
+
+Streaming fragments can be valuable recovery evidence, but an incomplete response is not a chapter, canon transaction, character-state update, promise settlement, or completed-ahead version. Persist it as an explicitly incomplete temporary artifact, preserve hash/order metadata, and quarantine it from formal projections. Immediate pause, cancellation, crash, lock, or network loss must not let readable-looking partial text bypass review and atomic settlement.
+
+## P-232 Recovery needs five distinct outcomes and non-creative reconciliation
+
+“Resume” is not one state. Project completed, safely paused, definitely failed, outcome unknown, and invalid connection require different explanations and actions. Unknown outcome first checks the original Provider request, local transaction, stream, UsageRecord, ToolReceipt, and postconditions without issuing a new creative generation or charge. Direct retry while still unknown risks duplicate prose and fees; only after a durable reconciliation result may the normal retry policy run.
+
+## P-233 Notification permission is contextual, optional attention routing
+
+Requesting notification permission on first launch asks for trust before the user has seen any value. Explain and request it only when the user starts the first long task. Notifications are limited to result completion, waiting for confirmation, pause/failure, cost limits, and major-story gates. Denial must not block tasks, recovery, local use, export, or backup; notifications observe durable task state and never drive the state machine.
+
+## P-234 Plain-language task labels must still project real transactional state
+
+The ordinary task surface should say only `正在做`, `接下来`, and `需要你`, with concise checkpoint and cost facts, instead of exposing an internal pipeline checklist. This simplification is a projection, not permission to collapse TaskRun states. Completed, paused, failed, unknown, connection-invalid, single-Writer ownership, and the two pause semantics must remain distinct underneath and stay consistent across conversation, results, task page, and notifications.
+
+## P-235 Historical engineering labels are not the current product milestone
+
+candidate-hardening M1 and Builds 26–28 are prototype and hardening evidence only. The current real milestone is S1 Agent 驾驶舱定调与重构, S0 is only the completed feasibility baseline, and Build 28 is not accepted. Never let a historical Build heading, old checkpoint or technically working screen overwrite the current S0–S6 product map.
+
+## P-236 CI, static UI, documentation and code completion do not pass a product stage
+
+A stage passes only with its stated user-visible capability, explicit included/excluded scope, automation evidence and exact device evidence. Green CI can prove a build; a static screen can prove layout; documentation can freeze a contract; code can prove implementation progress. None alone proves the product stage or user experience was accepted.
+
+## P-237 Harness gates must advance in order and cannot become empty IPA milestones
+
+H0–H5 are horizontal engineering gates, not user-facing product shells. S2 must prove the applicable H0–H3 minimum real loop before S3 advances H4; S4 completes H4 and enters H5; S5 completes H5. Do not skip early data/context/loop gates to demo multi-Agent serial generation, and do not package an empty Harness layer as a milestone IPA.
+
+## P-238 Physical-device evidence must bind one exact candidate identity
+
+Every candidate receipt binds version, Build, commit, IPA SHA-256 and candidate identity to the entry path, control location, action, result location, failure signal and recovery method. Evidence from another artifact, simulator, old process, disk bundle, or prior Build cannot silently prove the current executable.
+
+## P-239 Differential acceptance never waives security re-proof
+
+Unchanged ordinary behavior with valid exact-candidate evidence need not be mechanically retested after every slice. Security contracts are different: permissions, credential isolation, budget, idempotency, unknown-outcome reconciliation, Writer Lease, recovery and external disclosure must be re-proved on the exact candidate because packaging, entitlements, migration and lifecycle changes can invalidate them without visible UI changes.
+
+## P-240 Million-character capability claims belong to their frozen stage boundary
+
+S3 may use ordinary-scale materials but cannot claim complete million-character understanding. S5 is where the million-character narrative index and phased analysis of large reference novels are formally accepted. S6 completes million-character material handling across TXT/Markdown/DOCX/PDF/OCR/ZIP and the release-candidate quality, migration and security gates. Partial indexing, a successful fixture or a design document must not be marketed as full-book capability.
+
+## P-241 A truthful S1 preview receipt is not an S2 Agent turn
+
+A local persistence acknowledgement may say only what the transaction proved. During S1, the fixed receipt proves that the text was saved for interface and navigation validation; it does not prove model understanding, Provider availability, tool execution, story-state change, prose generation, or completion of an Agent loop. Do not create runtime, approval, artifact, chapter, receipt, usage, or novel side effects merely to make the preview look alive. Initialization and foreground restore must be read-only, and an empty installation must not create a Conversation until the first actual send.
+
+## P-242 Autosave is a governed durable mutation, not a harmless property observer
+
+A draft `didSet` can write while the app is inactive, after Build Activation has changed, after an atomic send already cleared the persisted draft, or with unbounded pasted content. Guard autosave by lifecycle and dynamic execution authorization at the write boundary; impose the same UTF-8 ceiling inside the database path; retain the last recoverable draft on failure; and suppress the observer when the successful send transaction has already cleared the persisted draft. Test rollback of user message, fixed receipt, Conversation time and draft clearing as one unit.
+
+## P-243 Unicode and encoding checks must test the real threat, not produce false-green noise
+
+Multiline user content can make a continuation line look like `System:` or `Agent:`, and bidi controls can visually reorder text around a trusted prefix. Reject unsafe directional controls before a preview message is committed and indent every displayed continuation line. Encoding scans must search explicit code points and literal corruption runs rather than treating ordinary Swift optionals such as `?` and `??` as mojibake. Scan touched files for U+FFFD, BOM/line-ending drift, a run of four consecutive ASCII question marks, trailing whitespace and credential patterns; never normalize unrelated legacy files merely to make a broad scanner green.
+
+## P-244 First-send setup and first-turn commit are one transaction
+
+Do not implement an empty-install send as `ensureConversation()` followed by `appendTurn()` in a second transaction. If the user message or fixed receipt fails after the first transaction commits, an empty Conversation survives even though the send failed, and recovery can mistake that shell for durable user work. On the first send, select or create the Conversation, insert the user message and honest fixed receipt, update the monotonic Conversation timestamp, and clear the persisted draft inside one database transaction. A forced failure on the second message must leave zero new Conversations, zero messages, and the prior draft unchanged.
+
+## P-245 Selected Conversation is durable state, not a latest-timestamp guess
+
+Conversation `updatedAt` sorts history; it does not identify the user's active workspace. Persist the selected Conversation separately, restore that exact identity after relaunch, and fail closed if it is missing or malformed. Otherwise background timestamps, delayed writes or another Conversation's newer activity can silently switch the center workspace and attach the next draft or send to the wrong story context.
+
+## P-246 Unbound and bound drafts must never clear or overwrite each other
+
+An unsent ?new conversation? draft is a real recoverable workspace even though no Conversation row exists yet. Each existing Conversation also owns an independent draft. A send, switch, delayed autosave or restore may update only the scope it was created for; it must carry the expected selection and fail closed after selection changes. Sending an existing Conversation must not erase the unsent-new draft, and first send must consume only that unbound draft inside the same transaction that creates and binds the Conversation.
+
+## P-247 Checkpoint identity includes Conversation workspace scope
+
+Payload hash plus task identity is insufficient once one task can visit several Conversations and an unbound new-conversation workspace. Checkpoints must bind a stable scope such as `s1:new` or `s1:conversation:<UUID>` and carry the Conversation identity where one exists. Deduplication may occur only inside that scope; sequence allocation, draft persistence and checkpoint insertion remain one transaction so recovery cannot restore the right bytes into the wrong Conversation.
+
+## P-248 Legacy draft slots are compatibility mirrors, never UI truth
+
+A retired singleton draft such as `draft(id='m0')` may temporarily mirror the active S1 draft for old callers, but it cannot choose the current Conversation, overwrite scoped drafts, or become a recovery authority. New UI and checkpoint code must read `s1WorkspaceState` plus `s1ConversationDraft`. Compatibility mirrors should be removed only in a deliberate migration after all legacy callers are gone, not promoted back into the architecture because they are convenient.
+
+## P-249 Checkpoint audit identity must not decay through tolerant decoding or `SET NULL`
+
+A non-empty but malformed `conversationID` is corrupted data, not the same thing as no Conversation. Likewise, `legacy:m0` and `s1:new` require a null Conversation identity, while `s1:conversation:<UUID>` requires the same parsed UUID in both columns. Decode these bindings fail-closed, reject unknown scopes, and use a restrictive foreign key plus an additive retention migration so databases that already applied an earlier `SET NULL` shape are also protected. Deleting a Conversation must never turn an auditable scoped checkpoint into an apparently unbound record. Regression tests must cover malformed identifiers, scope/identity mismatch, and attempted deletion of a Conversation that owns a checkpoint.
+
+## P-250 Left-region navigation must not own or reset the center Conversation workspace
+
+The Activity Bar and left-region pages are navigation surfaces, not the Agent control plane's state owner. Opening the novel shelf, pushing a book detail page, returning, or later switching among tasks/settings must not recreate the center Conversation view, select another Conversation, clear a scoped draft, interrupt streaming, or replace the current model. Test both empty and persisted shelves while asserting the same center messages, draft, and selected Conversation before and after the complete push/back path.
+
+## P-251 UI test fixtures must be explicit, debug-only, isolated, and persistence-real
+
+A fixture that appears during ordinary startup or can reach a normal application database may hide migration and state-ownership bugs or contaminate user data. Require an explicit launch-environment fixture name plus a valid isolated database scope, compile the bootstrap only for Debug, and fail closed when a requested fixture has an unknown name or a missing or malformed scope.
+
+Ordinary fixtures should seed through the same production persistence APIs the product uses. A complex scale, restore, or Reader-projection fixture may use constrained direct SQL only when it is Debug-only, explicitly requested, bound to a fresh isolated scope, deterministic, and followed by exact reopen and projection assertions. Such a fixture proves database/schema compatibility and UI projection only; it is not evidence that the production writer can create the same state. Formal production-writer evidence requires separate tests that create the state through production APIs and then reopen the real database.
+
+Describe these complex fixtures as fresh-only and insert-once, not idempotent. Also do not describe the entire bootstrap as insert-only: fixture-owned business entities may be inserted once, but the migration-created `s1WorkspaceState.default` singleton is updated to select the fixture Conversation. Fixture strings remain user-visible test data and must pass the same UTF-8 and corruption scans as product copy.
+
+## P-252 Retention migration must stop on already-decayed checkpoint identity
+
+An additive delete trigger protects future Conversation deletion, but it cannot truthfully reconstruct a Conversation identity that an older `ON DELETE SET NULL` schema has already erased. Before installing retention protection, detect scoped checkpoints with null Conversation identity and fail the migration closed. Do not invent an identity, rewrite the scope as unbound, or delete the audit record. Verify transaction rollback leaves the migration unapplied and the damaged row byte-for-byte available for a separate recovery procedure.
+
+## P-253 Capability-gated navigation must hide dead or internal destinations
+
+An icon, row, or button is a product promise. If S1 has no readable chapter, story-memory explanation, material workflow, device diagnostic need, or real task result, do not expose a dead `later` destination merely to make the shell look complete. Project only capabilities backed by meaningful state and a real action; keep diagnostics and build identity on an explicit debug/advanced surface. Tests should assert both the allowed destinations and the absence of retired or premature entries.
+
+## P-254 Activity Bar selection must not become Conversation ownership
+
+The Activity Bar may own which left navigation destination is visible, but it must not own, conditionally construct, or replace the center Conversation workspace. Keep the center Conversation mounted independently so switching to novels, tasks, or settings cannot recreate its model, change the selected Conversation, clear a scoped draft, interrupt streaming, or lose scroll state. Verify complete switch/back paths rather than only checking that destination pages appear.
+
+## P-255 A persisted setting must change every user-facing projection consistently
+
+A setting is not implemented merely because `@AppStorage` changes a visible `Text`. If `显示更新时间` hides timestamps visually, VoiceOver labels and UI-test projections must stop announcing the same time as well; re-enabling it must restore both. Persisted settings need relaunch coverage and must not mutate unrelated Conversation, draft, project, or task state.
+
+## P-256 Ordinary result surfaces must not leak governance vocabulary
+
+`这次结果` is a user-facing collection of real, actionable outcomes, not a convenient place to expose `Artifact`, `Tool Receipt`, revision hashes, bindings, internal Agent reports, or database identity. Preserve those objects and their security semantics in the governed runtime, but translate or move their diagnostic projection behind an explicit advanced surface. An honest empty state is better than fabricated engineering detail or a fake result.
+
+
+## P-257 Ordinary copy must be a projection, not a deletion of diagnostics
+
+Raw database, Keychain, network, approval, chapter and tool diagnostics are necessary for support and verification, but showing `DB-*`, `KEY-*`, `AGENT-*`, revision, binding, hash or Tool Receipt language in the ordinary cockpit makes the product feel broken and exposes implementation details. Keep the raw diagnostic in a separate diagnostic channel, then project a stable user-facing explanation with a concrete next action. Tests must assert both sides: the user surface contains no engineering code, while the diagnostic value still preserves the original reason.
+
+## P-258 Recovery and replay paths require the same ordinary-language contract as the happy path
+
+Humanizing only the first successful execution is insufficient. Durable recovery, idempotent replay and already-completed branches can append old engineering messages back into the same Conversation after relaunch. Route all of those branches through one tested pure copy projection, while leaving receipts, hashes, versions, approval bindings and completion checks unchanged. Regression tests should compare normal, recovered and replayed delivery and scan the resulting copy for forbidden governance vocabulary.
+
+## P-259 A visual overlay must also be an accessibility modal boundary
+
+Blocking taps with a dimming layer does not remove the covered workspace from VoiceOver. When an independent page or portrait navigation overlay is presented, every covered region must stop hit testing and leave the accessibility tree, while the overlay establishes a modal boundary and its close controls announce the action they actually perform. Page switches should also release composer focus so the software keyboard cannot obscure the newly presented surface.

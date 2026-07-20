@@ -1,3 +1,4 @@
+import CangJieCore
 import GRDB
 import XCTest
 @testable import CangJie
@@ -47,6 +48,256 @@ final class AppDatabaseTests: XCTestCase {
             XCTAssertEqual(second, first)
             XCTAssertEqual(try database.latestCheckpoint(taskID: taskID)?.sequence, 1)
         }
+    }
+
+    func testLegacyCheckpointDoesNotReuseMatchingPayloadFromDifferentScopeAndKeepsGlobalSequence() throws {
+        try withDatabase { database in
+            let taskID = UUID()
+            let s1Checkpoint = try database.checkpointS1ConversationDraft(
+                content: "S1 draft",
+                selectedConversationID: nil,
+                taskID: taskID,
+                reason: "s1 autosave",
+                payloadHash: "shared-payload",
+                now: Date(timeIntervalSince1970: 1_000)
+            )
+
+            let legacyCheckpoint = try database.checkpointDraft(
+                content: "Legacy draft",
+                taskID: taskID,
+                reason: "legacy autosave",
+                payloadHash: "shared-payload",
+                now: Date(timeIntervalSince1970: 2_000)
+            )
+
+            XCTAssertNotEqual(legacyCheckpoint.id, s1Checkpoint.id)
+            XCTAssertEqual(legacyCheckpoint.scopeKey, "legacy:m0")
+            XCTAssertNil(legacyCheckpoint.conversationID)
+            XCTAssertEqual(legacyCheckpoint.sequence, 2)
+            XCTAssertEqual(
+                try database.loadDraft(),
+                DraftSnapshot(
+                    content: "Legacy draft",
+                    updatedAt: Date(timeIntervalSince1970: 2_000)
+                )
+            )
+            XCTAssertEqual(try database.latestCheckpoint(taskID: taskID), legacyCheckpoint)
+        }
+    }
+
+    func testCheckpointLoadRejectsMalformedNonEmptyConversationIdentifier() throws {
+        try withDatabase { database in
+            let conversation = try database.appendS1WorkspacePreviewTurn(
+                selectedConversationID: nil,
+                turn: S1ConversationPreview.makeTurn(from: "checkpoint identity"),
+                now: Date(timeIntervalSince1970: 1_000)
+            ).conversation
+            let taskID = UUID()
+            let checkpoint = try database.checkpointS1ConversationDraft(
+                content: "bound draft",
+                selectedConversationID: conversation.id,
+                taskID: taskID,
+                reason: "identity validation",
+                payloadHash: "bound-hash",
+                now: Date(timeIntervalSince1970: 1_001)
+            )
+            let malformedConversationID = "not-a-uuid"
+            try database.queue.write { db in
+                try db.execute(
+                    sql: "INSERT INTO agentConversation (id, title, createdAt, updatedAt) VALUES (?, ?, ?, ?)",
+                    arguments: [malformedConversationID, "Malformed fixture", 1_002.0, 1_002.0]
+                )
+                try db.execute(
+                    sql: "UPDATE checkpoint SET conversationID = ? WHERE id = ?",
+                    arguments: [malformedConversationID, checkpoint.id.uuidString]
+                )
+            }
+
+            XCTAssertThrowsError(try database.latestCheckpoint(taskID: taskID)) { error in
+                XCTAssertEqual(error as? AppDatabaseError, .invalidCheckpointIdentifier)
+            }
+        }
+    }
+
+    func testCheckpointLoadRejectsUnknownScopeKey() throws {
+        try withDatabase { database in
+            let taskID = UUID()
+            let checkpoint = try database.checkpointDraft(
+                content: "legacy draft",
+                taskID: taskID,
+                reason: "scope validation",
+                payloadHash: "legacy-scope-hash",
+                now: Date(timeIntervalSince1970: 1_000)
+            )
+            try database.queue.write { db in
+                try db.execute(
+                    sql: "UPDATE checkpoint SET scopeKey = ? WHERE id = ?",
+                    arguments: ["unsupported:scope", checkpoint.id.uuidString]
+                )
+            }
+
+            XCTAssertThrowsError(try database.latestCheckpoint(taskID: taskID)) { error in
+                XCTAssertEqual(error as? AppDatabaseError, .invalidCheckpointScope)
+            }
+        }
+    }
+
+    func testCheckpointLoadRejectsScopeAndConversationMismatch() throws {
+        try withDatabase { database in
+            let firstConversation = try database.appendS1WorkspacePreviewTurn(
+                selectedConversationID: nil,
+                turn: S1ConversationPreview.makeTurn(from: "first checkpoint scope"),
+                now: Date(timeIntervalSince1970: 1_000)
+            ).conversation
+            let taskID = UUID()
+            let checkpoint = try database.checkpointS1ConversationDraft(
+                content: "first scoped draft",
+                selectedConversationID: firstConversation.id,
+                taskID: taskID,
+                reason: "scope validation",
+                payloadHash: "first-scope-hash",
+                now: Date(timeIntervalSince1970: 1_001)
+            )
+            _ = try database.selectNewS1Conversation(now: Date(timeIntervalSince1970: 1_002))
+            let secondConversation = try database.appendS1WorkspacePreviewTurn(
+                selectedConversationID: nil,
+                turn: S1ConversationPreview.makeTurn(from: "second checkpoint scope"),
+                now: Date(timeIntervalSince1970: 1_003)
+            ).conversation
+            try database.queue.write { db in
+                try db.execute(
+                    sql: "UPDATE checkpoint SET conversationID = ? WHERE id = ?",
+                    arguments: [secondConversation.id.uuidString, checkpoint.id.uuidString]
+                )
+            }
+
+            XCTAssertThrowsError(try database.latestCheckpoint(taskID: taskID)) { error in
+                XCTAssertEqual(error as? AppDatabaseError, .invalidCheckpointScope)
+            }
+        }
+    }
+
+    func testDeletingConversationWithCheckpointIsRestrictedAndPreservesAuditIdentity() throws {
+        try withDatabase { database in
+            let conversation = try database.appendS1WorkspacePreviewTurn(
+                selectedConversationID: nil,
+                turn: S1ConversationPreview.makeTurn(from: "audited conversation"),
+                now: Date(timeIntervalSince1970: 1_000)
+            ).conversation
+            let taskID = UUID()
+            let checkpoint = try database.checkpointS1ConversationDraft(
+                content: "audited draft",
+                selectedConversationID: conversation.id,
+                taskID: taskID,
+                reason: "audit retention",
+                payloadHash: "audit-hash",
+                now: Date(timeIntervalSince1970: 1_001)
+            )
+
+            XCTAssertThrowsError(try database.queue.write { db in
+                try db.execute(
+                    sql: "DELETE FROM agentConversation WHERE id = ?",
+                    arguments: [conversation.id.uuidString]
+                )
+            })
+
+            XCTAssertEqual(
+                try database.queue.read { db in
+                    try Int.fetchOne(
+                        db,
+                        sql: "SELECT COUNT(*) FROM agentConversation WHERE id = ?",
+                        arguments: [conversation.id.uuidString]
+                    ) ?? 0
+                },
+                1
+            )
+            XCTAssertEqual(try database.latestCheckpoint(taskID: taskID), checkpoint)
+            XCTAssertEqual(
+                try database.restoreS1ConversationWorkspace().selectedConversation?.id,
+                conversation.id
+            )
+        }
+    }
+
+    func testRetentionMigrationUpgradesAppliedSetNullSchemaAndPreservesCheckpointIdentity() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer {
+            XCTAssertNoThrow(try FileManager.default.removeItem(at: directory))
+        }
+        let path = directory.appendingPathComponent("legacy-set-null.sqlite").path
+        let fixture = try makeLegacySetNullCheckpointDatabase(at: path, deleteConversationBeforeUpgrade: false)
+
+        try Self.withOpenDatabase(at: path) { database in
+            XCTAssertEqual(
+                try database.queue.read { db in
+                    try Int.fetchOne(
+                        db,
+                        sql: "SELECT COUNT(*) FROM grdb_migrations WHERE identifier = ?",
+                        arguments: ["s1-checkpoint-conversation-retention-v1"]
+                    ) ?? 0
+                },
+                1
+            )
+
+            XCTAssertThrowsError(try database.queue.write { db in
+                try db.execute(
+                    sql: "DELETE FROM agentConversation WHERE id = ?",
+                    arguments: [fixture.conversationID.uuidString]
+                )
+            })
+
+            XCTAssertEqual(try database.latestCheckpoint(taskID: fixture.taskID), fixture.checkpoint)
+            let storedIdentity = try database.queue.read { db -> (String, String?) in
+                let row = try XCTUnwrap(Row.fetchOne(
+                    db,
+                    sql: "SELECT scopeKey, conversationID FROM checkpoint WHERE id = ?",
+                    arguments: [fixture.checkpoint.id.uuidString]
+                ))
+                return (row["scopeKey"], row["conversationID"])
+            }
+            XCTAssertEqual(storedIdentity.0, fixture.checkpoint.scopeKey)
+            XCTAssertEqual(storedIdentity.1, fixture.conversationID.uuidString)
+        }
+    }
+
+    func testRetentionMigrationLeavesPreviouslySetNullCheckpointFailClosedWithoutRepairOrDeletion() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer {
+            XCTAssertNoThrow(try FileManager.default.removeItem(at: directory))
+        }
+        let path = directory.appendingPathComponent("legacy-corrupt-set-null.sqlite").path
+        let fixture = try makeLegacySetNullCheckpointDatabase(at: path, deleteConversationBeforeUpgrade: true)
+
+        XCTAssertThrowsError(try AppDatabase(path: path)) { error in
+            XCTAssertEqual(error as? AppDatabaseError, .invalidCheckpointScope)
+        }
+
+        let queue = try DatabaseQueue(path: path)
+        let storedIdentity = try queue.read { db -> (Int, String, String?, Int) in
+            let row = try XCTUnwrap(Row.fetchOne(
+                db,
+                sql: "SELECT scopeKey, conversationID FROM checkpoint WHERE id = ?",
+                arguments: [fixture.checkpoint.id.uuidString]
+            ))
+            let count = try Int.fetchOne(
+                db,
+                sql: "SELECT COUNT(*) FROM checkpoint WHERE id = ?",
+                arguments: [fixture.checkpoint.id.uuidString]
+            ) ?? 0
+            let migrationCount = try Int.fetchOne(
+                db,
+                sql: "SELECT COUNT(*) FROM grdb_migrations WHERE identifier = ?",
+                arguments: ["s1-checkpoint-conversation-retention-v1"]
+            ) ?? 0
+            return (count, row["scopeKey"], row["conversationID"], migrationCount)
+        }
+
+        XCTAssertEqual(storedIdentity.0, 1)
+        XCTAssertEqual(storedIdentity.1, fixture.checkpoint.scopeKey)
+        XCTAssertNil(storedIdentity.2)
+        XCTAssertEqual(storedIdentity.3, 0)
     }
 
     func testCreateAndListNovelProjectsPersistsNewestFirst() throws {
@@ -116,6 +367,69 @@ final class AppDatabaseTests: XCTestCase {
             XCTAssertEqual(try database.listAgentMessages(conversationID: conversation.id), [user, assistant])
             XCTAssertEqual(try database.loadAgentSession(conversationID: conversation.id), session)
             XCTAssertEqual(try database.latestAgentRun(conversationID: conversation.id), run)
+        }
+    }
+
+    func testRuntimeRestoreReplaysHistoricalCanonicalApprovalMessageWithSameKey() throws {
+        try withDatabase { database in
+            let conversation = try database.ensureDefaultConversation(now: Date(timeIntervalSince1970: 550))
+            let project = try database.createProject(
+                title: "Replay",
+                premise: "P",
+                now: Date(timeIntervalSince1970: 550)
+            )
+            try database.saveAgentSession(
+                AgentSessionState(
+                    focusedProjectID: project.id,
+                    interviewStep: AgentRuntime.interviewQuestions.count,
+                    currentQuestion: "openingPlan.approval",
+                    interviewAnswers: ["hook", "goal", "cost"],
+                    updatedAt: Date(timeIntervalSince1970: 551)
+                ),
+                conversationID: conversation.id
+            )
+            let saved = try database.executeOpeningPlanSaveTool(
+                conversationID: conversation.id,
+                projectID: project.id,
+                title: "Opening plan",
+                body: "Approved opening plan",
+                idempotencyKey: "opening.canonical-replay.save",
+                now: Date(timeIntervalSince1970: 551),
+                expiresAt: Date(timeIntervalSince1970: 4_551)
+            )
+            let approved = try database.executeOpeningPlanApprovalTool(
+                conversationID: conversation.id,
+                approvalRequestID: saved.approval.id,
+                displayedBindingHash: saved.approval.bindingHash,
+                idempotencyKey: "opening.canonical-replay.approve",
+                now: Date(timeIntervalSince1970: 552)
+            )
+            let messageKey = [
+                "approval-message",
+                approved.approval.id.uuidString,
+                approved.approval.bindingHash
+            ].joined(separator: ".")
+            let historical = try database.appendAgentMessage(
+                conversationID: conversation.id,
+                role: .assistant,
+                content: AgentRuntimeCanonicalMessage.openingPlanConfirmed,
+                idempotencyKey: messageKey,
+                now: Date(timeIntervalSince1970: 553)
+            )
+
+            let runtime = try AgentRuntime(
+                database: database,
+                authorizer: AllowingAgentExecutionAuthorizer()
+            )
+            let restored = try runtime.restore(now: Date(timeIntervalSince1970: 554))
+            let stored = try database.listAgentMessages(conversationID: conversation.id)
+
+            XCTAssertEqual(stored.filter { $0.id == historical.id }.count, 1)
+            XCTAssertEqual(stored.first(where: { $0.id == historical.id })?.content, AgentRuntimeCanonicalMessage.openingPlanConfirmed)
+            XCTAssertEqual(
+                restored.messages.first(where: { $0.id == historical.id })?.displayText,
+                "仓颉：" + AgentRuntimeOrdinaryCopy.openingPlanConfirmed(delivery: .recovered)
+            )
         }
     }
 
@@ -1865,6 +2179,60 @@ final class AppDatabaseTests: XCTestCase {
         }
     }
 
+    func testProductionChapterToolReaderProjectionSurvivesActualDatabaseReopen() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { XCTAssertNoThrow(try FileManager.default.removeItem(at: directory)) }
+        let path = directory.appendingPathComponent("test.sqlite").path
+        var conversationID: UUID?
+        var projectID: UUID?
+        var versionID: UUID?
+
+        do {
+            let database = try AppDatabase(path: path)
+            let generated = try makeGeneratedChapter(
+                database: database,
+                keyPrefix: "chapter.reader-reopen"
+            )
+            conversationID = generated.conversationID
+            projectID = generated.projectID
+            versionID = generated.version.id
+            try database.saveAgentSession(
+                AgentSessionState(
+                    focusedProjectID: generated.projectID,
+                    interviewStep: 0,
+                    currentQuestion: "",
+                    interviewAnswers: [],
+                    updatedAt: Date(timeIntervalSince1970: 5_000)
+                ),
+                conversationID: generated.conversationID
+            )
+
+            let firstProjection = try XCTUnwrap(
+                database.restoreS1ReadableContent(
+                    selectedConversationID: generated.conversationID
+                )
+            )
+            XCTAssertEqual(firstProjection.activeVersionID, generated.version.id)
+            XCTAssertEqual(firstProjection.body, generated.version.body)
+        }
+
+        let expectedConversationID = try XCTUnwrap(conversationID)
+        let expectedProjectID = try XCTUnwrap(projectID)
+        let expectedVersionID = try XCTUnwrap(versionID)
+        let reopened = try AppDatabase(path: path)
+        let restoredProjection = try XCTUnwrap(
+            reopened.restoreS1ReadableContent(
+                selectedConversationID: expectedConversationID
+            )
+        )
+        XCTAssertEqual(restoredProjection.conversationID, expectedConversationID)
+        XCTAssertEqual(restoredProjection.projectID, expectedProjectID)
+        XCTAssertEqual(restoredProjection.activeVersionID, expectedVersionID)
+        XCTAssertEqual(restoredProjection.projectTitle, "Generated")
+        XCTAssertEqual(restoredProjection.chapterTitle, "Chapter 1")
+        XCTAssertEqual(restoredProjection.body, "Kept paragraph.\n\nRewrite me.")
+    }
     private struct ApprovedOpeningPlanFixture {
         let artifact: AgentArtifact
         let approvalID: UUID
@@ -1925,6 +2293,126 @@ final class AppDatabaseTests: XCTestCase {
             idempotencyKey: keyPrefix + ".generate"
         )
         return (conversation.id, project.id, generated.version)
+    }
+
+    private struct LegacySetNullCheckpointFixture {
+        let conversationID: UUID
+        let taskID: UUID
+        let checkpoint: PersistedCheckpoint
+    }
+
+    private func makeLegacySetNullCheckpointDatabase(
+        at path: String,
+        deleteConversationBeforeUpgrade: Bool
+    ) throws -> LegacySetNullCheckpointFixture {
+        let conversationID: UUID
+        let taskID = UUID()
+        let checkpoint: PersistedCheckpoint
+
+        do {
+            let database = try AppDatabase(path: path)
+            let conversation = try database.appendS1WorkspacePreviewTurn(
+                selectedConversationID: nil,
+                turn: S1ConversationPreview.makeTurn(from: "legacy checkpoint retention fixture"),
+                now: Date(timeIntervalSince1970: 1_000)
+            ).conversation
+            conversationID = conversation.id
+            checkpoint = try database.checkpointS1ConversationDraft(
+                content: "legacy audited draft",
+                selectedConversationID: conversation.id,
+                taskID: taskID,
+                reason: "legacy audit retention",
+                payloadHash: "legacy-audit-hash",
+                now: Date(timeIntervalSince1970: 1_001)
+            )
+
+            try database.queue.writeWithoutTransaction { db in
+                try db.execute(sql: "PRAGMA foreign_keys = OFF")
+                do {
+                    try db.execute(sql: "DROP TRIGGER IF EXISTS checkpoint_conversation_delete_restrict")
+                    try db.execute(
+                        sql: "DELETE FROM grdb_migrations WHERE identifier = ?",
+                        arguments: ["s1-checkpoint-conversation-retention-v1"]
+                    )
+                    try db.execute(sql: "DROP INDEX IF EXISTS checkpoint_task_scope_sequence")
+                    try db.execute(sql: "DROP TABLE IF EXISTS checkpoint_legacy_set_null")
+                    try db.execute(sql: """
+                        CREATE TABLE checkpoint_legacy_set_null (
+                            id TEXT PRIMARY KEY,
+                            taskID TEXT NOT NULL,
+                            idempotencyKey TEXT NOT NULL,
+                            stage TEXT NOT NULL,
+                            sequence INTEGER NOT NULL,
+                            payloadHash TEXT NOT NULL,
+                            createdAt DOUBLE NOT NULL,
+                            scopeKey TEXT NOT NULL DEFAULT 'legacy:m0',
+                            conversationID TEXT REFERENCES agentConversation(id) ON DELETE SET NULL,
+                            UNIQUE (taskID, sequence),
+                            UNIQUE (taskID, idempotencyKey)
+                        )
+                        """)
+                    try db.execute(sql: """
+                        INSERT INTO checkpoint_legacy_set_null (
+                            id, taskID, idempotencyKey, stage, sequence, payloadHash,
+                            createdAt, scopeKey, conversationID
+                        )
+                        SELECT
+                            id, taskID, idempotencyKey, stage, sequence, payloadHash,
+                            createdAt, scopeKey, conversationID
+                        FROM checkpoint
+                        """)
+                    try db.execute(sql: "DROP TABLE checkpoint")
+                    try db.execute(sql: "ALTER TABLE checkpoint_legacy_set_null RENAME TO checkpoint")
+                    try db.execute(sql: "CREATE INDEX checkpoint_on_taskID ON checkpoint(taskID)")
+                    try db.execute(sql: """
+                        CREATE INDEX checkpoint_task_scope_sequence
+                        ON checkpoint(taskID, scopeKey, sequence)
+                        """)
+                    try db.execute(sql: "PRAGMA foreign_keys = ON")
+                } catch {
+                    try? db.execute(sql: "PRAGMA foreign_keys = ON")
+                    throw error
+                }
+
+                let deleteRule = try String.fetchOne(
+                    db,
+                    sql: """
+                        SELECT on_delete
+                        FROM pragma_foreign_key_list('checkpoint')
+                        WHERE "table" = 'agentConversation' AND "from" = 'conversationID'
+                        """)
+                XCTAssertEqual(deleteRule, "SET NULL")
+                XCTAssertEqual(
+                    try Int.fetchOne(
+                        db,
+                        sql: "SELECT COUNT(*) FROM grdb_migrations WHERE identifier = ?",
+                        arguments: ["s1-checkpoint-scope-v1"]
+                    ) ?? 0,
+                    1
+                )
+                XCTAssertEqual(
+                    try Int.fetchOne(
+                        db,
+                        sql: "SELECT COUNT(*) FROM grdb_migrations WHERE identifier = ?",
+                        arguments: ["s1-checkpoint-conversation-retention-v1"]
+                    ) ?? 0,
+                    0
+                )
+
+                if deleteConversationBeforeUpgrade {
+                    try db.execute(
+                        sql: "DELETE FROM agentConversation WHERE id = ?",
+                        arguments: [conversationID.uuidString]
+                    )
+                }
+            }
+        }
+
+        return LegacySetNullCheckpointFixture(
+            conversationID: conversationID,
+            taskID: taskID,
+            checkpoint: checkpoint
+        )
     }
 
     private func withDatabase(_ body: (AppDatabase) throws -> Void) throws {

@@ -123,14 +123,20 @@ struct PersistedCheckpoint: Equatable {
     let stage: String
     let sequence: Int
     let payloadHash: String
+    let scopeKey: String
+    let conversationID: UUID?
     let createdAt: Date
 }
 
 enum AppDatabaseError: Error, Equatable {
     case writeAheadLoggingUnavailable(actualMode: String)
     case invalidCheckpointIdentifier
+    case invalidCheckpointScope
     case checkpointTaskMismatch
     case invalidAgentSession
+    case invalidS1PreviewTurn
+    case draftInputLimitExceeded
+    case invalidUITestDatabaseScope
     case invalidAgentRun
     case invalidToolReceiptReference
     case idempotencyConflict
@@ -168,13 +174,23 @@ final class AppDatabase {
         try Self.migrator.migrate(queue)
     }
 
-    static func makeDefault(fileManager: FileManager = .default) throws -> AppDatabase {
+    static func makeDefault(
+        fileManager: FileManager = .default,
+        environment: [String: String] = ProcessInfo.processInfo.environment
+    ) throws -> AppDatabase {
         var support = try fileManager.url(
             for: .applicationSupportDirectory,
             in: .userDomainMask,
             appropriateFor: nil,
             create: true
         ).appendingPathComponent("CangJie", isDirectory: true)
+        if let rawScope = environment["CANGJIE_UI_TEST_DATABASE_SCOPE"] {
+            guard let scope = UUID(uuidString: rawScope) else {
+                throw AppDatabaseError.invalidUITestDatabaseScope
+            }
+            support.appendPathComponent("UITests", isDirectory: true)
+            support.appendPathComponent(scope.uuidString, isDirectory: true)
+        }
         try fileManager.createDirectory(at: support, withIntermediateDirectories: true)
         try applyLocalDataProtection(to: &support, fileManager: fileManager)
 
@@ -198,6 +214,7 @@ final class AppDatabase {
         }
     }
 
+
     func checkpointDraft(
         content: String,
         taskID: UUID,
@@ -206,18 +223,29 @@ final class AppDatabase {
         now: Date = Date()
     ) throws -> PersistedCheckpoint {
         try queue.write { db in
-            let latest = try Self.latestCheckpoint(taskID: taskID, in: db)
-            if let latest, latest.payloadHash == payloadHash {
-                return latest
+            let latestInLegacyScope = try Self.latestCheckpoint(
+                taskID: taskID,
+                scopeKey: "legacy:m0",
+                in: db
+            )
+            if let latestInLegacyScope, latestInLegacyScope.payloadHash == payloadHash {
+                return latestInLegacyScope
             }
+            let latestSequence = try Int.fetchOne(
+                db,
+                sql: "SELECT MAX(sequence) FROM checkpoint WHERE taskID = ?",
+                arguments: [taskID.uuidString]
+            ) ?? 0
 
             let checkpoint = PersistedCheckpoint(
                 id: UUID(),
                 taskID: taskID,
                 idempotencyKey: "m0-draft.\(taskID.uuidString).\(UUID().uuidString)",
                 stage: reason,
-                sequence: (latest?.sequence ?? 0) + 1,
+                sequence: latestSequence + 1,
                 payloadHash: payloadHash,
+                scopeKey: "legacy:m0",
+                conversationID: nil,
                 createdAt: now
             )
             try Self.upsertDraft(content, now: now, in: db)
@@ -242,6 +270,66 @@ final class AppDatabase {
     func latestCheckpoint(taskID: UUID) throws -> PersistedCheckpoint? {
         try queue.read { db in
             try Self.latestCheckpoint(taskID: taskID, in: db)
+        }
+    }
+
+    func checkpointS1ConversationDraft(
+        content: String,
+        selectedConversationID: UUID?,
+        taskID: UUID,
+        reason: String,
+        payloadHash: String,
+        now: Date = Date()
+    ) throws -> PersistedCheckpoint {
+        try queue.write { db in
+            try Self.requireS1WorkspaceSelection(selectedConversationID, in: db)
+            let scopeKey = Self.s1CheckpointScopeKey(selectedConversationID)
+            let latestInScope = try Self.latestCheckpoint(
+                taskID: taskID,
+                scopeKey: scopeKey,
+                in: db
+            )
+            if let latestInScope, latestInScope.payloadHash == payloadHash {
+                return latestInScope
+            }
+            let latestSequence = try Int.fetchOne(
+                db,
+                sql: "SELECT MAX(sequence) FROM checkpoint WHERE taskID = ?",
+                arguments: [taskID.uuidString]
+            ) ?? 0
+            let checkpoint = PersistedCheckpoint(
+                id: UUID(),
+                taskID: taskID,
+                idempotencyKey: "s1-draft.\(taskID.uuidString).\(UUID().uuidString)",
+                stage: reason,
+                sequence: latestSequence + 1,
+                payloadHash: payloadHash,
+                scopeKey: scopeKey,
+                conversationID: selectedConversationID,
+                createdAt: now
+            )
+            try Self.upsertDraft(content, now: now, in: db)
+            try Self.upsertS1WorkspaceDraft(
+                content,
+                selectedConversationID: selectedConversationID,
+                now: now,
+                in: db
+            )
+            try Self.insertCheckpoint(checkpoint, in: db)
+            return checkpoint
+        }
+    }
+
+    func latestS1ConversationCheckpoint(
+        taskID: UUID,
+        selectedConversationID: UUID?
+    ) throws -> PersistedCheckpoint? {
+        try queue.read { db in
+            try Self.latestCheckpoint(
+                taskID: taskID,
+                scopeKey: Self.s1CheckpointScopeKey(selectedConversationID),
+                in: db
+            )
         }
     }
 
@@ -367,6 +455,24 @@ final class AppDatabase {
         return try decodeCheckpoint(row, expectedTaskID: taskID)
     }
 
+    private static func latestCheckpoint(
+        taskID: UUID,
+        scopeKey: String,
+        in db: Database
+    ) throws -> PersistedCheckpoint? {
+        guard let row = try Row.fetchOne(
+            db,
+            sql: """
+                SELECT * FROM checkpoint
+                WHERE taskID = ? AND scopeKey = ?
+                ORDER BY sequence DESC
+                LIMIT 1
+                """,
+            arguments: [taskID.uuidString, scopeKey]
+        ) else { return nil }
+        return try decodeCheckpoint(row, expectedTaskID: taskID)
+    }
+
     private static func decodeCheckpoint(
         _ row: Row,
         expectedTaskID: UUID
@@ -378,6 +484,19 @@ final class AppDatabase {
         guard storedTaskID == expectedTaskID else {
             throw AppDatabaseError.checkpointTaskMismatch
         }
+        let scopeKey: String = row["scopeKey"]
+        let rawConversationID: String? = row["conversationID"]
+        let conversationID: UUID?
+        if let rawConversationID {
+            guard let parsedConversationID = UUID(uuidString: rawConversationID) else {
+                throw AppDatabaseError.invalidCheckpointIdentifier
+            }
+            conversationID = parsedConversationID
+        } else {
+            conversationID = nil
+        }
+        try validateCheckpointScope(scopeKey, conversationID: conversationID)
+
         return PersistedCheckpoint(
             id: id,
             taskID: storedTaskID,
@@ -385,11 +504,16 @@ final class AppDatabase {
             stage: row["stage"],
             sequence: row["sequence"],
             payloadHash: row["payloadHash"],
+            scopeKey: scopeKey,
+            conversationID: conversationID,
             createdAt: Date(timeIntervalSince1970: row["createdAt"])
         )
     }
 
-    private static func upsertDraft(_ content: String, now: Date, in db: Database) throws {
+    static func upsertDraft(_ content: String, now: Date, in db: Database) throws {
+        guard content.utf8.count <= S1ConversationPreview.maximumDraftUTF8Bytes else {
+            throw AppDatabaseError.draftInputLimitExceeded
+        }
         try db.execute(
             sql: """
             INSERT INTO draft (id, content, updatedAt) VALUES ('m0', ?, ?)
@@ -399,11 +523,93 @@ final class AppDatabase {
         )
     }
 
+    private static func requireS1WorkspaceSelection(
+        _ expectedConversationID: UUID?,
+        in db: Database
+    ) throws {
+        guard let row = try Row.fetchOne(
+            db,
+            sql: "SELECT selectedConversationID FROM s1WorkspaceState WHERE id = 'default'"
+        ) else {
+            throw AppDatabaseError.invalidAgentSession
+        }
+        let rawSelectedID: String? = row["selectedConversationID"]
+        let persistedConversationID = rawSelectedID.flatMap(UUID.init(uuidString:))
+        guard (rawSelectedID == nil || persistedConversationID != nil),
+              persistedConversationID == expectedConversationID else {
+            throw AppDatabaseError.invalidAgentSession
+        }
+    }
+
+    private static func s1CheckpointScopeKey(_ conversationID: UUID?) -> String {
+        if let conversationID {
+            return "s1:conversation:\(conversationID.uuidString)"
+        }
+        return "s1:new"
+    }
+
+    private static func upsertS1WorkspaceDraft(
+        _ content: String,
+        selectedConversationID: UUID?,
+        now: Date,
+        in db: Database
+    ) throws {
+        if let selectedConversationID {
+            try db.execute(
+                sql: """
+                    INSERT INTO s1ConversationDraft (conversationID, content, updatedAt)
+                    VALUES (?, ?, ?)
+                    ON CONFLICT(conversationID) DO UPDATE SET
+                        content = excluded.content,
+                        updatedAt = excluded.updatedAt
+                    """,
+                arguments: [
+                    selectedConversationID.uuidString,
+                    content,
+                    now.timeIntervalSince1970
+                ]
+            )
+        } else {
+            try db.execute(
+                sql: """
+                    UPDATE s1WorkspaceState
+                    SET unboundDraft = ?, updatedAt = ?
+                    WHERE id = 'default'
+                    """,
+                arguments: [content, now.timeIntervalSince1970]
+            )
+        }
+    }
+
+    private static func validateCheckpointScope(
+        _ scopeKey: String,
+        conversationID: UUID?
+    ) throws {
+        switch scopeKey {
+        case "legacy:m0", "s1:new":
+            guard conversationID == nil else {
+                throw AppDatabaseError.invalidCheckpointScope
+            }
+        default:
+            guard let conversationID,
+                  scopeKey == s1CheckpointScopeKey(conversationID) else {
+                throw AppDatabaseError.invalidCheckpointScope
+            }
+        }
+    }
+
     private static func insertCheckpoint(_ checkpoint: PersistedCheckpoint, in db: Database) throws {
+        try validateCheckpointScope(
+            checkpoint.scopeKey,
+            conversationID: checkpoint.conversationID
+        )
         try db.execute(
             sql: """
-            INSERT INTO checkpoint (id, taskID, idempotencyKey, stage, sequence, payloadHash, createdAt)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO checkpoint (
+                id, taskID, idempotencyKey, stage, sequence, payloadHash,
+                scopeKey, conversationID, createdAt
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             arguments: [
                 checkpoint.id.uuidString,
@@ -412,6 +618,8 @@ final class AppDatabase {
                 checkpoint.stage,
                 checkpoint.sequence,
                 checkpoint.payloadHash,
+                checkpoint.scopeKey,
+                checkpoint.conversationID?.uuidString,
                 checkpoint.createdAt.timeIntervalSince1970
             ]
         )
@@ -927,6 +1135,87 @@ final class AppDatabase {
                 )
                 BEGIN
                     SELECT RAISE(ABORT, 'tool receipt origin run scope mismatch');
+                END
+                """)
+        }
+        migrator.registerMigration("s1-conversation-workspace-v1") { db in
+            try db.create(table: "s1ConversationDraft") { table in
+                table.column("conversationID", .text)
+                    .primaryKey()
+                    .references("agentConversation", onDelete: .cascade)
+                table.column("content", .text).notNull()
+                table.column("updatedAt", .double).notNull()
+            }
+            try db.create(table: "s1WorkspaceState") { table in
+                table.column("id", .text).primaryKey()
+                table.column("selectedConversationID", .text)
+                    .references("agentConversation", onDelete: .setNull)
+                table.column("unboundDraft", .text).notNull()
+                table.column("updatedAt", .double).notNull()
+            }
+
+            let latestConversationID = try String.fetchOne(
+                db,
+                sql: "SELECT id FROM agentConversation ORDER BY updatedAt DESC, rowid DESC LIMIT 1"
+            )
+            let legacyDraft = try String.fetchOne(
+                db,
+                sql: "SELECT content FROM draft WHERE id = 'm0'"
+            ) ?? ""
+            let legacyDraftUpdatedAt = try Double.fetchOne(
+                db,
+                sql: "SELECT updatedAt FROM draft WHERE id = 'm0'"
+            ) ?? 0
+
+            if let latestConversationID {
+                try db.execute(
+                    sql: "INSERT INTO s1ConversationDraft (conversationID, content, updatedAt) VALUES (?, ?, ?)",
+                    arguments: [latestConversationID, legacyDraft, legacyDraftUpdatedAt]
+                )
+            }
+            try db.execute(
+                sql: "INSERT INTO s1WorkspaceState (id, selectedConversationID, unboundDraft, updatedAt) VALUES ('default', ?, ?, ?)",
+                arguments: [
+                    latestConversationID,
+                    latestConversationID == nil ? legacyDraft : "",
+                    legacyDraftUpdatedAt
+                ]
+            )
+        }
+        migrator.registerMigration("s1-checkpoint-scope-v1") { db in
+            try db.alter(table: "checkpoint") { table in
+                table.add(column: "scopeKey", .text).notNull().defaults(to: "legacy:m0")
+                table.add(column: "conversationID", .text)
+                    .references("agentConversation", onDelete: .restrict)
+            }
+            try db.create(
+                index: "checkpoint_task_scope_sequence",
+                on: "checkpoint",
+                columns: ["taskID", "scopeKey", "sequence"]
+            )
+        }
+        migrator.registerMigration("s1-checkpoint-conversation-retention-v1") { db in
+            let orphanedScopedCheckpointCount = try Int.fetchOne(
+                db,
+                sql: """
+                    SELECT COUNT(*)
+                    FROM checkpoint
+                    WHERE scopeKey LIKE 's1:conversation:%'
+                      AND conversationID IS NULL
+                    """) ?? 0
+            guard orphanedScopedCheckpointCount == 0 else {
+                throw AppDatabaseError.invalidCheckpointScope
+            }
+
+            try db.execute(sql: """
+                CREATE TRIGGER checkpoint_conversation_delete_restrict
+                BEFORE DELETE ON agentConversation
+                WHEN EXISTS (
+                    SELECT 1 FROM checkpoint
+                    WHERE conversationID = OLD.id
+                )
+                BEGIN
+                    SELECT RAISE(ABORT, 'checkpoint conversation is retained');
                 END
                 """)
         }
