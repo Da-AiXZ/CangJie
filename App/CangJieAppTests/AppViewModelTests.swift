@@ -409,7 +409,7 @@ final class AppViewModelTests: XCTestCase {
             XCTAssertEqual(factoryCalls, 0)
             XCTAssertEqual(viewModel.draft, "existing draft")
             XCTAssertEqual(viewModel.businessStatus, "等你说说想写什么")
-            XCTAssertTrue(viewModel.transientNotice?.message == "本地内容已准备好" == true)
+            XCTAssertEqual(viewModel.transientNotice?.message, "本地内容已准备好")
 
             viewModel.draft = "updated draft"
             viewModel.saveDraft()
@@ -475,7 +475,7 @@ final class AppViewModelTests: XCTestCase {
             XCTAssertEqual(factoryCalls, 1)
             XCTAssertEqual(viewModel.draft, "")
             XCTAssertEqual(viewModel.businessStatus, "等你说说想写什么")
-            XCTAssertTrue(viewModel.transientNotice?.message == "本地内容已准备好" == true)
+            XCTAssertEqual(viewModel.transientNotice?.message, "本地内容已准备好")
         }
     }
 
@@ -853,7 +853,7 @@ final class AppViewModelTests: XCTestCase {
 
             XCTAssertEqual(viewModel.businessStatus, businessStatus)
             XCTAssertEqual(viewModel.transientNotice?.kind, .lifecycle)
-            XCTAssertTrue(viewModel.transientNotice?.message == "当前内容已安全保存" == true)
+            XCTAssertEqual(viewModel.transientNotice?.message, "当前内容已安全保存")
             XCTAssertNil(viewModel.errorMessage)
             XCTAssertEqual(try database.loadDraft()?.content, "unsent scene note")
         }

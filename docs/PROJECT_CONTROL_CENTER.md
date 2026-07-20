@@ -1215,3 +1215,24 @@ Apple boundary and next gate:
 
 - The authoritative proof is a new `macos-15` iPadOS CI run compiling and executing the actual App XCTest target with zero actor-isolation or missing-`await` errors, while Core CI passes for the same exact commit.
 - No IPA workflow has been triggered for this repair, no Candidate Set manifest or IPA hashes exist for it, and there is no physical-device installation stop yet. Only after both CI workflows pass may `build-ipa.yml` be manually triggered; only after its exact Candidate Set manifest, commit binding, SHA-256, signature, entitlements, and validation instructions are verified may the user be asked to install the paired IPAs.
+
+
+## 2026-07-20 S1 App XCTest chained-comparison compile repair
+
+This remains inside S1 and does not claim S1 completion, S2 start, Provider/model integration, a Typed Tool loop, H0-H5 completion, IPA acceptance, or physical-device acceptance.
+
+Remote evidence for exact commit `2e8e20f9b2566d02384650f4fb23636cb9ebf2cd`:
+
+- Core CI run `29721669526` passed.
+- iPadOS CI run `29721669531` progressed beyond the previous actor-isolation errors, then failed compiling `App/CangJieAppTests/AppViewModelTests.swift`.
+- The first real errors were the three non-associative chained comparisons at lines 412, 478, and 856: `optional message == expected string == true`.
+- Keychain Isolation Probe tests passed again, but they do not waive the main App XCTest target failure.
+
+Repair scope and local evidence:
+
+- Replaced the three chained `XCTAssertTrue` expressions with direct `XCTAssertEqual` comparisons, preserving the expected Chinese notice text and improving failure diagnostics.
+- A repository-wide App Swift scan found no remaining `== ... == true` chain.
+- `swiftc -frontend -parse`, Python contracts, encoding/credential scans, and `git diff --check` remain required locally; Xcode on `macos-15` remains authoritative for App XCTest compilation and execution.
+- Added Pitfall P-262 so this exact Swift precedence error is not repeated.
+
+No IPA workflow may be triggered until Core CI and iPadOS CI pass for the same new exact commit. This is not a physical-device installation stop point.

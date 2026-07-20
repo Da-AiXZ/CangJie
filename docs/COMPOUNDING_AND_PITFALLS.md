@@ -1083,3 +1083,8 @@ A Swift file that references a public type from `CangJieCore` must import `CangJ
 ## P-261 Windows parse and Core CI cannot prove iOS XCTest actor isolation
 
 Windows SwiftPM/Core tests and `swiftc -frontend -parse` do not fully validate `@MainActor` isolation, cross-actor calls, or `async/await` requirements in the iOS App XCTest target. When a test calls a MainActor-isolated helper, mark the test with the same isolation rather than weakening the helper; when an async GRDB API is selected in an async test context, use `await` rather than downgrading the API or removing the test. Treat macOS Xcode compilation and execution of the actual App XCTest target as authoritative. Preserve the Windows checks as auxiliary evidence only, and record the exact Apple CI result before advancing to IPA packaging.
+
+
+## P-262 Optional comparison assertions must not chain equality
+
+Swift comparison operators are non-associative, so an assertion such as `optionalString == expected == true` is a compile error rather than an extra truth check. Prefer `XCTAssertEqual(optionalString, expected)` for direct values and better failure diagnostics; reserve `XCTAssertTrue(expression == true)` only for a single optional-Bool comparison that is actually needed. Search the complete App XCTest target for the same chained pattern before pushing, because Windows syntax-only checks may not represent the exact Xcode target build.
