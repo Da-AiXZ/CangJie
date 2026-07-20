@@ -423,6 +423,7 @@ struct ContentView: View {
             }
         }
         .clipped()
+        .accessibilityElement(children: .contain)
         .accessibilityIdentifier("workspace-landscape-columns")
     }
 
@@ -492,6 +493,7 @@ struct ContentView: View {
             }
         }
         .clipped()
+        .accessibilityElement(children: .contain)
         .accessibilityIdentifier("workspace-landscape-columns")
     }
 
@@ -623,6 +625,7 @@ struct ContentView: View {
             }
         }
         .clipped()
+        .accessibilityElement(children: .contain)
         .accessibilityIdentifier("workspace-portrait-single-focus")
     }
     private var portraitTopBar: some View {
