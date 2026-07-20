@@ -1528,3 +1528,16 @@ First replacement evidence for exact commit `7be2e5009d6c6d0a95fa7e087532f0eca39
 - The test now verifies the top Candidate Set identity first, performs at most three upward swipes inside the diagnostics List until the canary control is hittable, and still requires that control to be enabled. No production behavior or security assertion is weakened.
 
 Remote acceptance and a replacement paired IPA remain pending.
+
+Replacement acceptance for exact commit `f93d43beb1459f4cf10ec3b7dcf3030d9b48e7fe`:
+
+- Core CI `29786055647` passed. iPadOS CI `29786055674` passed 197 App XCTest cases, all 20 main App UI tests, 13 Probe unit tests, and the Probe UI test. The advanced diagnostics operability test passed in 15.798 seconds with ordinary-surface absence, Settings navigation, bounded canary reveal, and enabled-control assertions intact.
+- TrollStore Candidate Set run `29787116654` succeeded and uploaded artifact `CangJie-paired-device-validation-required-31-1-f93d43beb1459f4cf10ec3b7dcf3030d9b48e7fe`.
+- Candidate Set ID `46471b8cbd5cf8dec6ff6c3878ca77f9e37127462c13daea29c453869e221e70`, version `1.0`, build `31001`.
+- Main IPA SHA-256 `355c05669610cecfeaaf00c8ff4104575af69115da8ba9e191391f80c4507818`.
+- Probe IPA SHA-256 `3a6f67395fb68c96b129efdffaa4197d3ca4cf611e03ac9db88dab8463830e15`.
+- The downloaded directory passed `scripts/verify-build-artifacts.py --metadata-only` and an independent archive audit: manifest candidate derivation, IPA checksums, arm64 Mach-O payloads, packaged Info.plist identity, compiled Candidate Set markers, signed executable hashes, absence of `embedded.mobileprovision`, and distinct self-only Keychain groups all matched.
+- Local verified copy: `F:\project\CangJie\artifacts\CangJie-S1-advanced-diagnostics-run-29787116654-verified`.
+- Independent audit receipt: `independent-audit.json`, SHA-256 `551524ab5baa3cef232439ad976a11454f0b4bf504e077b86a981dbe40f5894a`.
+
+This candidate is ready for the exact paired TrollStore device gate. Acceptance correctly remains `blocked-pending-trollstore-device-keychain-isolation-validation` until the user installs both IPAs, verifies single-overwrite activation and matching candidate identity, prepares the main canary through `设置 > 高级 > 设备诊断`, obtains a PASS from the paired Probe, confirms the main canary digest is unchanged, and deletes the canary back to Absent.
