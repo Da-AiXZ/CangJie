@@ -276,6 +276,28 @@ final class CangJieSmokeUITests: XCTestCase {
         XCTAssertTrue(help.waitForExistence(timeout: 5) || purpose.waitForExistence(timeout: 2))
     }
 
+    func testSettingsExposesDeviceDiagnosticsOnlyThroughAdvancedPath() {
+        let app = makeIsolatedApp()
+        launchWithDeterministicTimestampSetting(app)
+
+        XCTAssertTrue(app.buttons["activity-bar-settings"].waitForExistence(timeout: 10))
+        XCTAssertFalse(app.buttons["device-diagnostics-link"].exists)
+
+        app.buttons["activity-bar-settings"].tap()
+        let diagnosticsLink = app.buttons["device-diagnostics-link"]
+        XCTAssertTrue(diagnosticsLink.waitForExistence(timeout: 5))
+        diagnosticsLink.tap()
+
+        XCTAssertTrue(
+            app.descendants(matching: .any)["device-diagnostics-list"]
+                .waitForExistence(timeout: 5)
+        )
+        let prepareCanaryButton = app.buttons["isolation-canary-prepare"]
+        XCTAssertTrue(prepareCanaryButton.exists)
+        XCTAssertTrue(prepareCanaryButton.isEnabled)
+        XCTAssertTrue(app.staticTexts["diagnostics-candidate-set"].exists)
+    }
+
     func testProjectRefreshShowsVisibleAcknowledgement() {
         let app = makeIsolatedApp()
         launchWithDeterministicTimestampSetting(app)

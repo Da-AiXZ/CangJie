@@ -1506,3 +1506,17 @@ Remote acceptance for exact commit `9b8a4086ace915b057a113a215ea3024c2c0e473`:
 - The formerly failing `testTasksAndSettingsPreserveConversationAndTimestampSettingReallyApplies` passed in 50.101 seconds, proving the trailing-coordinate activation reached the Toggle and preserved the immediate and relaunched timestamp contracts.
 
 This S1 CI repair is remotely accepted. IPA packaging remains a separate acceptance gate and has not been triggered by this slice.
+
+## 2026-07-21 S1 run-30 candidate operability gate rejected before installation
+
+TrollStore Candidate Set run `29781764682` succeeded for exact commit `44c6a293e138534eb9eab857e3883849b781bece`. The downloaded paired artifact passed the repository metadata verifier and an independent archive/hash audit:
+
+- Artifact `CangJie-paired-device-validation-required-30-1-44c6a293e138534eb9eab857e3883849b781bece`.
+- Candidate Set ID `825b66efda45db0d2f8fa271c5a49e12c552a80938155665bf8ff2c00bea3d02`, version `1.0`, build `30001`.
+- Main IPA SHA-256 `a058437ce0db4f0814cbf9b144e9cf5a9322d39281bd5655c29a646f95a6e1ca`.
+- Probe IPA SHA-256 `4dbd3d308d43b3171a379857379fe9b131a44cf6e67c988fbd6045d098f422a1`.
+- Both archived arm64 executables, bundle identities, compiled identities, signed executable hashes, isolated self-only Keychain groups, entitlement files, and fail-closed manifest status matched.
+
+Run 30 is nevertheless not install-ready. Its manifest requires preparing the main-App isolation canary before running the paired Probe, but the S1 refactor left `DeviceDiagnosticsView` without any production navigation reference. Asking for installation would therefore hand the user a candidate that cannot complete its own security acceptance script.
+
+The minimal repair keeps diagnostics absent from the ordinary Agent surface and adds one real `设置 > 高级 > 设备诊断` navigation path to the existing view. A new UI test requires the link to be absent on the ordinary conversation surface, present only after opening Settings, and able to reach the Candidate Set and isolation-canary controls. Run 30 remains preserved as rejected audit evidence and must be superseded by a new dual-CI and paired-IPA candidate before device installation.

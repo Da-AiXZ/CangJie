@@ -268,6 +268,7 @@ private struct S1TasksPage: View {
 }
 
 private struct S1SettingsPage: View {
+    @ObservedObject var model: AppViewModel
     @Binding var showsConversationTimestamps: Bool
     let onBack: () -> Void
 
@@ -281,6 +282,16 @@ private struct S1SettingsPage: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .accessibilityIdentifier("settings-conversation-time-note")
+                }
+
+                Section("高级") {
+                    NavigationLink {
+                        DeviceDiagnosticsView(model: model)
+                    } label: {
+                        Label("设备诊断", systemImage: "wrench.and.screwdriver")
+                    }
+                    .accessibilityIdentifier("device-diagnostics-link")
+                    .accessibilityHint("查看候选版本身份和设备安全验证工具")
                 }
             }
             .navigationTitle("设置")
@@ -878,7 +889,7 @@ struct ContentView: View {
                 selectedActivity = .conversation
             }
         case .settings:
-            S1SettingsPage(showsConversationTimestamps: $showsConversationTimestamps) {
+            S1SettingsPage(model: model, showsConversationTimestamps: $showsConversationTimestamps) {
                 selectedActivity = .conversation
             }
         }

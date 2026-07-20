@@ -1163,3 +1163,7 @@ An isolation report may contain all completed evidence in its model while later 
 In iPadOS UI run `29774894603`, `XCUIElement.tap()` on the accessibility element for a SwiftUI `Toggle` inside a `List` synthesized an event but left the value at `1`; the earlier version then failed when the timestamp row stayed visible. Keep the immediate-effect and persistence assertions, and target the trailing normalized coordinate inside the switch row so the test reaches the native control rather than its label/container. Do not remove the assertion or weaken the production binding based on a failed hit target.
 
 Acceptance evidence: exact commit `9b8a408` passed iPadOS CI `29779040541`; the timestamp setting test passed with its value-transition, immediate-disappearance, row-label, and relaunch assertions intact.
+
+## P-277 A fail-closed device candidate needs an operable acceptance path
+
+A green paired-IPA build is not install-ready when its manifest requires a main-App canary or diagnostic action that no production navigation path can reach. Before asking for device installation, trace every required check from the artifact instructions to an actual user-operable control in the exact candidate. Keep engineering diagnostics off the ordinary Agent surface, but expose the real controls through an explicit advanced path and cover both ordinary absence and advanced discoverability in UI tests. Preserve an otherwise valid artifact as rejected audit evidence rather than weakening the security gate or asking the user to install an older build first.
