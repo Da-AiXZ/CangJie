@@ -1,6 +1,6 @@
 # CangJie Compounding and Pitfalls Log
 
-Updated: 2026-07-19. Update after every slice or milestone with evidence.
+Updated: 2026-07-21. Update after every slice or milestone with evidence.
 
 ## P-001 M0 shell was mistaken for product UX
 Feasibility screen is not the Agent product. Label every IPA as feasibility, development slice, candidate, or accepted milestone; report included/excluded/verification/next.
@@ -1179,3 +1179,19 @@ A TrollStore overwrite can be performed exactly once while the first subsequent 
 ## P-279 Model connection identity is a credential-disclosure boundary
 
 Provider choice, Base URL, credential reference and selected model must be one immutable, explicitly user-created identity. Bind the credential reference to the exact connection ID, Provider and allowed host/port; the Keychain item and retrieval adapter must repeat and verify that binding instead of trusting mutable database metadata. Never infer a Provider from key shape, fan one key out to candidate hosts, accept an official Provider name with an unrelated host, or persist API-key plaintext inside the connection record. Reject non-HTTPS endpoints and URLs carrying userinfo, query strings or fragments before Keychain access; a custom host belongs to the explicit custom connector. Re-run the same validation when decoding durable records so tampered storage cannot bypass the construction boundary, and make the network adapter resolve every custom destination and reject unsafe redirects/private or link-local retargeting before attaching credentials. When no current connection exists, persist the exact Conversation/project/branch-bound intent and enter `modelConnectionRequired`; do not create a sent Provider request, usage, artifact, ToolReceipt or canned AI success message. Resume from that same immutable pending intent after setup rather than rebuilding it from UI fields.
+
+## P-280 JSON and SQLite mirrors must use the same Date epoch
+
+Swift's default Codable representation for `Date` and a SQLite `DOUBLE` stored with `timeIntervalSince1970` can recover adjacent floating-point values even when they represent the same instant. When the payload and metadata are required to match exactly, configure both JSON encoding and decoding as `.secondsSince1970` and store the same Unix-seconds value in SQLite. Keep a fractional-second regression. Do not hide an epoch mismatch behind a broad timestamp tolerance or weaken the rest of the identity comparison; P-069 still applies to older mixed representations that cannot be rewritten safely.
+
+## P-281 Selected connection metadata is not credential or Provider evidence
+
+A `currentConnectionID` row proves only which saved metadata record the user selected. It does not prove that a Keychain item exists, that the item is bound to the same connection/Provider/host/port, that the connection test passed, or that the Provider is currently usable. Never call Provider preparation or resume from SQLite metadata alone. Keychain retrieval must repeat and verify the binding, and later request admission must require that verified evidence; missing or mismatched credentials fail closed without ProviderRequest, usage, artifact or ToolReceipt creation.
+
+## P-282 Idempotent save replay must not overwrite a later explicit selection
+
+Saving a new connection and selecting it can be one atomic first-time transaction, but replaying the immutable save is historical reconciliation, not a fresh user choice. If the user selected connection B after connection A was saved, a delayed replay of A must return A's original stored result without switching current selection back to A. New current-connection choices use a dedicated explicit selection operation and have their own current-state timestamp/evidence.
+
+## P-283 Partial metadata mirrors leave valid payload substitution undetected
+
+Cross-checking only IDs and credential host/port does not protect other identity-bearing fields. A valid replacement selected model, a different custom Base-URL path on the same host, or a different valid pending user request can still decode successfully. Persist and verify an exact versioned payload hash (or equivalent complete canonical identity) before decoding, then continue to cross-check duplicated scope and credential fields. A hash stored beside the payload is a corruption and uncoordinated-tamper check, not proof against an attacker who can rewrite the entire database; Keychain binding and request/runtime evidence remain separate security boundaries.

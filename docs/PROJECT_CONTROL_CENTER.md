@@ -450,9 +450,9 @@ Reset/recovery: how to return to the required starting state
 
 ## Immediate queue
 
-1. 以 TDD 建立 S2 的 no-key 入口：首次需要 AI 时保存原始意图，明确要求用户选择具体 Provider；设置未完成前不得发送模型请求、创建工具回执或伪造 Agent 回复。
-2. 复用并收紧现有 Provider/Keychain 基础，完成命名连接、Key/Endpoint 边界、连接测试、模型发现和用户手选模型；Key 只进入 Keychain，普通数据库、日志、回执和备份不得出现凭证。
-3. 将用户选择的真实模型接回原 Conversation 和原始意图，支持流式输出、取消、用量记录、断网/未知结果对账和明确的人工恢复；不做自动 Provider 识别或隐藏路由。
+1. 在已经完成的 Core admission 与 App SQLite metadata/pending-intent 基础上，以 TDD 实现 Keychain item：保存 Key 时重复绑定 connection ID、Provider、allowed host/port，读取时重新核对；SQLite current selection 不能单独成为凭证存在或 Provider 可用证据。
+2. 完成显式命名连接的 Key/Endpoint 写入、连接测试、模型发现和用户手选模型；Key 只进入 Keychain，普通数据库、日志、回执和备份不得出现凭证。
+3. 将通过 Keychain 绑定复验和连接测试的真实模型接回原 Conversation 与原始 pending intent，支持流式输出、取消、用量记录、断网/未知结果对账和明确的人工恢复；不做自动 Provider 识别或隐藏路由。
 4. 用中央对话中的结构化 Tool Call 证明至少 `project.create` 和 `project.status` 的真实执行、ToolReceipt、幂等与强退恢复；模型文字不能成为执行证据，S2 不生成正式正文。
 5. 为一个真实受治理任务验证暂停、恢复、失败对账、队列和“正在做 / 接下来 / 需要你”三处同源投影，并按顺序通过适用 H0–H3。
 6. 保持 Run-31 的 S1 导航、草稿、书架、普通术语、诊断高级入口和 Keychain 隔离回归；若覆盖安装首启红色提示复现，记录精确文案和身份状态，不进行第二次覆盖。
@@ -1579,3 +1579,18 @@ TDD and deterministic evidence:
 - `git diff --check`, changed-file UTF-8/BOM/U+FFFD/CRLF/trailing-whitespace scans and focused secret scans passed. The protected `.tmp-appvm-index.txt` remains unchanged and untracked at 28,868 bytes with SHA-256 `4682EEB10DC361950FB0FDE60A8BFF3D16A801542412AAAA5FDA981392011DE8`.
 
 The next S2 slice is App-side durable storage for named connection metadata and pending intent, with the actual secret mapped into a Keychain item that repeats and verifies the same connection/Provider/host binding. It must remain transactionally separate from Provider send, model usage and ToolReceipt creation. The later custom-endpoint network adapter must resolve and validate every destination address and reject unsafe redirects/private or link-local retargeting before any credential is attached; Core URL syntax validation alone is not SSRF proof.
+
+## 2026-07-21 S2 App-side model-connection persistence hardening
+
+The App persistence slice now has a reviewed local implementation, but it still does **not** claim Keychain storage, credential availability, Provider usability, connection testing, model discovery, network send, App UI, ToolReceipt, H0-H3 completion, IPA or device acceptance.
+
+- Migration `s2-model-connection-v1` adds `modelConnection`, singleton `modelConnectionState`, and `pendingModelIntent`. SQLite stores immutable connection metadata, the Keychain credential reference/binding, explicit current selection and the exact Conversation/project/branch-bound pending intent; it never stores API-key plaintext.
+- Connection/current-selection/pending-intent writes are transactional. Conversation, project and current-connection deletion are retained by foreign keys with `ON DELETE RESTRICT`. Exact replay is idempotent; changed connection or intent payloads and credential-ID reuse fail closed.
+- A connection-save replay no longer reapplies `makeCurrent`. This prevents a delayed replay of connection A from silently overriding the user's later explicit selection of connection B; a new selection must use the dedicated selection operation.
+- Both connection and pending-intent rows now persist a SHA-256 of the exact versioned JSON bytes in addition to identity metadata. Restore verifies the hash before decoding and then cross-checks the duplicated IDs, scope and credential Provider/host/port. This closes valid-but-altered selected-model, custom Base-URL-path and pending-user-request payload changes. The hash is a corruption/tamper check inside the SQLite record, not a substitute for the next Keychain binding verification.
+- JSON Date coding and SQLite mirror timestamps both use Unix seconds. The fractional-timestamp regression keeps exact equality without weakening business identity to a broad tolerance.
+- `currentModelConnection()` deliberately returns only the explicitly selected metadata record. It does not claim that the referenced Keychain item exists, that its binding matches, or that the Provider is usable; no database method prepares or resumes a Provider request from SQLite metadata alone.
+
+Focused tests now contain 14 App integration cases covering restart recovery, no plaintext credential columns, exact replay/conflict behavior, late-replay selection preservation, credential reuse, Provider/host retargeting, selected-model and custom-path payload alteration, fractional timestamps, pending-intent request/scope alteration, explicit current selection and delete restrictions. Local Swift syntax parsing, Core `swift test --enable-code-coverage` (115 XCTest + 15 Swift Testing), all seven Python contract scripts (32 tests, 1 skipped), migration SQL/foreign-key checks and `git diff --check` pass. Full App XCTest and iPadOS semantic compilation remain pending the next remote CI run.
+
+The protected `.tmp-appvm-index.txt` was identified as a 2026-07-20 UTF-16LE line-number/search index derived from `App/CangJieAppTests/AppViewModelTests.swift`; it is not a product source or build input. It remains untracked and unchanged at 28,868 bytes, SHA-256 `4682EEB10DC361950FB0FDE60A8BFF3D16A801542412AAAA5FDA981392011DE8`.

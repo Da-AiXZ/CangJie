@@ -139,6 +139,8 @@ enum AppDatabaseError: Error, Equatable {
     case draftInputLimitExceeded
     case invalidUITestDatabaseScope
     case invalidAgentRun
+    case invalidModelConnection
+    case invalidPendingModelIntent
     case invalidToolReceiptReference
     case idempotencyConflict
     case invalidApprovalRequest
@@ -1219,6 +1221,53 @@ final class AppDatabase {
                     SELECT RAISE(ABORT, 'checkpoint conversation is retained');
                 END
                 """)
+        }
+        migrator.registerMigration("s2-model-connection-v1") { db in
+            try db.execute(sql: """
+                CREATE TABLE modelConnection (
+                    id TEXT PRIMARY KEY NOT NULL,
+                    credentialID TEXT NOT NULL UNIQUE,
+                    credentialProvider TEXT NOT NULL,
+                    credentialAllowedHost TEXT NOT NULL,
+                    credentialAllowedPort INTEGER,
+                    payloadVersion INTEGER NOT NULL CHECK (payloadVersion = 1),
+                    payloadJSON TEXT NOT NULL,
+                    payloadHash TEXT NOT NULL,
+                    createdAt DOUBLE NOT NULL,
+                    updatedAt DOUBLE NOT NULL
+                )
+                """)
+            try db.execute(sql: """
+                CREATE TABLE modelConnectionState (
+                    id TEXT PRIMARY KEY NOT NULL,
+                    currentConnectionID TEXT
+                        REFERENCES modelConnection(id) ON DELETE RESTRICT,
+                    updatedAt DOUBLE NOT NULL
+                )
+                """)
+            try db.execute(
+                sql: "INSERT INTO modelConnectionState (id, currentConnectionID, updatedAt) VALUES ('default', NULL, 0)"
+            )
+            try db.execute(sql: """
+                CREATE TABLE pendingModelIntent (
+                    id TEXT PRIMARY KEY NOT NULL,
+                    conversationID TEXT NOT NULL
+                        REFERENCES agentConversation(id) ON DELETE RESTRICT,
+                    projectID TEXT
+                        REFERENCES novelProject(id) ON DELETE RESTRICT,
+                    branchID TEXT,
+                    payloadVersion INTEGER NOT NULL CHECK (payloadVersion = 1),
+                    payloadJSON TEXT NOT NULL,
+                    payloadHash TEXT NOT NULL,
+                    createdAt DOUBLE NOT NULL,
+                    CHECK (branchID IS NULL OR projectID IS NOT NULL)
+                )
+                """)
+            try db.create(
+                index: "pendingModelIntent_conversation_created",
+                on: "pendingModelIntent",
+                columns: ["conversationID", "createdAt"]
+            )
         }
         return migrator
     }
