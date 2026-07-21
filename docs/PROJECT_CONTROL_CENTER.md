@@ -1,7 +1,7 @@
 # CangJie Project Control Center
 
 - Authority: current operational truth
-- Updated: 2026-07-20
+- Updated: 2026-07-21
 - Repository: `F:\project\CangJie`
 - Remote: `https://github.com/Da-AiXZ/CangJie`, branch `main`
 ## Agent Harness architecture decision
@@ -70,7 +70,7 @@ These are connector defaults, not credentials or a promise that every model supp
 
 ## Background, offline, recovery, and notification lifecycle (FROZEN)
 
-- Decision status: `FROZEN`, confirmed 2026-07-19 as `CJ-PX-006`; this is a documentation contract, not an implementation claim and does not change the real S1 milestone.
+- Decision status: `FROZEN`, confirmed 2026-07-19 as `CJ-PX-006`; this contract did not by itself advance the then-current S1 milestone. The authoritative current stage is tracked below under `Current milestone`.
 - Before backgrounding, screen lock, or detected network loss, persist the draft, real task stage, Provider request identity/state, received stream fragments, recorded cost, and latest safe continuation point. This recovery contract never promises unlimited background execution on iPadOS 16.6.1.
 - Recovery must distinguish completed, safely paused, definitely failed, outcome unknown, and invalid connection. Unknown outcome first performs non-creative reconciliation against the original request and local receipts/usage; it must not issue a new creative request or charge, and cannot be directly retried while still unknown.
 - Offline use includes local projects, prose, materials, drafts, novel export, and project backup. New AI requests created offline remain unsent and require user confirmation after connectivity returns. Requests already sent may automatically reconcile their original identity.
@@ -82,7 +82,7 @@ These are connector defaults, not credentials or a promise that every model supp
 ## Product stages and evidence-bound acceptance (FROZEN)
 
 - Decision status: `CJ-PX-007 / FROZEN`, confirmed 2026-07-19.
-- CangJie uses S0–S6 as user-visible product stages and H0–H5 as sequential Harness engineering gates. The current real milestone is **S1 Agent 驾驶舱定调与重构**. S0 is only the completed technical-feasibility baseline.
+- CangJie uses S0–S6 as user-visible product stages and H0–H5 as sequential Harness engineering gates. Exact Run-31 automation and physical-device evidence accepted S1 on 2026-07-21; the current real milestone is **S2 真正可操作软件的 Agent**. S0 is only the completed technical-feasibility baseline.
 - Historical candidate-hardening M1 labels and Builds 26–28 are engineering-prototype/hardening evidence, not the current complete-product milestone. Build 28 is not accepted.
 - S2 proves the first real Provider and the no-key → Provider/Key/Endpoint → model discovery → user-selected model → central Agent Typed Tool project/status → ToolReceipt → force-quit recovery loop, passes the applicable H0–H3 gates, and contains no formal prose generation.
 - S3 adds dynamic intent discovery, one high-value question at a time, authorized reference abstraction, preference evidence, work direction and opening preparation. It uses ordinary-scale materials only and advances the H4 main path without claiming complete million-character understanding.
@@ -323,9 +323,9 @@ These are connector defaults, not credentials or a promise that every model supp
 
 ## Current milestone
 
-**S1 Agent 驾驶舱定调与重构。** 当前首先冻结普通用户入口、最终 iPad 布局、左右区域行为、人话文案和每阶段可见交付，再开始改造 App。此阶段不是删除底层能力，而是把已经完成的生产级治理装进正确的普通人驾驶舱。
+**S2 真正可操作软件的 Agent。** S1 Agent 驾驶舱定调与重构已由精确 Run-31 候选完成自动化和真机验收。当前按冻结路线接入真实 Provider、用户手选模型、中央 Agent Typed Tools / ToolReceipt，以及不生成正式正文的最小恢复闭环；不得把历史 Runtime 演示或模型文字当作 S2 通过证据。
 
-S1 目标：
+S1 已验收基线：
 
 - 首屏直接进入仓颉对话；
 - 全中文、大白话，不要求用户理解写作或工程术语；
@@ -343,7 +343,7 @@ S1 目标：
 
 用户偏好代理路线当前状态：产品合同与 P0–P5 架构已经冻结，代码尚未进入 P0。近期只能先建设可追溯的事件/证据数据基础和范围治理；不得把未来轻量模型评估写成首版已实现能力，也不得用演示性“数字分身”绕开真实反馈和权限验证。
 
-TrollStore 一次覆盖后仍可能运行旧进程、第二次覆盖才显示新界面的激活风险暂时搁置但不关闭。Build 28 的运行身份 fail-closed 防护和配对 Probe 证据继续保留；不得把第二次覆盖写成正常安装步骤。该问题不再阻塞 S1 产品驾驶舱设计和实现，但下一次正式真机候选仍需带版本身份验证。
+Run-31 证明 TrollStore **一次覆盖**后无需第二次覆盖即可激活新候选：首次打开出现红色 fail-closed 提示并要求结束后台后重开，用户按提示强退重开后身份、运行态、配对 Probe、Keychain 隔离和 S1 smoke 全部通过。用户未记录首次红色提示的精确文字，因此不能宣称已定位其底层原因；后续候选仍须保留运行身份验证，并在该提示复现时记录精确文案。第二次覆盖或卸载仍不得写成正常恢复步骤。
 
 本轮新增权威设计文档：
 
@@ -351,6 +351,22 @@ TrollStore 一次覆盖后仍可能运行旧进程、第二次覆盖才显示新
 - `docs/MILESTONE_VISUAL_ACCEPTANCE.md`：S0–S6 每阶段用户能看到什么、能做什么、暂时不能做什么和真机验收脚本。
 
 ## Validated baseline
+
+Device-accepted S1 Agent-cockpit candidate:
+
+```text
+commit f93d43beb1459f4cf10ec3b7dcf3030d9b48e7fe
+Core CI 29786055647: success
+iPadOS CI 29786055674: success (197 App XCTest, 20 main App UI, 13 Probe unit, Probe UI)
+Build TrollStore Candidate Set 29787116654 | run number 31
+Candidate Set ID 46471b8cbd5cf8dec6ff6c3878ca77f9e37127462c13daea29c453869e221e70
+Version 1.0 | build 31001
+Main SHA-256 355c05669610cecfeaaf00c8ff4104575af69115da8ba9e191391f80c4507818
+Probe SHA-256 3a6f67395fb68c96b129efdffaa4197d3ca4cf611e03ac9db88dab8463830e15
+Local verified copy F:\project\CangJie\artifacts\CangJie-S1-advanced-diagnostics-run-29787116654-verified
+```
+
+The user completed one Main overwrite plus Probe installation on the target iPad. The first launch showed a red fail-closed relaunch instruction; one force-quit and relaunch, without a second overwrite or uninstall, activated the expected candidate. The user then confirmed all requested identity/runtime checks, Main canary creation, paired Probe isolation PASS conditions including `errSecMissingEntitlement`, unchanged Main digest, canary deletion to Absent, and the S1 navigation/draft/conversation smoke checks with no remaining issue. This exact candidate therefore passes the S1 physical-device gate. The unknown first-launch warning text remains an observation to capture if it recurs, not an unproven root-cause claim.
 
 Device-accepted M0 baseline:
 
@@ -434,14 +450,13 @@ Reset/recovery: how to return to the required starting state
 
 ## Immediate queue
 
-1. 继续冻结剩余高影响决定；已确认横竖屏、图标导航、Agent 主导校准、手动编辑次级、人工版本治理、选区语义、修改影响与依赖重连、用户偏好代理/影子用户、三层证据画像、非参数化首版、盲读预审、黄/红漂移治理、模糊拒绝诊断、前三章逐章批准、单次连续创作授权、默认 3 章/可调 1–5 章/最多 5 章未读领先、单 Writer 逐章结算、两种暂停、自动连载分级创作授权、自主权、动态意图、对话与小说关系、“这次结果”、“我的小说”、“故事记忆”、“AI 任务”、自动研究、第一章启动门槛、不可变原文、多层叙事索引、自适应查询、证据扩大、原文闭环、渐进索引、轻量首版边界、上传资料先本地免费基础索引、联网深度理解首次明确授权、授权范围内增量处理、幂等暂停恢复，以及统一 Evidence Index + `NarrativeIndex` / `ResearchIndex` / `ProjectMaterialIndex` / `PreferenceIndex` 专用理解器和严格检索隔离，不得退回旧方案。
-2. 按已冻结路线推进 P0/P1 事件与叙事证据基础：先落统一 Evidence Index 的不可变原文、`SourceSpan`、来源/版本/哈希、免费本地基础 FTS5、章节/页码/段落定位、索引 checkpoint/覆盖状态、`MaterialAnalysisAuthorization`、`MaterialAnalysisCursor` 和费用/外发回执；再落四类资料路由、混合 ZIP 文件/片段分类与项目/类型/用途/确认/权限/外发隔离，并统一采集明确表达、选择、拒绝诊断、最终通过版本、授权参考资料抽象特征和交互习惯；随后接入授权范围内的增量深度理解、轻量向量、人物/事件/认知/状态/伏笔关系和自适应查询。不得跳过本地证据底座直接外发整书、做数字分身或“全书理解”演示，也不得提前引入蒸馏、LoRA、轻量模型、Neo4j、Qdrant 或完整 GraphRAG/LightRAG 服务。
-3. 以 `PRODUCT_EXPERIENCE_BLUEPRINT.md` 为视觉契约审计现有 SwiftUI shell，列出可复用状态模型、必须替换的默认路径和新增组件。
-4. 按 TDD 实现 S1 驾驶舱：中文欢迎页、中心对话、左侧历史与独立书架/详情页、右侧人话结果、专业字段默认折叠，以及横竖屏/键盘/滚动适配。
-5. 为 S1 验证导航身份、中央状态不重建、书架浏览不偷换创作上下文、普通消息不建空书、闲聊不生成结果卡、长内容可滚动、草稿恢复和术语可见性。
-6. 保留现有 Build 28 工具、数据库、审批、版本和安全能力作为后台回归，不把诊断页继续放在普通用户主路径。
-7. S1 完成后构建一个明确标记为“产品驾驶舱候选”的 IPA，提供页面位置、点击路径、预期文字和外观问题清单，由用户做第一次新方向真机验收。
-8. S1 通过后严格按冻结地图推进：S2 完成真实 Provider、命名连接、用户手选模型、中央 Agent Typed Tools/Receipt/强退恢复的无正文最小闭环并通过适用 H0–H3；S3 完成动态意图、一次一个高价值问题、常规规模参考资料抽象学习、偏好证据、作品方向和开篇准备并推进 H4；S4 完成真实正文、选区交流、模糊拒绝诊断、影响预览、版本差异、前三章逐章校准和单独连续创作授权，完成 H4 并进入 H5；S5 正式验收滚动自动连载、最多 5 章未读、重大决定/预算暂停、两种暂停、分支影响、百万字叙事索引、大型参考小说分阶段分析及完整 H5；S6 完成全格式与百万字资料、质量、干净正文导出、无凭证备份恢复、无障碍、性能、迁移、安全审计和正式候选。P5 仅在留出集和真实用户抽样证明净收益后评估，不是首版硬承诺。
+1. 以 TDD 建立 S2 的 no-key 入口：首次需要 AI 时保存原始意图，明确要求用户选择具体 Provider；设置未完成前不得发送模型请求、创建工具回执或伪造 Agent 回复。
+2. 复用并收紧现有 Provider/Keychain 基础，完成命名连接、Key/Endpoint 边界、连接测试、模型发现和用户手选模型；Key 只进入 Keychain，普通数据库、日志、回执和备份不得出现凭证。
+3. 将用户选择的真实模型接回原 Conversation 和原始意图，支持流式输出、取消、用量记录、断网/未知结果对账和明确的人工恢复；不做自动 Provider 识别或隐藏路由。
+4. 用中央对话中的结构化 Tool Call 证明至少 `project.create` 和 `project.status` 的真实执行、ToolReceipt、幂等与强退恢复；模型文字不能成为执行证据，S2 不生成正式正文。
+5. 为一个真实受治理任务验证暂停、恢复、失败对账、队列和“正在做 / 接下来 / 需要你”三处同源投影，并按顺序通过适用 H0–H3。
+6. 保持 Run-31 的 S1 导航、草稿、书架、普通术语、诊断高级入口和 Keychain 隔离回归；若覆盖安装首启红色提示复现，记录精确文案和身份状态，不进行第二次覆盖。
+7. S2 自动化和精确候选证据齐备后，才构建下一份设备候选；S3 及正式正文、动态意图挖掘、资料深度理解和偏好代理不得提前混入该候选。
 
 ## Change log
 
@@ -1541,3 +1556,26 @@ Replacement acceptance for exact commit `f93d43beb1459f4cf10ec3b7dcf3030d9b48e7f
 - Independent audit receipt: `independent-audit.json`, SHA-256 `551524ab5baa3cef232439ad976a11454f0b4bf504e077b86a981dbe40f5894a`.
 
 This candidate is ready for the exact paired TrollStore device gate. Acceptance correctly remains `blocked-pending-trollstore-device-keychain-isolation-validation` until the user installs both IPAs, verifies single-overwrite activation and matching candidate identity, prepares the main canary through `设置 > 高级 > 设备诊断`, obtains a PASS from the paired Probe, confirms the main canary digest is unchanged, and deletes the canary back to Absent.
+
+## 2026-07-21 S1 device acceptance and S2 explicit-connection admission slice
+
+Physical-device acceptance for exact Run-31 candidate `f93d43beb1459f4cf10ec3b7dcf3030d9b48e7fe` is complete. The user performed one Main overwrite, saw a red fail-closed instruction on the first launch, force-quit and relaunched without a second overwrite or uninstall, and then completed the requested identity, runtime, paired-Probe isolation, unchanged-canary, deletion-to-Absent and S1 cockpit smoke checks without a remaining issue. Because the exact first-launch warning text was not captured, this record does not invent its root cause; a future recurrence must capture the displayed copy and identity state. S1 is accepted and the current stage is S2.
+
+The first S2 implementation slice remains deliberately platform-neutral and does **not** claim a real Provider connection, model discovery, network request, Keychain persistence, App UI, Tool Call, ToolReceipt, H0-H3 completion, IPA or device acceptance:
+
+- Added an explicit connector registry for DeepSeek, Anthropic, OpenAI, Gemini, OpenRouter and a hostless custom connector using the frozen names, official Base URLs and discovery paths.
+- `ModelConnection` is immutable and contains only a credential reference bound to the exact connection ID, Provider and allowed host/port, never API-key plaintext. Official connectors reject unrelated hosts; all endpoints reject non-HTTPS URLs, URL userinfo, query strings and fragments before a credential can be associated with them.
+- Custom services require an explicitly supplied HTTPS Base URL and permit a manual model only as the documented discovery fallback. Every connection still requires a user-visible name and explicit selected model.
+- Codable restore re-runs the same endpoint and intent validation so a tampered persisted connection or pending intent cannot bypass construction-time checks.
+- `ModelRequestAdmission` validates and preserves the exact Conversation/project/branch-bound user intent. No current connection yields only `modelConnectionRequired`; it does not create a Provider request, usage, artifact, ToolReceipt or simulated Agent reply. A validated current connection yields preparation carrying the complete immutable connection snapshot, and `resume(_:with:)` preserves the original persisted intent ID, timestamp and bindings after setup with no automatic Provider/key switching.
+- Review hardening rejects oversized connection names/model identifiers, control characters and bidirectional display controls; uses an exhaustive Provider registry switch; and rejects coordinated Codable retargeting that changes a Provider and official endpoint while retaining a credential bound to the original connection.
+
+TDD and deterministic evidence:
+
+- RED: focused SwiftPM compilation failed because the connection registry, immutable connection, pending intent and admission types did not exist.
+- GREEN: `ModelConnectionContractTests` passed **16/16** tests, including official-host binding, unsafe endpoint rejection, credential host/port retargeting rejection, Codable tamper rejection, bounded display-safe identifiers, branch/project identity, exact pending-intent resume and no-key admission.
+- Full `swift test --enable-code-coverage` passed **115 XCTest cases plus 15 Swift Testing cases**, with zero failures.
+- Overall Core line coverage is **4,999/5,127 = 97.50%**; `ModelConnectionContract.swift` line coverage is **260/268 = 97.01%**, with 26/26 functions covered.
+- `git diff --check`, changed-file UTF-8/BOM/U+FFFD/CRLF/trailing-whitespace scans and focused secret scans passed. The protected `.tmp-appvm-index.txt` remains unchanged and untracked at 28,868 bytes with SHA-256 `4682EEB10DC361950FB0FDE60A8BFF3D16A801542412AAAA5FDA981392011DE8`.
+
+The next S2 slice is App-side durable storage for named connection metadata and pending intent, with the actual secret mapped into a Keychain item that repeats and verifies the same connection/Provider/host binding. It must remain transactionally separate from Provider send, model usage and ToolReceipt creation. The later custom-endpoint network adapter must resolve and validate every destination address and reject unsafe redirects/private or link-local retargeting before any credential is attached; Core URL syntax validation alone is not SSRF proof.
