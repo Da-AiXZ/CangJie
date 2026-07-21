@@ -25,6 +25,18 @@ protocol ModelCredentialRepository {
     func delete(for connection: ModelConnection) throws
 }
 
+/// Serializes every process-local credential mutation and any higher-level
+/// Keychain/SQLite compensation sequence that uses this coordinator.
+enum ModelCredentialOperationCoordinator {
+    private static let lock = NSRecursiveLock()
+
+    static func withExclusiveAccess<T>(_ body: () throws -> T) rethrows -> T {
+        lock.lock()
+        defer { lock.unlock() }
+        return try body()
+    }
+}
+
 struct KeychainModelCredentialRepository: ModelCredentialRepository {
     static let maximumSecretUTF8Bytes = 4_096
 
@@ -56,8 +68,6 @@ struct KeychainModelCredentialRepository: ModelCredentialRepository {
 
     private static let envelopeVersion = 1
     private static let accountPrefix = "model-credential-v1:"
-    private static let operationLock = NSLock()
-
     private let secrets: any SecretRepository
 
     init(secrets: any SecretRepository = KeychainSecretRepository()) {
@@ -66,7 +76,7 @@ struct KeychainModelCredentialRepository: ModelCredentialRepository {
 
     func save(_ secret: String, for connection: ModelConnection) throws {
         try Self.validateNewSecret(secret)
-        try Self.withOperationLock {
+        try ModelCredentialOperationCoordinator.withExclusiveAccess {
             try validateExistingItems(for: connection.credential)
             let verificationAccount = Self.verificationAccount(
                 for: connection.credential.id
@@ -110,7 +120,7 @@ struct KeychainModelCredentialRepository: ModelCredentialRepository {
     }
 
     func resolve(for connection: ModelConnection) throws -> KeychainBoundModelCredential? {
-        try Self.withOperationLock {
+        try ModelCredentialOperationCoordinator.withExclusiveAccess {
             let verificationAccount = Self.verificationAccount(
                 for: connection.credential.id
             )
@@ -149,7 +159,7 @@ struct KeychainModelCredentialRepository: ModelCredentialRepository {
     }
 
     func delete(for connection: ModelConnection) throws {
-        try Self.withOperationLock {
+        try ModelCredentialOperationCoordinator.withExclusiveAccess {
             try validateExistingItems(for: connection.credential)
             let verificationAccount = Self.verificationAccount(
                 for: connection.credential.id
@@ -359,9 +369,4 @@ struct KeychainModelCredentialRepository: ModelCredentialRepository {
         }
     }
 
-    private static func withOperationLock<T>(_ body: () throws -> T) rethrows -> T {
-        operationLock.lock()
-        defer { operationLock.unlock() }
-        return try body()
-    }
 }

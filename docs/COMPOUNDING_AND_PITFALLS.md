@@ -1207,3 +1207,15 @@ Writing a Keychain payload and then discovering a read-back mismatch is too late
 ## P-286 Credential deletion revokes before it cleans up
 
 Deleting the payload first or treating a failed marker delete as “still active” lets a partially failed delete continue authorizing requests. Persist and verify a `revoked` marker before cleanup, then delete and verify the payload, then remove the marker. A payload-delete failure leaves only a revoked inactive orphan; a marker-cleanup failure leaves a revoked marker. Both must resolve to no credential, surface a cleanup failure and support a later idempotent cleanup retry. The real Keychain path still requires a signed Simulator application test; a pure in-memory fake cannot replace P-079.
+
+## P-287 A destructive Keychain save failure belongs inside cross-store compensation
+
+A low-level credential save is multi-step: it can revoke the old marker, replace the payload and then fail before active verification. Capturing the previous credential is useless if the save call itself sits outside the setup service's compensation boundary. Enclose save, exact read-back and SQLite metadata/current-selection commit in one error boundary; on any failure restore the exact previous credential or delete the new one, verify the result, and surface an explicit compensation failure when cleanup cannot be proven. A test that throws only before the first mutation does not cover this defect; inject a failure after the replacement payload has been written.
+
+## P-288 Keychain/SQLite compensation needs one shared process-local coordinator
+
+Separate method-level Keychain locks do not protect the interval between previous-credential capture, database failure and rollback. A concurrent save or delete can otherwise occur in that gap, after which unconditional compensation may revive a deleted key or remove a newer one. Use one shared recursive coordinator for direct repository operations and the complete higher-level setup sequence, and test that another credential operation cannot enter while setup is paused between save and metadata commit. This is process-local protection; any future extension sharing the access group across processes requires a separate cross-process protocol.
+
+## P-289 Immutable connection replay must not rewrite credentials
+
+SQLite deciding that a connection row is an idempotent replay after Keychain has already been overwritten is too late. A delayed old create request can roll a newer key back even while current-selection replay protection works. For an existing immutable connection, verify that the active bound credential exactly matches the replay input, return the historical metadata, and neither write Keychain nor reapply `makeCurrent`. A differing key is a replay conflict. Legitimate key rotation must use a separate versioned replacement operation with its own identity and recovery contract, not reuse connection creation as an ambiguous update.

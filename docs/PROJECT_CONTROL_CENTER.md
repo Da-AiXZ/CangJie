@@ -450,9 +450,9 @@ Reset/recovery: how to return to the required starting state
 
 ## Immediate queue
 
-1. 将已实现的 Keychain credential payload + active/revoked verification marker repository 接入命名连接设置编排：只有 Keychain 精确回读和绑定复验成功后才能保存/激活对应 metadata；SQLite current selection 仍不能单独成为凭证存在或 Provider 可用证据。
-2. 完成显式命名连接的 Key/Endpoint 设置、真实连接测试、模型发现和用户手选模型；Key 只进入 Keychain，普通数据库、日志、回执和备份不得出现凭证。
-3. 将通过 Keychain 绑定复验和连接测试的真实模型接回原 Conversation 与原始 pending intent，支持流式输出、取消、用量记录、断网/未知结果对账和明确的人工恢复；不做自动 Provider 识别或隐藏路由。
+1. 将本地完成的 Keychain/SQLite 命名连接设置编排提交到真实 App XCTest：只有 Keychain 精确回读和绑定复验成功后才能保存/激活 metadata；任何失败必须补偿或显式进入补偿失败，迟到重放不得改写较新 Key 或 current selection。
+2. 在该编排远端通过后，完成显式命名连接的 Key/Endpoint 设置、真实连接测试、模型发现和用户手选模型；Key 只进入 Keychain，普通数据库、日志、回执和备份不得出现凭证。
+3. 将通过 Keychain 绑定复验、连接测试和用户选模的真实模型接回原 Conversation 与原始 pending intent，支持流式输出、取消、用量记录、断网/未知结果对账和明确的人工恢复；不做自动 Provider 识别或隐藏路由。
 4. 用中央对话中的结构化 Tool Call 证明至少 `project.create` 和 `project.status` 的真实执行、ToolReceipt、幂等与强退恢复；模型文字不能成为执行证据，S2 不生成正式正文。
 5. 为一个真实受治理任务验证暂停、恢复、失败对账、队列和“正在做 / 接下来 / 需要你”三处同源投影，并按顺序通过适用 H0–H3。
 6. 保持 Run-31 的 S1 导航、草稿、书架、普通术语、诊断高级入口和 Keychain 隔离回归；若覆盖安装首启红色提示复现，记录精确文案和身份状态，不进行第二次覆盖。
@@ -1612,3 +1612,20 @@ The next local Keychain slice is implemented and reviewed but still awaits its o
 - Eleven focused tests cover exact save/update/resolve, all input boundaries, cross-binding overwrite/delete rejection, malformed and altered payloads, write-read verification, revoked failure states, payload and marker cleanup failures, and a production `KeychainSecretRepository` round trip intended for the signed iPad Simulator test host.
 
 Local evidence: both new Swift files pass syntax parsing; the production repository and tests pass Swift semantic type-checking against minimal local stubs for unavailable Apple/XCTest modules; `git diff --check`, UTF-8/trailing-whitespace scans and focused secret/SQLite/log coupling scans pass. The signed production-Keychain test can only be accepted by the iPadOS CI test host, consistent with P-079. `.tmp-appvm-index.txt` remains untouched with the recorded size and hash.
+
+## 2026-07-21 S2 Keychain remote acceptance and setup-orchestration hardening
+
+Remote acceptance for exact Keychain commit `8c8e3e09bd555f2211ca40502e1a16f1b46580dc` is complete:
+
+- Core CI `29814395127` passed.
+- iPadOS CI `29814395026` passed 222 App XCTest cases, all 20 main App UI tests, 13 Isolation Probe unit tests and the Probe UI test. `ModelCredentialRepositoryTests` passed 11/11, including the signed production `KeychainSecretRepository` round trip. Both simulator test commands reported `TEST SUCCEEDED`.
+
+The next setup-orchestration slice is implemented locally and remains pending its own App XCTest run. It still does **not** claim Provider connectivity, model discovery, network send, setup UI, ToolReceipt, H0-H3 completion, IPA or device acceptance.
+
+- `ModelConnectionSetupService` keeps connection creation inside one process-wide credential coordinator shared with direct Keychain repository operations. The coordinator spans prior-credential capture, Keychain save/read-back, SQLite metadata/current-selection commit and any compensation, preventing another process-local save/delete from interleaving with rollback.
+- Credential save itself is inside the compensation boundary. A write that mutates Keychain and then throws restores the exact previous active credential; a new credential is deleted when metadata cannot commit. Failure to prove compensation returns `credentialCompensationFailed` instead of claiming a clean rollback.
+- Metadata and current selection are committed only after the exact bound credential is read back. A credential-ID collision is rejected before Keychain mutation.
+- An immutable connection-save replay first verifies that the currently active credential is exactly the replayed credential, then returns the historical metadata without rewriting Keychain or reapplying `makeCurrent`. A differing active key returns `credentialReplayConflict`; credential replacement must be a separate versioned operation rather than an old create request masquerading as a retry.
+- Twelve focused setup tests cover credential-before-metadata ordering, pre-write and post-mutation save failure, read-back failure, credential-ID collision without Keychain mutation, database-failure restoration/deletion, current-selection replay, stale-key replay rejection, shared-coordinator exclusion and explicit compensation failure.
+
+Local verification: all changed production and test Swift files pass syntax parsing; production plus both credential/setup test files pass semantic type-checking against the established minimal Core/CryptoKit/XCTest/AppDatabase stubs without diagnostics; a temporary executable harness passes post-mutation save rollback and stale-key replay scenarios. The independent read-only review's two P1 findings and one P2 finding are addressed by the shared coordinator, enlarged compensation boundary and immutable replay check. Apple/GRDB execution remains authoritative and is pending the replacement CI commit. `.tmp-appvm-index.txt` remains untracked and unchanged at 28,868 bytes with SHA-256 `4682EEB10DC361950FB0FDE60A8BFF3D16A801542412AAAA5FDA981392011DE8`.
