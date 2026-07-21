@@ -450,8 +450,8 @@ Reset/recovery: how to return to the required starting state
 
 ## Immediate queue
 
-1. 在已经完成的 Core admission 与 App SQLite metadata/pending-intent 基础上，以 TDD 实现 Keychain item：保存 Key 时重复绑定 connection ID、Provider、allowed host/port，读取时重新核对；SQLite current selection 不能单独成为凭证存在或 Provider 可用证据。
-2. 完成显式命名连接的 Key/Endpoint 写入、连接测试、模型发现和用户手选模型；Key 只进入 Keychain，普通数据库、日志、回执和备份不得出现凭证。
+1. 将已实现的 Keychain credential payload + active/revoked verification marker repository 接入命名连接设置编排：只有 Keychain 精确回读和绑定复验成功后才能保存/激活对应 metadata；SQLite current selection 仍不能单独成为凭证存在或 Provider 可用证据。
+2. 完成显式命名连接的 Key/Endpoint 设置、真实连接测试、模型发现和用户手选模型；Key 只进入 Keychain，普通数据库、日志、回执和备份不得出现凭证。
 3. 将通过 Keychain 绑定复验和连接测试的真实模型接回原 Conversation 与原始 pending intent，支持流式输出、取消、用量记录、断网/未知结果对账和明确的人工恢复；不做自动 Provider 识别或隐藏路由。
 4. 用中央对话中的结构化 Tool Call 证明至少 `project.create` 和 `project.status` 的真实执行、ToolReceipt、幂等与强退恢复；模型文字不能成为执行证据，S2 不生成正式正文。
 5. 为一个真实受治理任务验证暂停、恢复、失败对账、队列和“正在做 / 接下来 / 需要你”三处同源投影，并按顺序通过适用 H0–H3。
@@ -1594,3 +1594,21 @@ The App persistence slice now has a reviewed local implementation, but it still 
 Focused tests now contain 14 App integration cases covering restart recovery, no plaintext credential columns, exact replay/conflict behavior, late-replay selection preservation, credential reuse, Provider/host retargeting, selected-model and custom-path payload alteration, fractional timestamps, pending-intent request/scope alteration, explicit current selection and delete restrictions. Local Swift syntax parsing, Core `swift test --enable-code-coverage` (115 XCTest + 15 Swift Testing), all seven Python contract scripts (32 tests, 1 skipped), migration SQL/foreign-key checks and `git diff --check` pass. Full App XCTest and iPadOS semantic compilation remain pending the next remote CI run.
 
 The protected `.tmp-appvm-index.txt` was identified as a 2026-07-20 UTF-16LE line-number/search index derived from `App/CangJieAppTests/AppViewModelTests.swift`; it is not a product source or build input. It remains untracked and unchanged at 28,868 bytes, SHA-256 `4682EEB10DC361950FB0FDE60A8BFF3D16A801542412AAAA5FDA981392011DE8`.
+
+## 2026-07-21 S2 SQLite remote acceptance and Keychain binding slice
+
+Remote acceptance for exact SQLite/pending-intent commit `f91e9d7250760c0c3ba573b82735801768ec830d` is complete:
+
+- Core CI `29810765822` passed.
+- iPadOS CI `29810765816` passed semantic compilation and all simulator gates: 211 App XCTest cases, all 20 main App UI tests, 13 Isolation Probe unit tests and the Probe UI test. `ModelConnectionPersistenceTests` passed 14/14, including the late-replay selection and complete payload-hash regressions. Both simulator test commands reported `TEST SUCCEEDED`.
+
+The next local Keychain slice is implemented and reviewed but still awaits its own remote App XCTest result. It does **not** yet claim connection setup orchestration, Provider connectivity, model discovery, network requests, App UI, ToolReceipt, H0-H3 completion, IPA or device acceptance.
+
+- `KeychainModelCredentialRepository` stores no credential in SQLite or logs. The Keychain credential payload repeats credential ID, connection ID, Provider and allowed host/port together with the secret. A separate Keychain verification marker repeats the same binding and stores the exact credential-payload SHA-256.
+- Save/resolve/delete are serialized by one process-wide lock. Saving first writes and verifies a `revoked` marker, then writes and exactly reads back the credential payload, and only then writes an `active` marker. A failed or altered payload therefore remains inactive even if its Keychain item exists.
+- Resolve returns a credential only when the marker is `active`, both marker and payload match the requested binding, and the marker hash matches the exact payload bytes. A missing, malformed, cross-bound, revoked or hash-mismatched item fails closed without Provider preparation.
+- Delete first writes and verifies a `revoked` marker, then removes and verifies the credential payload, and finally removes the marker. If either cleanup delete fails, the remaining marker is revoked and resolution still returns no credential; retry can finish orphan cleanup without reactivating it.
+- New secrets must be nonblank, at most 4,096 UTF-8 bytes and free of control or bidirectional display characters. Re-entering a key for the same exact binding is allowed; a different connection/Provider/host/port cannot overwrite or delete the item even if it reuses the credential ID.
+- Eleven focused tests cover exact save/update/resolve, all input boundaries, cross-binding overwrite/delete rejection, malformed and altered payloads, write-read verification, revoked failure states, payload and marker cleanup failures, and a production `KeychainSecretRepository` round trip intended for the signed iPad Simulator test host.
+
+Local evidence: both new Swift files pass syntax parsing; the production repository and tests pass Swift semantic type-checking against minimal local stubs for unavailable Apple/XCTest modules; `git diff --check`, UTF-8/trailing-whitespace scans and focused secret/SQLite/log coupling scans pass. The signed production-Keychain test can only be accepted by the iPadOS CI test host, consistent with P-079. `.tmp-appvm-index.txt` remains untouched with the recorded size and hash.

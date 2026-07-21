@@ -1195,3 +1195,15 @@ Saving a new connection and selecting it can be one atomic first-time transactio
 ## P-283 Partial metadata mirrors leave valid payload substitution undetected
 
 Cross-checking only IDs and credential host/port does not protect other identity-bearing fields. A valid replacement selected model, a different custom Base-URL path on the same host, or a different valid pending user request can still decode successfully. Persist and verify an exact versioned payload hash (or equivalent complete canonical identity) before decoding, then continue to cross-check duplicated scope and credential fields. A hash stored beside the payload is a corruption and uncoordinated-tamper check, not proof against an attacker who can rewrite the entire database; Keychain binding and request/runtime evidence remain separate security boundaries.
+
+## P-284 Keychain binding checks and mutations must be serialized
+
+Reading an item, validating its connection/Provider/host/port binding and then updating or deleting it are otherwise a TOCTOU sequence. Two operations reusing one credential ID can both observe an empty or old value and cross-overwrite it. Serialize the whole save/resolve/delete protocol process-wide, keep one deterministic account namespace per credential ID, and re-check the full binding on every existing payload and verification marker. This protects the current single-App process; any future extension or second process sharing the access group requires an explicit cross-process protocol rather than assuming the in-process lock is sufficient.
+
+## P-285 Read-back verification needs a separate activation record
+
+Writing a Keychain payload and then discovering a read-back mismatch is too late if normal resolution accepts any binding-valid payload. Store the credential payload and its activation evidence as separate Keychain items. The marker repeats the binding and exact payload hash; resolution accepts only an `active` marker whose hash closes over the exact payload. Save first writes a verified `revoked` marker, verifies the payload, and activates only last. A crash, altered write or failed verification therefore leaves data present but unusable instead of silently usable.
+
+## P-286 Credential deletion revokes before it cleans up
+
+Deleting the payload first or treating a failed marker delete as “still active” lets a partially failed delete continue authorizing requests. Persist and verify a `revoked` marker before cleanup, then delete and verify the payload, then remove the marker. A payload-delete failure leaves only a revoked inactive orphan; a marker-cleanup failure leaves a revoked marker. Both must resolve to no credential, surface a cleanup failure and support a later idempotent cleanup retry. The real Keychain path still requires a signed Simulator application test; a pure in-memory fake cannot replace P-079.
