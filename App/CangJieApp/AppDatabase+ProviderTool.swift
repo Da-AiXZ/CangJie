@@ -104,12 +104,13 @@ extension AppDatabase {
                 providerCallIndex: exactInvocation.providerCallIndex,
                 createdAt: now
             )
-            try Self.insertToolReceipt(receipt, in: db)
             try Self.updateRunAfterProviderTool(
                 exactInvocation,
+                projectID: result.0?.id ?? exactInvocation.projectID,
                 now: now,
                 in: db
             )
+            try Self.insertToolReceipt(receipt, in: db)
             return ProviderToolExecutionResult(
                 invocation: exactInvocation,
                 receipt: receipt,
@@ -286,6 +287,7 @@ extension AppDatabase {
 
     private static func updateRunAfterProviderTool(
         _ invocation: ProjectToolInvocation,
+        projectID: UUID?,
         now: Date,
         in db: Database
     ) throws {
@@ -306,7 +308,7 @@ extension AppDatabase {
         try upsertAgentRun(
             AgentRunSnapshot(
                 id: run.id,
-                projectID: run.projectID,
+                projectID: projectID,
                 kind: run.kind,
                 status: run.status,
                 idempotencyKey: run.idempotencyKey,

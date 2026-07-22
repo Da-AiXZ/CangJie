@@ -42,6 +42,13 @@ final class ProviderToolExecutionTests: XCTestCase {
             )?.currentStage,
             "provider.toolExecuted"
         )
+        XCTAssertEqual(
+            try fixture.database.agentRun(
+                id: fixture.request.identity.runID,
+                conversationID: fixture.intent.conversationID
+            )?.projectID,
+            first.project?.id
+        )
     }
 
     func testInvocationMustMatchTheDurableProviderResponseExactly() throws {
