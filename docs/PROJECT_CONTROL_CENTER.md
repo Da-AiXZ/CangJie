@@ -1,7 +1,7 @@
 # CangJie Project Control Center
 
 - Authority: compact operational dashboard
-- Updated: 2026-07-22
+- Updated: 2026-07-23
 - Repository: `F:\project\CangJie`
 - Remote: `https://github.com/Da-AiXZ/CangJie`, branch `main`
 - Authority boundary: single source for current implementation, verification, blockers and queue
@@ -48,7 +48,7 @@ Formal prose generation is outside S2.
 | Central model-connection setup | Frozen | Complete for slice | Passed | Accepted on Candidate 33 |
 | Real Provider generation | Frozen boundary | OpenAI-compatible streaming transport implemented for DeepSeek, OpenAI and OpenRouter | Passed on `313165a` | None |
 | Provider-backed AgentRun | Frozen boundary | Durable request, stream, usage and unknown-outcome projection implemented | Passed on `313165a` | None |
-| Typed Tool and ToolReceipt continuation | Frozen boundary | Not implemented | None | None |
+| Typed Tool and ToolReceipt continuation | Frozen boundary | Strict project create/status execution, exact receipt and Provider continuation are complete in the coordinator slice; central Conversation wiring remains | Core and iPadOS passed on `d355331` | None |
 | Force-quit recovery of the real S2 loop | Frozen boundary | Not implemented | None | None |
 
 ## Last accepted device baseline
@@ -96,17 +96,19 @@ Explicitly absent:
 
 ## Active blocker
 
-No external blocker. S2 remains incomplete because the real Provider, AgentRun,
-Typed Tool, ToolReceipt and recovery loop has not yet been implemented.
+No external blocker. The Provider, AgentRun and governed project Tool/ToolReceipt
+coordinator slices have passed exact-SHA automation. S2 remains incomplete because
+the coordinator is not yet wired into the central Conversation and cancellation,
+unknown-outcome reconciliation, lifecycle recovery and force-quit recovery have not
+yet passed as one user-visible loop.
 
 ## Immediate queue
 
-1. Validate the linear multi-request migration and strict versioned Typed Tool contracts.
-2. Execute project creation/status and persist the exact `ToolReceipt` in one governed transaction.
-3. Return Tool results to the model and consume the pending intent only with the durable final continuation.
-4. Wire streaming, cancellation and recovery into the central Conversation surface.
-5. Prove unknown-outcome reconciliation and force-quit recovery.
-6. Build the next candidate only when the complete S2 loop becomes device-observable.
+1. Wire `ProviderAgentRunCoordinator` into the central Conversation using the durable pending intent and verified current connection.
+2. Project real streaming into the Conversation, execute strict Tool calls, return exact Tool results and consume the pending intent only with the durable final continuation.
+3. Complete cancellation, lifecycle persistence and five-state recovery without duplicate Provider requests, tools, receipts, usage or intent consumption.
+4. Prove unknown-outcome reconciliation and force-quit recovery through focused tests and exact-SHA Apple CI.
+5. Build the next candidate only when the complete S2 loop becomes device-observable.
 
 ## Stable decision routing
 

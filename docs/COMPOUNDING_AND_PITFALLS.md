@@ -144,7 +144,13 @@ No-key state must still allow drafts, browsing, history and connection managemen
 
 ### R-032 Fix a causal defect class, not one assertion per CI run
 
-Read the complete log, identify the first root class and repair every occurrence supported by the same evidence. Keep unrelated failures out of that slice.
+Read the complete failed-step log before editing. Separate compilation, App XCTest,
+XCUITest, probes and packaging, then use the earliest failure only as a causal-ordering
+clue. Do not stop reading after the first assertion. Identify the first root defect
+class and repair every occurrence supported by the same evidence in one bounded
+slice; keep unrelated or merely speculative failures out of it. When compilation
+prevents later stages from running, first remove that compile blocker, then read the
+complete replacement log before claiming the defect class is closed.
 
 ### R-033 Tests change only when the contract proves them stale
 

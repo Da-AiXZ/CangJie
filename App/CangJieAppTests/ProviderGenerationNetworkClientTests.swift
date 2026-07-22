@@ -108,6 +108,102 @@ final class ProviderGenerationNetworkClientTests: XCTestCase {
         )
     }
 
+    func testContinuationRequestCarriesExactAssistantCallAndToolResult() async throws {
+        let fixture = try makeFixture(provider: .openAI)
+        let transport = RecordingProviderGenerationTransport(
+            events: [
+                .response(
+                    ProviderGenerationHTTPMetadata(
+                        statusCode: 200,
+                        responseURL: URL(string: "https://api.openai.com/v1/chat/completions")!,
+                        contentType: "text/event-stream"
+                    )
+                ),
+                .event(sse(#"{"choices":[{"delta":{"content":"完成"},"finish_reason":"stop"}]}"#)),
+                .event(sse(#"{"choices":[],"usage":{"prompt_tokens":20,"completion_tokens":2,"total_tokens":22}}"#)),
+                .event(sse("[DONE]"))
+            ]
+        )
+        let client = ProviderGenerationNetworkClient(transport: transport)
+        let response = ProviderResponsePayload(
+            text: "",
+            toolCalls: [
+                ProviderToolCallPayload(
+                    index: 0,
+                    id: "call-1",
+                    name: "project_status",
+                    argumentsJSON: "{}"
+                )
+            ],
+            finishReason: "tool_calls"
+        )
+        let resultJSON = #"{"receiptID":"receipt-1","status":"noCurrentProject"}"#
+        let prompt = try ProviderGenerationPrompt.continuation(
+            systemPrompt: "You are CangJie.",
+            userPrompt: fixture.intent.userRequest,
+            assistantResponse: response,
+            toolResults: [
+                ProviderGenerationToolResult(
+                    callID: "call-1",
+                    callIndex: 0,
+                    contentJSON: resultJSON
+                )
+            ]
+        )
+        let preparedContinuation = try ProviderRequestLifecycle.prepare(
+            requestID: UUID(),
+            runID: fixture.request.identity.runID,
+            idempotencyKey: "provider.request.continuation",
+            attemptNumber: 1,
+            turnSequence: 2,
+            previousRequestID: fixture.request.identity.requestID,
+            intent: fixture.intent,
+            verifiedConnection: fixture.verifiedConnection,
+            responseAssetID: UUID(),
+            promptManifestHash: hash("6"),
+            contextManifestHash: hash("2"),
+            toolCatalogManifestHash: hash("3"),
+            disclosureScopeHash: hash("4"),
+            requestPolicyHash: hash("5"),
+            now: fixture.request.updatedAt
+        )
+        let continuationRequest = try ProviderRequestLifecycle.markSending(
+            preparedContinuation,
+            now: fixture.request.updatedAt.addingTimeInterval(1)
+        )
+
+        _ = try await collect(
+            client.stream(
+                request: continuationRequest,
+                verifiedConnection: fixture.verifiedConnection,
+                secret: "fixture-secret",
+                prompt: prompt
+            )
+        )
+
+        let recordedRequests = await transport.requests()
+        let recorded = try XCTUnwrap(recordedRequests.first)
+        let body = try XCTUnwrap(recorded.request.httpBody)
+        let json = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: body) as? [String: Any]
+        )
+        let messages = try XCTUnwrap(json["messages"] as? [[String: Any]])
+        XCTAssertEqual(messages.map { $0["role"] as? String }, [
+            "system", "user", "assistant", "tool"
+        ])
+        let assistantCalls = try XCTUnwrap(
+            messages[2]["tool_calls"] as? [[String: Any]]
+        )
+        XCTAssertEqual(assistantCalls.first?["id"] as? String, "call-1")
+        let function = try XCTUnwrap(
+            assistantCalls.first?["function"] as? [String: Any]
+        )
+        XCTAssertEqual(function["name"] as? String, "project_status")
+        XCTAssertEqual(function["arguments"] as? String, "{}")
+        XCTAssertEqual(messages[3]["tool_call_id"] as? String, "call-1")
+        XCTAssertEqual(messages[3]["content"] as? String, resultJSON)
+    }
+
     func testAuthenticationRejectionIsDefiniteButServerFailureIsUnknown() async throws {
         let fixture = try makeFixture(provider: .openAI)
         let unauthorizedTransport = RecordingProviderGenerationTransport(

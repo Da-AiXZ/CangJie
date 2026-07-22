@@ -51,6 +51,20 @@ protocol ProviderGenerationServing {
         systemPrompt: String,
         userPrompt: String
     ) -> AsyncThrowingStream<ProviderGenerationEvent, Error>
+
+    func validate(
+        request: ProviderRequestSnapshot,
+        verifiedConnection: VerifiedModelConnection,
+        secret: String,
+        prompt: ProviderGenerationPrompt
+    ) throws
+
+    func stream(
+        request: ProviderRequestSnapshot,
+        verifiedConnection: VerifiedModelConnection,
+        secret: String,
+        prompt: ProviderGenerationPrompt
+    ) -> AsyncThrowingStream<ProviderGenerationEvent, Error>
 }
 
 extension ProviderGenerationServing {
@@ -61,6 +75,46 @@ extension ProviderGenerationServing {
         systemPrompt: String,
         userPrompt: String
     ) throws {}
+
+    func validate(
+        request: ProviderRequestSnapshot,
+        verifiedConnection: VerifiedModelConnection,
+        secret: String,
+        prompt: ProviderGenerationPrompt
+    ) throws {
+        guard prompt.isInitial else {
+            throw ProviderGenerationError.invalidPreparedRequest
+        }
+        try validate(
+            request: request,
+            verifiedConnection: verifiedConnection,
+            secret: secret,
+            systemPrompt: prompt.systemPrompt,
+            userPrompt: prompt.userPrompt
+        )
+    }
+
+    func stream(
+        request: ProviderRequestSnapshot,
+        verifiedConnection: VerifiedModelConnection,
+        secret: String,
+        prompt: ProviderGenerationPrompt
+    ) -> AsyncThrowingStream<ProviderGenerationEvent, Error> {
+        guard prompt.isInitial else {
+            return AsyncThrowingStream {
+                $0.finish(
+                    throwing: ProviderGenerationError.invalidPreparedRequest
+                )
+            }
+        }
+        return stream(
+            request: request,
+            verifiedConnection: verifiedConnection,
+            secret: secret,
+            systemPrompt: prompt.systemPrompt,
+            userPrompt: prompt.userPrompt
+        )
+    }
 }
 
 protocol ProviderGenerationHTTPTransport: Sendable {
@@ -228,13 +282,29 @@ struct ProviderGenerationNetworkClient: Sendable {
         systemPrompt: String,
         userPrompt: String
     ) throws {
+        try validate(
+            request: request,
+            verifiedConnection: verifiedConnection,
+            secret: secret,
+            prompt: .initial(
+                systemPrompt: systemPrompt,
+                userPrompt: userPrompt
+            )
+        )
+    }
+
+    func validate(
+        request: ProviderRequestSnapshot,
+        verifiedConnection: VerifiedModelConnection,
+        secret: String,
+        prompt: ProviderGenerationPrompt
+    ) throws {
         _ = try makeRequest(
             request: request,
             requiredPhase: .prepared,
             verifiedConnection: verifiedConnection,
             secret: secret,
-            systemPrompt: systemPrompt,
-            userPrompt: userPrompt
+            prompt: prompt
         )
     }
 
@@ -245,6 +315,23 @@ struct ProviderGenerationNetworkClient: Sendable {
         systemPrompt: String,
         userPrompt: String
     ) -> AsyncThrowingStream<ProviderGenerationEvent, Error> {
+        stream(
+            request: request,
+            verifiedConnection: verifiedConnection,
+            secret: secret,
+            prompt: .initial(
+                systemPrompt: systemPrompt,
+                userPrompt: userPrompt
+            )
+        )
+    }
+
+    func stream(
+        request: ProviderRequestSnapshot,
+        verifiedConnection: VerifiedModelConnection,
+        secret: String,
+        prompt: ProviderGenerationPrompt
+    ) -> AsyncThrowingStream<ProviderGenerationEvent, Error> {
         AsyncThrowingStream(bufferingPolicy: .bufferingOldest(128)) { continuation in
             let task = Task {
                 do {
@@ -253,8 +340,7 @@ struct ProviderGenerationNetworkClient: Sendable {
                         requiredPhase: .sending,
                         verifiedConnection: verifiedConnection,
                         secret: secret,
-                        systemPrompt: systemPrompt,
-                        userPrompt: userPrompt
+                        prompt: prompt
                     )
                     let source = await transport.stream(
                         urlRequest,
@@ -293,15 +379,14 @@ struct ProviderGenerationNetworkClient: Sendable {
         requiredPhase: ProviderRequestPhase,
         verifiedConnection: VerifiedModelConnection,
         secret: String,
-        systemPrompt: String,
-        userPrompt: String
+        prompt: ProviderGenerationPrompt
     ) throws -> URLRequest {
+        try prompt.validate()
         guard request.phase == requiredPhase,
               Self.matches(request.identity, verifiedConnection),
-              !systemPrompt.isEmpty,
-              systemPrompt.utf8.count <= Self.maximumPromptUTF8Bytes,
-              !userPrompt.isEmpty,
-              userPrompt.utf8.count <= Self.maximumPromptUTF8Bytes else {
+              prompt.systemPrompt.utf8.count <= Self.maximumPromptUTF8Bytes,
+              prompt.userPrompt.utf8.count <= Self.maximumPromptUTF8Bytes,
+              prompt.isInitial == (request.identity.turnSequence == 1) else {
             throw ProviderGenerationError.invalidPreparedRequest
         }
         do {
@@ -313,10 +398,7 @@ struct ProviderGenerationNetworkClient: Sendable {
             for: verifiedConnection.connection
         )
         let body: [String: Any] = [
-            "messages": [
-                ["role": "system", "content": systemPrompt],
-                ["role": "user", "content": userPrompt]
-            ],
+            "messages": try Self.messages(for: prompt),
             "model": verifiedConnection.connection.selectedModel,
             "stream": true,
             "stream_options": ["include_usage": true],
@@ -347,6 +429,44 @@ struct ProviderGenerationNetworkClient: Sendable {
             options: [.sortedKeys, .withoutEscapingSlashes]
         )
         return urlRequest
+    }
+
+    private static func messages(
+        for prompt: ProviderGenerationPrompt
+    ) throws -> [[String: Any]] {
+        var messages: [[String: Any]] = [
+            ["role": "system", "content": prompt.systemPrompt],
+            ["role": "user", "content": prompt.userPrompt]
+        ]
+        guard let response = prompt.assistantResponse else {
+            return messages
+        }
+        let calls: [[String: Any]] = try response.toolCalls.map { call in
+            guard let id = call.id, let name = call.name else {
+                throw ProviderGenerationError.invalidPreparedRequest
+            }
+            return [
+                "id": id,
+                "type": "function",
+                "function": [
+                    "name": name,
+                    "arguments": call.argumentsJSON
+                ]
+            ]
+        }
+        messages.append([
+            "role": "assistant",
+            "content": response.text,
+            "tool_calls": calls
+        ])
+        messages.append(contentsOf: prompt.toolResults.map { result in
+            [
+                "role": "tool",
+                "tool_call_id": result.callID,
+                "content": result.contentJSON
+            ]
+        })
+        return messages
     }
 
     private func consume(

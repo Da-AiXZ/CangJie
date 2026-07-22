@@ -185,8 +185,13 @@ extension AppDatabase {
                     throw AppDatabaseError.invalidAgentRun
                 }
                 let existingRun = try Self.decodeAgentRun(runRow)
+                let scopeMatches = try Self.providerContinuationRunScopeMatches(
+                    existingRun,
+                    request: validated,
+                    in: db
+                )
                 guard existingRun.kind == "providerTurn",
-                      existingRun.projectID == validated.identity.projectID,
+                      scopeMatches,
                       existingRun.status == .running else {
                     throw AppDatabaseError.invalidAgentRun
                 }
@@ -617,6 +622,44 @@ extension AppDatabase {
                 throw AppDatabaseError.invalidProviderRequest
             }
         }
+    }
+
+    private static func providerContinuationRunScopeMatches(
+        _ run: AgentRunSnapshot,
+        request: ProviderRequestSnapshot,
+        in db: Database
+    ) throws -> Bool {
+        if run.projectID == request.identity.projectID {
+            return true
+        }
+        guard request.identity.turnSequence > 1,
+              request.identity.projectID == nil,
+              let projectID = run.projectID,
+              let previousRequestID = request.identity.previousRequestID else {
+            return false
+        }
+        let receiptCount = try Int.fetchOne(
+            db,
+            sql: """
+                SELECT COUNT(*) FROM toolReceipt
+                WHERE providerRequestID = ?
+                  AND toolID = 'project.create'
+                  AND toolVersion = '1'
+                  AND outcome = 'completed'
+                  AND conversationID = ?
+                  AND originRunID = ?
+                  AND projectID = ?
+                  AND outputReference = ?
+                """,
+            arguments: [
+                previousRequestID.uuidString,
+                request.identity.conversationID.uuidString,
+                run.id.uuidString,
+                projectID.uuidString,
+                projectID.uuidString
+            ]
+        ) ?? 0
+        return receiptCount == 1
     }
 
     private static func sameProviderConnection(

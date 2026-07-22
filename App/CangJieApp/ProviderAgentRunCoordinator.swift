@@ -12,18 +12,6 @@ enum ProviderAgentRunError: Error, Equatable {
     case persistenceFailed
 }
 
-struct ProviderRunProjection: Equatable {
-    let requestID: UUID
-    let phase: ProviderRequestPhase
-    let text: String
-    let usage: ProviderUsage?
-}
-
-struct ProviderRunCompletion: Equatable {
-    let request: ProviderRequestSnapshot
-    let response: ProviderResponsePayload
-}
-
 @MainActor
 final class ProviderAgentRunCoordinator {
     static let systemPrompt = """
@@ -60,17 +48,27 @@ final class ProviderAgentRunCoordinator {
         if let existing = try database.providerRequest(intentID: intent.id) {
             switch ProviderRequestRecovery.nextAction(for: existing) {
             case .sendPersistedRequest:
+                let prompt = try generationPrompt(
+                    for: existing,
+                    intent: intent
+                )
                 try Self.validateExisting(
                     existing,
                     intent: intent,
-                    verifiedConnection: verifiedConnection
+                    verifiedConnection: verifiedConnection,
+                    prompt: prompt
                 )
                 request = existing
             case .continueFromDurableResponse:
+                let prompt = try generationPrompt(
+                    for: existing,
+                    intent: intent
+                )
                 try Self.validateExisting(
                     existing,
                     intent: intent,
-                    verifiedConnection: verifiedConnection
+                    verifiedConnection: verifiedConnection,
+                    prompt: prompt
                 )
                 return ProviderRunCompletion(
                     request: existing,
@@ -111,6 +109,8 @@ final class ProviderAgentRunCoordinator {
             )
         }
 
+        let prompt = try generationPrompt(for: request, intent: intent)
+
         guard Self.supports(request.identity.provider) else {
             let failed = try ProviderRequestLifecycle.failBeforeSend(
                 request,
@@ -144,8 +144,7 @@ final class ProviderAgentRunCoordinator {
                 request: request,
                 verifiedConnection: verifiedConnection,
                 secret: credential.secret,
-                systemPrompt: Self.systemPrompt,
-                userPrompt: intent.userRequest
+                prompt: prompt
             )
         } catch let error as ProviderGenerationError {
             let failure: ProviderRequestFailure
@@ -190,8 +189,7 @@ final class ProviderAgentRunCoordinator {
                 request: request,
                 verifiedConnection: verifiedConnection,
                 secret: credential.secret,
-                systemPrompt: Self.systemPrompt,
-                userPrompt: intent.userRequest
+                prompt: prompt
             )
             for try await event in stream {
                 try Self.apply(event, response: &response, usage: &usage)
@@ -267,6 +265,66 @@ final class ProviderAgentRunCoordinator {
         }
     }
 
+    func runToCompletion(
+        intent: PendingModelIntent,
+        verifiedConnection: VerifiedModelConnection,
+        onUpdate: (ProviderRunProjection) -> Void = { _ in }
+    ) async throws -> ProviderAgentLoopCompletion {
+        var completion = try await run(
+            intent: intent,
+            verifiedConnection: verifiedConnection,
+            onUpdate: onUpdate
+        )
+        var receipts: [ToolReceipt] = []
+
+        while !completion.response.toolCalls.isEmpty {
+            guard completion.request.identity.turnSequence
+                    < ProviderRequestLifecycle.maximumTurnsPerAttempt else {
+                throw ProviderAgentRunError.terminalRequest
+            }
+            let executions = try executeTools(for: completion)
+            receipts.append(contentsOf: executions.map(\.receipt))
+            let prompt = try continuationPrompt(
+                response: completion.response,
+                executions: executions,
+                userRequest: intent.userRequest
+            )
+            let next = try Self.makePreparedRequest(
+                intent: intent,
+                verifiedConnection: verifiedConnection,
+                requestID: UUID(),
+                runID: completion.request.identity.runID,
+                responseAssetID: UUID(),
+                attemptNumber: completion.request.identity.attemptNumber,
+                turnSequence: completion.request.identity.turnSequence + 1,
+                previousRequestID: completion.request.identity.requestID,
+                prompt: prompt,
+                now: now()
+            )
+            _ = try database.persistPreparedProviderRequest(
+                next,
+                intent: intent,
+                verifiedConnection: verifiedConnection
+            )
+            completion = try await run(
+                intent: intent,
+                verifiedConnection: verifiedConnection,
+                onUpdate: onUpdate
+            )
+        }
+
+        let committed = try database.commitProviderContinuation(
+            completion.request,
+            now: now()
+        )
+        return ProviderAgentLoopCompletion(
+            request: committed.request,
+            message: committed.message,
+            receipts: receipts,
+            projects: try database.listProjects()
+        )
+    }
+
     static func makePreparedRequest(
         intent: PendingModelIntent,
         verifiedConnection: VerifiedModelConnection,
@@ -275,7 +333,11 @@ final class ProviderAgentRunCoordinator {
         previousRequestID: UUID? = nil,
         now: Date
     ) throws -> ProviderRequestSnapshot {
-        try makePreparedRequest(
+        let prompt = ProviderGenerationPrompt.initial(
+            systemPrompt: systemPrompt,
+            userPrompt: intent.userRequest
+        )
+        return try makePreparedRequest(
             intent: intent,
             verifiedConnection: verifiedConnection,
             requestID: UUID(),
@@ -284,6 +346,7 @@ final class ProviderAgentRunCoordinator {
             attemptNumber: attemptNumber,
             turnSequence: turnSequence,
             previousRequestID: previousRequestID,
+            prompt: prompt,
             now: now
         )
     }
@@ -297,6 +360,7 @@ final class ProviderAgentRunCoordinator {
         attemptNumber: Int,
         turnSequence: Int,
         previousRequestID: UUID?,
+        prompt: ProviderGenerationPrompt,
         now: Date
     ) throws -> ProviderRequestSnapshot {
         let connection = verifiedConnection.connection
@@ -310,10 +374,7 @@ final class ProviderAgentRunCoordinator {
             intent: intent,
             verifiedConnection: verifiedConnection,
             responseAssetID: responseAssetID,
-            promptManifestHash: digest([
-                "provider-prompt-v1",
-                systemPrompt
-            ]),
+            promptManifestHash: try promptManifestHash(prompt),
             contextManifestHash: digest([
                 "provider-context-v1",
                 intent.conversationID.uuidString,
@@ -346,7 +407,8 @@ final class ProviderAgentRunCoordinator {
     private static func validateExisting(
         _ request: ProviderRequestSnapshot,
         intent: PendingModelIntent,
-        verifiedConnection: VerifiedModelConnection
+        verifiedConnection: VerifiedModelConnection,
+        prompt: ProviderGenerationPrompt
     ) throws {
         let expected = try makePreparedRequest(
             intent: intent,
@@ -357,6 +419,7 @@ final class ProviderAgentRunCoordinator {
             attemptNumber: request.identity.attemptNumber,
             turnSequence: request.identity.turnSequence,
             previousRequestID: request.identity.previousRequestID,
+            prompt: prompt,
             now: request.createdAt
         )
         guard request.identity == expected.identity,
@@ -400,6 +463,137 @@ final class ProviderAgentRunCoordinator {
         } catch {
             throw ProviderAgentRunError.persistenceFailed
         }
+    }
+
+    private func generationPrompt(
+        for request: ProviderRequestSnapshot,
+        intent: PendingModelIntent
+    ) throws -> ProviderGenerationPrompt {
+        guard request.identity.turnSequence > 1 else {
+            return .initial(
+                systemPrompt: Self.systemPrompt,
+                userPrompt: intent.userRequest
+            )
+        }
+        guard let previousRequestID = request.identity.previousRequestID,
+              let previous = try database.providerRequest(
+                id: previousRequestID
+              ) else {
+            throw ProviderAgentRunError.persistenceFailed
+        }
+        let previousCompletion = ProviderRunCompletion(
+            request: previous,
+            response: try response(for: previous)
+        )
+        return try continuationPrompt(
+            response: previousCompletion.response,
+            executions: executeTools(for: previousCompletion),
+            userRequest: intent.userRequest
+        )
+    }
+
+    private func executeTools(
+        for completion: ProviderRunCompletion
+    ) throws -> [ProviderToolExecutionResult] {
+        try completion.response.toolCalls.map { call in
+            guard let callID = call.id, let name = call.name else {
+                throw ProviderAgentRunError.invalidStream
+            }
+            let invocation: ProjectToolInvocation
+            do {
+                invocation = try ProjectToolInvocation.parse(
+                    providerFunctionName: name,
+                    argumentsJSON: call.argumentsJSON,
+                    providerCallID: callID,
+                    providerCallIndex: call.index,
+                    providerRequestID: completion.request.identity.requestID,
+                    runID: completion.request.identity.runID,
+                    conversationID: completion.request.identity.conversationID,
+                    projectID: completion.request.identity.projectID
+                )
+            } catch {
+                throw ProviderAgentRunError.invalidStream
+            }
+            return try database.executeProviderTool(invocation, now: now())
+        }
+    }
+
+    private func continuationPrompt(
+        response: ProviderResponsePayload,
+        executions: [ProviderToolExecutionResult],
+        userRequest: String
+    ) throws -> ProviderGenerationPrompt {
+        try ProviderGenerationPrompt.continuation(
+            systemPrompt: Self.systemPrompt,
+            userPrompt: userRequest,
+            assistantResponse: response,
+            toolResults: try executions.map(Self.generationToolResult)
+        )
+    }
+
+    private static func generationToolResult(
+        _ execution: ProviderToolExecutionResult
+    ) throws -> ProviderGenerationToolResult {
+        let receipt = execution.receipt
+        var receiptObject: [String: Any] = [
+            "id": receipt.id.uuidString.lowercased(),
+            "toolID": receipt.toolID,
+            "outcome": receipt.outcome
+        ]
+        if let toolVersion = receipt.toolVersion {
+            receiptObject["toolVersion"] = toolVersion
+        }
+        if let inputHash = receipt.inputHash {
+            receiptObject["inputHash"] = inputHash
+        }
+        if let outputReference = receipt.outputReference {
+            receiptObject["outputReference"] = outputReference
+        }
+        var object: [String: Any] = [
+            "receipt": receiptObject,
+            "receiptID": receipt.id.uuidString.lowercased(),
+            "status": execution.status
+        ]
+        if let project = execution.project {
+            object["project"] = [
+                "id": project.id.uuidString.lowercased(),
+                "title": project.title,
+                "premise": project.premise
+            ]
+        }
+        guard JSONSerialization.isValidJSONObject(object),
+              let data = try? JSONSerialization.data(
+                withJSONObject: object,
+                options: [.sortedKeys, .withoutEscapingSlashes]
+              ), let json = String(data: data, encoding: .utf8) else {
+            throw ProviderAgentRunError.persistenceFailed
+        }
+        return ProviderGenerationToolResult(
+            callID: execution.invocation.providerCallID,
+            callIndex: execution.invocation.providerCallIndex,
+            contentJSON: json
+        )
+    }
+
+    private static func promptManifestHash(
+        _ prompt: ProviderGenerationPrompt
+    ) throws -> String {
+        if prompt.isInitial {
+            return digest(["provider-prompt-v1", prompt.systemPrompt])
+        }
+        guard let response = prompt.assistantResponse else {
+            throw ProviderAgentRunError.invalidStream
+        }
+        return digest(
+            [
+                "provider-prompt-v2",
+                prompt.systemPrompt,
+                prompt.userPrompt,
+                try encode(response)
+            ] + prompt.toolResults.flatMap {
+                [$0.callID, String($0.callIndex), $0.contentJSON]
+            }
+        )
     }
 
     private func settle(
