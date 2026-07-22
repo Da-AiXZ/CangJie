@@ -120,11 +120,11 @@ final class ModelConnectionRecoveryViewModelTests: XCTestCase, ModelConnectionSe
             let viewModel = AppViewModel(
                 database: database,
                 keychain: FailingSecretRepository(),
-                isolationCanaryRepository: StubIsolationCanaryRepository(),
                 modelCredentialRepository: credentials,
                 modelDiscoveryClient: ModelDiscoveryNetworkClient(
                     transport: RecordingTransport(responses: [])
                 ),
+                isolationCanaryRepository: StubIsolationCanaryRepository(),
                 compiledBuildStamp: .generated,
                 buildActivationStore: StubBuildActivationStore(),
                 bundleIdentityLoader: nil,

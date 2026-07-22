@@ -1281,3 +1281,7 @@ Holding a child `ObservableObject` as a plain property of an observed parent doe
 ## P-304 A pending model intent is a durable Conversation-scoped mutex, not a latest-row hint
 
 Until a real Provider loop atomically consumes the request, allowing another pending intent in the same Conversation silently strands work. Enforce one unconsumed intent in the transaction and in the database schema; migration must reject historical duplicates before adding the unique index instead of choosing the newest row. Rehydrate by the selected Conversation, preserve an in-progress setup across lifecycle recovery, and never let explicit settings management inherit a hidden intent from another Conversation. An unresolved Keychain/SQLite setup journal must block resume admission even if current metadata and a credential happen to be readable.
+
+## P-305 Swift named arguments still follow declaration order
+
+Swift argument labels do not make initializer arguments freely reorderable. When a test supplies multiple optional dependencies, keep them in the exact declaration order and scan every call site that passes the same pair before rerunning Apple CI. In iPadOS CI `29913815925`, production and Core compilation succeeded, but `ModelConnectionRecoveryViewModelTests.swift:124` stopped the App test target because `isolationCanaryRepository` preceded the earlier-declared `modelCredentialRepository`. Fix the call order; do not change the initializer API or production behavior to accommodate one stale test invocation.
