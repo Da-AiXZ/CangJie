@@ -89,6 +89,8 @@ final class AppViewModel: ObservableObject {
     @Published private(set) var canCancelProviderRun = false
     @Published private(set) var providerTaskProjection: S2ProviderTaskProjection?
     private(set) var providerRunStartBlocker: ProviderRunStartBlocker?
+    private(set) var providerRunFailureDescription: String?
+    private(set) var providerRecoveryFailureDescription: String?
 
     let modelConnectionSetup: ModelConnectionSetupController
 
@@ -750,6 +752,9 @@ final class AppViewModel: ObservableObject {
             return
         }
         guard activeProviderIntentID == nil else {
+            if activeProviderIntentID == intent.id, providerRunTask != nil {
+                return
+            }
             providerRunStartBlocker = .alreadyActive
             return
         }
@@ -804,6 +809,7 @@ final class AppViewModel: ObservableObject {
             return
         }
 
+        providerRunFailureDescription = nil
         let generation = UUID()
         providerRunGeneration = generation
         activeProviderIntentID = intent.id
@@ -867,6 +873,7 @@ final class AppViewModel: ObservableObject {
               providerRunGeneration == generation else {
             return
         }
+        providerRunFailureDescription = nil
         activeProviderIntentID = nil
         providerRunGeneration = nil
         providerRunTask = nil
@@ -902,6 +909,7 @@ final class AppViewModel: ObservableObject {
               providerRunGeneration == generation else {
             return
         }
+        providerRunFailureDescription = Self.providerDiagnosticCode(for: error)
         activeProviderIntentID = nil
         providerRunGeneration = nil
         providerRunTask = nil
@@ -1059,6 +1067,7 @@ final class AppViewModel: ObservableObject {
         guard let database, let selectedConversationID else {
             return
         }
+        providerRecoveryFailureDescription = nil
         do {
             guard let intent = try database.latestPendingModelIntent(
                 conversationID: selectedConversationID
@@ -1076,8 +1085,19 @@ final class AppViewModel: ObservableObject {
             )
             businessStatus = "本地安全对账已完成，这次请求的结果仍不能确认"
         } catch {
+            providerRecoveryFailureDescription = Self.providerDiagnosticCode(for: error)
             publishError("模型请求恢复失败（S2-PROVIDER-RESTORE）", domain: .composer)
         }
+    }
+
+    private static func providerDiagnosticCode(for error: Error) -> String {
+        if let providerError = error as? ProviderAgentRunError {
+            return String(describing: providerError)
+        }
+        if let databaseError = error as? AppDatabaseError {
+            return String(describing: databaseError)
+        }
+        return String(reflecting: type(of: error))
     }
 
     private func refreshS1NovelProgress() {

@@ -78,6 +78,10 @@ final class AppViewModelProviderRetryTests: XCTestCase {
         viewModel.retryProviderRun()
         XCTAssertNil(viewModel.providerRunStartBlocker)
         await viewModel.waitForProviderRunToSettle()
+        XCTAssertNil(
+            viewModel.providerRunFailureDescription,
+            viewModel.providerRunFailureDescription ?? ""
+        )
         let retried = try XCTUnwrap(
             database.providerRequest(intentID: intent.id)
         )

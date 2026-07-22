@@ -54,6 +54,10 @@ final class AppViewModelProviderRunTests: XCTestCase {
         let intent = try XCTUnwrap(viewModel.modelConnectionSetup.pendingIntent)
         XCTAssertNil(viewModel.providerRunStartBlocker)
         await viewModel.waitForProviderRunToSettle()
+        XCTAssertNil(
+            viewModel.providerRunFailureDescription,
+            viewModel.providerRunFailureDescription ?? ""
+        )
         let conversationID = try XCTUnwrap(viewModel.selectedConversationID)
         let messages = try database.listAgentMessages(
             conversationID: conversationID
@@ -116,7 +120,12 @@ final class AppViewModelProviderRunTests: XCTestCase {
         XCTAssertNil(viewModel.providerRunStartBlocker)
         try await waitUntil {
             try database.providerRequest(intentID: intent.id)?.phase == .streaming
+                || viewModel.providerRunFailureDescription != nil
         }
+        XCTAssertNil(
+            viewModel.providerRunFailureDescription,
+            viewModel.providerRunFailureDescription ?? ""
+        )
         XCTAssertEqual(viewModel.displayedProviderStreamText, "尚未完成")
 
         viewModel.startNewS1Conversation()
@@ -221,6 +230,10 @@ final class AppViewModelProviderRunTests: XCTestCase {
             providerGenerationService: generation,
             taskID: UUID(),
             draftAutosaveDelayNanoseconds: UInt64.max
+        )
+        XCTAssertNil(
+            viewModel.providerRecoveryFailureDescription,
+            viewModel.providerRecoveryFailureDescription ?? ""
         )
 
         let reconciled = try XCTUnwrap(
