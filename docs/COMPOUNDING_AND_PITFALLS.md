@@ -1263,3 +1263,11 @@ Temporary and workspace roots can have multiple valid spellings: Windows may exp
 ## P-300 C socket constants do not have one Swift import shape on every platform
 
 Do not infer an Apple C-module import type from a Linux build. In iPadOS CI `29883112652`, the Darwin-only resolver failed before tests because Xcode imported `SOCK_STREAM` as `Int32`, making `SOCK_STREAM.rawValue` invalid. Keep platform adapter code behind its real import boundary and use the type exposed by that target; here `addrinfo.ai_socktype` receives `SOCK_STREAM` directly. A Windows parse or Core build cannot prove Apple SDK type semantics, so the exact iPadOS semantic compile remains authoritative. Fix only the representation mismatch; do not weaken address classification, SSRF rejection or credential gates to make the build green.
+
+## P-301 Security-hardening fixtures must advance through the new provenance gate
+
+When production begins requiring an opaque capability, an older shared fixture that still constructs the raw value is no longer a valid happy-path fixture. In iPadOS CI `29884171560`, the journal tamper test failed before reaching reconciliation because its Custom candidate came from `.customCatalogWithoutCredentialProbe` without credential-proven selection evidence. Update the explicit test seam to mint the transport-SPI capability and leave negative provenance tests on the raw path. Never weaken the production factory or make ordinary fixtures silently bypass the gate just to restore unrelated persistence coverage.
+
+## P-302 Cancellation tests must observe task state, not one concrete sleep error type
+
+Cooperative cancellation can surface through different concrete thrown errors across Swift runtimes even when the task is cancelled and the deadline result is correct. A hanging transport that records cancellation only in `catch is CancellationError` can therefore report a false negative. Record `Task.isCancelled` in the task's exit path, or use an equivalent bounded cancellation handshake, then retain the real assertions: timeout wins, the in-flight request is cancelled, no later catalog request is sent, and every phase shares the original absolute deadline. Do not add sleeps, extend budgets or weaken fail-closed behavior to make the test pass.

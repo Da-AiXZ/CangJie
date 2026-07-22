@@ -175,12 +175,12 @@ actor CancellationRecordingTransport: ModelDiscoveryHTTPTransport {
         let waiters = startWaiters
         startWaiters.removeAll()
         waiters.forEach { $0.resume() }
-        do {
-            try await Task.sleep(nanoseconds: UInt64.max)
-        } catch is CancellationError {
-            didCancel = true
-            throw CancellationError()
+        defer {
+            if Task.isCancelled {
+                didCancel = true
+            }
         }
+        try await Task.sleep(nanoseconds: UInt64.max)
         throw ModelDiscoveryNetworkError.invalidResponse
     }
 

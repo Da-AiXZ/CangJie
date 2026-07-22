@@ -56,13 +56,22 @@ enum ModelConnectionTestFixture {
             baseURL: baseURL,
             secret: secret
         )
+        let selection = try makeSelection(
+            from: attempt,
+            provider: provider,
+            selectedModel: selectedModel
+        )
+        if provider == .custom {
+            return try attempt.prepareConnection(
+                name: name,
+                credentialProvenSelection: CredentialProvenCustomModelSelection(
+                    selection: selection
+                )
+            )
+        }
         return try attempt.prepareConnection(
             name: name,
-            selection: makeSelection(
-                from: attempt,
-                provider: provider,
-                selectedModel: selectedModel
-            )
+            selection: selection
         )
     }
 
