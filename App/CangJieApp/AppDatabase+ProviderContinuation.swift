@@ -86,7 +86,7 @@ extension AppDatabase {
                     committed.identity.intentID.uuidString
                 ]
             )
-            guard db.changesCount == 1 else {
+            if db.changesCount != 1 {
                 guard let intentRow = try Row.fetchOne(
                     db,
                     sql: "SELECT consumedAt, continuationRequestID FROM pendingModelIntent WHERE id = ?",
