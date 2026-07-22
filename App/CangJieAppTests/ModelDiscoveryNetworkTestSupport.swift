@@ -180,7 +180,7 @@ actor CancellationRecordingTransport: ModelDiscoveryHTTPTransport {
                 didCancel = true
             }
         }
-        try await Task.sleep(nanoseconds: UInt64.max)
+        try await Task.sleep(nanoseconds: 60_000_000_000)
         throw ModelDiscoveryNetworkError.invalidResponse
     }
 
@@ -254,6 +254,6 @@ final class SequenceClock: ModelDiscoveryMonotonicClock, @unchecked Sendable {
     }
 
     func sleep(for duration: TimeInterval) async throws {
-        try await Task.sleep(nanoseconds: UInt64.max)
+        try await Task.sleep(nanoseconds: 60_000_000_000)
     }
 }

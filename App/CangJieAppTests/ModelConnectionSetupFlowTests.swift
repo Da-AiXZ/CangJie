@@ -524,14 +524,15 @@ final class ModelConnectionSetupFlowTests: XCTestCase, ModelConnectionSetupServi
             let pendingA = try XCTUnwrap(viewModel.modelConnectionSetup.pendingIntent)
 
             viewModel.startNewS1Conversation()
-            let conversationB = try XCTUnwrap(viewModel.selectedConversationID)
-            XCTAssertNotEqual(conversationB, conversationA)
+            XCTAssertNil(viewModel.selectedConversationID)
             XCTAssertEqual(
                 viewModel.displayedBusinessStatus,
                 "当前只验证界面、导航和本地保存，尚未接入真正的模型任务"
             )
             viewModel.draft = "B 会话的请求"
             viewModel.sendModelDependentMessage()
+            let conversationB = try XCTUnwrap(viewModel.selectedConversationID)
+            XCTAssertNotEqual(conversationB, conversationA)
             let pendingB = try XCTUnwrap(viewModel.modelConnectionSetup.pendingIntent)
             XCTAssertEqual(pendingB.conversationID, conversationB)
 

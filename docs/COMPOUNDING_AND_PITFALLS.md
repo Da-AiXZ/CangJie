@@ -1272,6 +1272,8 @@ When production begins requiring an opaque capability, an older shared fixture t
 
 Cooperative cancellation can surface through different concrete thrown errors across Swift runtimes even when the task is cancelled and the deadline result is correct. A hanging transport that records cancellation only in `catch is CancellationError` can therefore report a false negative. Record `Task.isCancelled` in the task's exit path, or use an equivalent bounded cancellation handshake, then retain the real assertions: timeout wins, the in-flight request is cancelled, no later catalog request is sent, and every phase shares the original absolute deadline. Do not add sleeps, extend budgets or weaken fail-closed behavior to make the test pass.
 
+`Task.sleep(nanoseconds: UInt64.max)` is also not a portable way to represent a hanging dependency. On Apple it can leave the intended suspension path and expose the test double's fallback error before the deadline task wins. Use a large valid duration that the tested deadline cancels immediately, keep `Task.isCancelled` exit evidence, and replace every occurrence of the invalid maximum rather than patching one assertion.
+
 Acceptance evidence: exact commit `c27dd70f46658260606a06e68c900bf8a6cb8acc` passed Core CI `29885862452`, iPadOS CI `29885862456`, and paired-IPA workflow `29886779892`. The downloaded version `1.0` / build `32001` pair passed metadata, Mach-O, signature and distinct-Keychain-entitlement checks. After receiving the exact device script, the user reported no problem and instructed development to continue. Record only that report; do not manufacture screenshots, exact UI text or additional device observations.
 
 ## P-303 Nested ObservableObjects must be observed at the UI boundary that consumes them
@@ -1281,6 +1283,8 @@ Holding a child `ObservableObject` as a plain property of an observed parent doe
 ## P-304 A pending model intent is a durable Conversation-scoped mutex, not a latest-row hint
 
 Until a real Provider loop atomically consumes the request, allowing another pending intent in the same Conversation silently strands work. Enforce one unconsumed intent in the transaction and in the database schema; migration must reject historical duplicates before adding the unique index instead of choosing the newest row. Rehydrate by the selected Conversation, preserve an in-progress setup across lifecycle recovery, and never let explicit settings management inherit a hidden intent from another Conversation. An unresolved Keychain/SQLite setup journal must block resume admission even if current metadata and a credential happen to be readable.
+
+An absent pending intent is not a match for an unbound new Conversation merely because both optional IDs are `nil`. Unwrap the intent before comparing its Conversation scope; otherwise first-launch composer availability and baseline status fail closed for the wrong reason. Likewise, starting a blank Conversation does not allocate its durable ID: the first persisted turn creates it atomically, so tests must assert the new ID only after that turn.
 
 ## P-305 Swift named arguments still follow declaration order
 

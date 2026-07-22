@@ -102,11 +102,17 @@ final class ModelConnectionSetupController: ObservableObject {
         if isExplicitManagement {
             return step != .idle
         }
-        return pendingIntent?.conversationID == conversationID
+        guard let pendingIntent else {
+            return false
+        }
+        return pendingIntent.conversationID == conversationID
     }
 
     func conversationStatus(for conversationID: UUID?) -> String? {
-        guard pendingIntent?.conversationID == conversationID else { return nil }
+        guard let pendingIntent,
+              pendingIntent.conversationID == conversationID else {
+            return nil
+        }
         return resumeDecision == nil
             ? ModelConnectionSetupConversationCopy.connectionRequired
             : ModelConnectionSetupConversationCopy.connectionReady
@@ -209,7 +215,8 @@ final class ModelConnectionSetupController: ObservableObject {
             ) {
                 prepareForPendingIntent(pendingIntent)
             } else if !isExplicitManagement,
-                      self.pendingIntent?.conversationID == conversationID {
+                      let pendingIntent = self.pendingIntent,
+                      pendingIntent.conversationID == conversationID {
                 cancel()
                 self.pendingIntent = nil
             }

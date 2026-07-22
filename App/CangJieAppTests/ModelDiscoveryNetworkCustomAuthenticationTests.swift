@@ -441,7 +441,7 @@ private actor HangingCustomAuthenticationTransport: ModelDiscoveryHTTPTransport 
                 didCancelAuthentication = true
             }
         }
-        try await Task.sleep(nanoseconds: UInt64.max)
+        try await Task.sleep(nanoseconds: 60_000_000_000)
         throw ModelDiscoveryNetworkError.invalidResponse
     }
 
