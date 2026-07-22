@@ -269,6 +269,7 @@ private struct S1TasksPage: View {
 
 private struct S1SettingsPage: View {
     @ObservedObject var model: AppViewModel
+    @ObservedObject var setup: ModelConnectionSetupController
     @Binding var showsConversationTimestamps: Bool
     let onBack: () -> Void
 
@@ -282,6 +283,23 @@ private struct S1SettingsPage: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .accessibilityIdentifier("settings-conversation-time-note")
+                }
+
+                Section("模型连接") {
+                    NavigationLink {
+                        ModelConnectionManagementPage(
+                            setup: setup,
+                            onClose: model.closeModelConnectionManagement
+                        )
+                    } label: {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("管理模型连接")
+                            Text(setup.currentConnectionLabel ?? "还没有当前连接")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    .accessibilityIdentifier("model-connection-settings-link")
                 }
 
                 Section("高级") {
@@ -313,6 +331,7 @@ private struct S1SettingsPage: View {
 
 struct ContentView: View {
     @ObservedObject var model: AppViewModel
+    @ObservedObject private var setup: ModelConnectionSetupController
     @State private var reviewedOpeningPlan: OpeningPlanApprovalReview?
     @State private var reviewedChapter: ChapterReviewReference?
     @State private var selectedActivity: S1ActivityDestination = .conversation
@@ -320,6 +339,11 @@ struct ContentView: View {
     @State private var isPortraitNavigationPresented = false
     @AppStorage("s1.showsConversationTimestamps") private var showsConversationTimestamps = true
     @FocusState private var isComposerFocused: Bool
+
+    init(model: AppViewModel) {
+        self.model = model
+        _setup = ObservedObject(wrappedValue: model.modelConnectionSetup)
+    }
 
     var body: some View {
         GeometryReader { geometry in
@@ -889,7 +913,11 @@ struct ContentView: View {
                 selectedActivity = .conversation
             }
         case .settings:
-            S1SettingsPage(model: model, showsConversationTimestamps: $showsConversationTimestamps) {
+            S1SettingsPage(
+                model: model,
+                setup: setup,
+                showsConversationTimestamps: $showsConversationTimestamps
+            ) {
                 selectedActivity = .conversation
             }
         }
@@ -1038,7 +1066,7 @@ struct ContentView: View {
                     Text("仓颉")
                         .font(.title2.bold())
                         .accessibilityIdentifier("agent-control-plane-title")
-                    Text(model.businessStatus)
+                    Text(model.displayedBusinessStatus)
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .accessibilityIdentifier("agent-business-status")
@@ -1056,6 +1084,20 @@ struct ContentView: View {
                     }
                 }
                 Spacer()
+                if let connectionLabel = setup.currentConnectionLabel {
+                    Text(connectionLabel)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .accessibilityIdentifier("current-model-connection-header")
+                }
+                Button {
+                    model.openModelConnectionSetup()
+                } label: {
+                    Image(systemName: "link")
+                }
+                .accessibilityLabel("连接模型")
+                .accessibilityIdentifier("model-connection-open")
                 Button {
                     toggleResultsDrawer()
                 } label: {
@@ -1109,6 +1151,11 @@ struct ContentView: View {
                 }
                 .padding()
             }
+            if setup.isPresented(for: model.selectedConversationID) {
+                ModelConnectionSetupCard(setup: setup) {
+                    setup.cancel()
+                }
+            }
             if let approval = pendingOpeningPlanApproval {
                 pendingApprovalCard(approval)
             }
@@ -1137,7 +1184,7 @@ struct ContentView: View {
                     .padding(6)
                     .background(.background, in: RoundedRectangle(cornerRadius: 12))
                     Button {
-                        model.sendS1PreviewMessage()
+                        model.sendModelDependentMessage()
                         isComposerFocused = false
                     } label: {
                         Image(systemName: "arrow.up.circle.fill").font(.system(size: 32))
@@ -1157,6 +1204,7 @@ struct ContentView: View {
         model.conversationMessages.isEmpty
             && !model.hasEarlierConversationMessages
             && model.projects.isEmpty
+            && !setup.isPresented(for: model.selectedConversationID)
             && model.openingPlanApproval == nil
             && model.lastToolReceipt == nil
             && model.latestAgentRun == nil

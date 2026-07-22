@@ -1,6 +1,6 @@
 # CangJie Compounding and Pitfalls Log
 
-Updated: 2026-07-21. Update after every slice or milestone with evidence.
+Updated: 2026-07-22. Update after every slice or milestone with evidence.
 
 ## P-001 M0 shell was mistaken for product UX
 Feasibility screen is not the Agent product. Label every IPA as feasibility, development slice, candidate, or accepted milestone; report included/excluded/verification/next.
@@ -1271,3 +1271,13 @@ When production begins requiring an opaque capability, an older shared fixture t
 ## P-302 Cancellation tests must observe task state, not one concrete sleep error type
 
 Cooperative cancellation can surface through different concrete thrown errors across Swift runtimes even when the task is cancelled and the deadline result is correct. A hanging transport that records cancellation only in `catch is CancellationError` can therefore report a false negative. Record `Task.isCancelled` in the task's exit path, or use an equivalent bounded cancellation handshake, then retain the real assertions: timeout wins, the in-flight request is cancelled, no later catalog request is sent, and every phase shares the original absolute deadline. Do not add sleeps, extend budgets or weaken fail-closed behavior to make the test pass.
+
+Acceptance evidence: exact commit `c27dd70f46658260606a06e68c900bf8a6cb8acc` passed Core CI `29885862452`, iPadOS CI `29885862456`, and paired-IPA workflow `29886779892`. The downloaded version `1.0` / build `32001` pair passed metadata, Mach-O, signature and distinct-Keychain-entitlement checks. After receiving the exact device script, the user reported no problem and instructed development to continue. Record only that report; do not manufacture screenshots, exact UI text or additional device observations.
+
+## P-303 Nested ObservableObjects must be observed at the UI boundary that consumes them
+
+Holding a child `ObservableObject` as a plain property of an observed parent does not forward the child's change notifications. A setup card may update because it observes the child while the surrounding header, insertion condition and composer gate remain stale. The view that reads child state must observe that controller directly, or the parent must deliberately forward `objectWillChange`; add UI assertions for the outer header and enabled state, not only the child card.
+
+## P-304 A pending model intent is a durable Conversation-scoped mutex, not a latest-row hint
+
+Until a real Provider loop atomically consumes the request, allowing another pending intent in the same Conversation silently strands work. Enforce one unconsumed intent in the transaction and in the database schema; migration must reject historical duplicates before adding the unique index instead of choosing the newest row. Rehydrate by the selected Conversation, preserve an in-progress setup across lifecycle recovery, and never let explicit settings management inherit a hidden intent from another Conversation. An unresolved Keychain/SQLite setup journal must block resume admission even if current metadata and a credential happen to be readable.

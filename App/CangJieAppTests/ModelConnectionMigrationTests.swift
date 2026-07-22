@@ -56,6 +56,94 @@ final class ModelConnectionMigrationTests: XCTestCase {
         }
     }
 
+    func testPendingIntentConversationMigrationCreatesUniqueConstraint() throws {
+        try withTemporaryDatabasePath { path in
+            let database = try AppDatabase(path: path)
+            let state = try database.queue.read { db -> (Int, Int) in
+                let uniqueFlag = try Int.fetchOne(
+                    db,
+                    sql: """
+                        SELECT \"unique\"
+                        FROM pragma_index_list('pendingModelIntent')
+                        WHERE name = 'pendingModelIntent_conversation_unique'
+                        """
+                ) ?? 0
+                let migrationCount = try Int.fetchOne(
+                    db,
+                    sql: "SELECT COUNT(*) FROM grdb_migrations WHERE identifier = ?",
+                    arguments: ["s2-pending-model-intent-conversation-unique-v1"]
+                ) ?? 0
+                return (uniqueFlag, migrationCount)
+            }
+            XCTAssertEqual(state.0, 1)
+            XCTAssertEqual(state.1, 1)
+        }
+    }
+
+    func testPendingIntentConversationMigrationRejectsAmbiguousLegacyRows() throws {
+        try withTemporaryDatabasePath { path in
+            let conversationID = UUID()
+            do {
+                var configuration = Configuration()
+                configuration.foreignKeysEnabled = true
+                let queue = try DatabaseQueue(path: path, configuration: configuration)
+                try AppDatabase.migrator.migrate(
+                    queue,
+                    upTo: "s2-model-connection-setup-journal-v1"
+                )
+                try queue.write { db in
+                    try db.execute(
+                        sql: "INSERT INTO agentConversation (id, title, createdAt, updatedAt) VALUES (?, ?, ?, ?)",
+                        arguments: [conversationID.uuidString, "Legacy pending", 2_100.0, 2_100.0]
+                    )
+                    for (offset, request) in ["first", "second"].enumerated() {
+                        let intent = try PendingModelIntent(
+                            id: UUID(),
+                            conversationID: conversationID,
+                            projectID: nil,
+                            branchID: nil,
+                            userRequest: request,
+                            createdAt: Date(timeIntervalSince1970: 2_101.0 + Double(offset))
+                        )
+                        let payload = try encodePendingIntent(intent)
+                        try db.execute(
+                            sql: """
+                                INSERT INTO pendingModelIntent (
+                                    id, conversationID, projectID, branchID,
+                                    payloadVersion, payloadJSON, payloadHash, createdAt
+                                ) VALUES (?, ?, NULL, NULL, 1, ?, ?, ?)
+                                """,
+                            arguments: [
+                                intent.id.uuidString,
+                                conversationID.uuidString,
+                                payload,
+                                AppDatabase.payloadHash(payload),
+                                intent.createdAt.timeIntervalSince1970
+                            ]
+                        )
+                    }
+                }
+            }
+
+            XCTAssertThrowsError(try AppDatabase(path: path)) { error in
+                XCTAssertEqual(
+                    error as? AppDatabaseError,
+                    .pendingModelIntentAlreadyExists
+                )
+            }
+
+            let queue = try DatabaseQueue(path: path)
+            let migrationCount = try queue.read { db in
+                try Int.fetchOne(
+                    db,
+                    sql: "SELECT COUNT(*) FROM grdb_migrations WHERE identifier = ?",
+                    arguments: ["s2-pending-model-intent-conversation-unique-v1"]
+                ) ?? 0
+            }
+            XCTAssertEqual(migrationCount, 0)
+        }
+    }
+
     private func makeLegacyModelConnectionDatabase(
         at path: String,
         corruptPayloadHash: Bool = false
@@ -163,6 +251,15 @@ final class ModelConnectionMigrationTests: XCTestCase {
             XCTAssertEqual(db.changesCount, 1)
         }
         return expected
+    }
+
+    private func encodePendingIntent(_ intent: PendingModelIntent) throws -> String {
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .secondsSince1970
+        encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
+        return try XCTUnwrap(
+            String(data: encoder.encode(intent), encoding: .utf8)
+        )
     }
 
     private func withTemporaryDatabasePath(

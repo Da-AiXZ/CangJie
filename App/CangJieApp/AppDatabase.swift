@@ -142,6 +142,7 @@ enum AppDatabaseError: Error, Equatable {
     case invalidModelConnection
     case invalidModelConnectionSetupJournal
     case invalidPendingModelIntent
+    case pendingModelIntentAlreadyExists
     case invalidToolReceiptReference
     case idempotencyConflict
     case invalidApprovalRequest
@@ -1334,6 +1335,27 @@ final class AppDatabase {
                     payloadHash TEXT NOT NULL,
                     createdAt DOUBLE NOT NULL
                 )
+                """)
+        }
+        migrator.registerMigration("s2-pending-model-intent-conversation-unique-v1") { db in
+            let duplicateConversationCount = try Int.fetchOne(
+                db,
+                sql: """
+                    SELECT COUNT(*)
+                    FROM (
+                        SELECT conversationID
+                        FROM pendingModelIntent
+                        GROUP BY conversationID
+                        HAVING COUNT(*) > 1
+                    )
+                    """
+            ) ?? 0
+            guard duplicateConversationCount == 0 else {
+                throw AppDatabaseError.pendingModelIntentAlreadyExists
+            }
+            try db.execute(sql: """
+                CREATE UNIQUE INDEX pendingModelIntent_conversation_unique
+                ON pendingModelIntent (conversationID)
                 """)
         }
         return migrator

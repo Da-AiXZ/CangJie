@@ -578,8 +578,8 @@ final class CangJieSmokeUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["你：\(fixtureMessage)"].exists)
     }
 
-    func testS1PreviewSendPersistsExactReceiptWithoutStartingLegacyAgentFlow() {
-        let app = makeIsolatedApp()
+    func testS2FirstModelRequestOpensExplicitConnectionFlowAndKeepsOriginalIntent() {
+        let app = makeIsolatedApp(fixture: "model-connection-setup")
         launchWithDeterministicTimestampSetting(app)
 
         let composer = app.textViews["agent-composer"]
@@ -587,30 +587,72 @@ final class CangJieSmokeUITests: XCTestCase {
         XCTAssertTrue(composer.waitForExistence(timeout: 10))
         XCTAssertTrue(sendButton.waitForExistence(timeout: 10))
 
-        let userText = "s1-preview-" + UUID().uuidString
+        let userText = "s2-model-request-" + UUID().uuidString
         composer.tap()
         composer.typeText(userText)
         sendButton.tap()
 
         let userMessage = app.staticTexts["你：" + userText]
-        let systemMessage = app.staticTexts[
-            "界面预览版：这句话已保存。当前只验证界面和导航，真正的模型对话从 S2 接入。"
-        ]
         XCTAssertTrue(userMessage.waitForExistence(timeout: 5))
-        XCTAssertTrue(systemMessage.waitForExistence(timeout: 5))
+        XCTAssertTrue(app.descendants(matching: .any)["model-connection-setup-card"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["model-provider-openAI"].exists)
+        app.buttons["model-provider-openAI"].tap()
+
+        let endpoint = app.staticTexts["model-connection-base-url"]
+        XCTAssertTrue(endpoint.waitForExistence(timeout: 5))
+        XCTAssertEqual(endpoint.label, "https://api.openai.com/v1")
+        let secret = "ui-test-secret-value"
+        let secretField = app.secureTextFields["model-connection-secret"]
+        XCTAssertTrue(secretField.waitForExistence(timeout: 5))
+        secretField.tap()
+        secretField.typeText(secret)
+        app.buttons["model-connection-discover"].tap()
+
+        let modelScroll = app.scrollViews["model-choice-scroll"]
+        XCTAssertTrue(modelScroll.waitForExistence(timeout: 5))
+        let tailModel = app.buttons["model-choice-gpt-fixture-tail"]
+        reveal(tailModel, in: modelScroll, swiping: .up, maxSwipes: 30)
+        XCTAssertEqual(tailModel.value as? String, "未选择")
+        tailModel.tap()
+        let nameField = app.textFields["model-connection-name"]
+        XCTAssertTrue(nameField.waitForExistence(timeout: 5))
+        nameField.tap()
+        nameField.typeText("我的测试连接")
+        app.buttons["model-connection-save-current"].tap()
+
+        let current = app.staticTexts["current-model-connection"]
+        XCTAssertTrue(current.waitForExistence(timeout: 5))
+        XCTAssertTrue(current.label.contains("我的测试连接"))
+        XCTAssertTrue(current.label.contains("gpt-fixture-tail"))
+        let currentHeader = app.staticTexts["current-model-connection-header"]
+        XCTAssertTrue(currentHeader.waitForExistence(timeout: 5))
+        XCTAssertTrue(currentHeader.label.contains("我的测试连接"))
+        XCTAssertTrue(currentHeader.label.contains("gpt-fixture-tail"))
+        XCTAssertTrue(app.staticTexts["你：" + userText].exists)
+        XCTAssertEqual(
+            app.descendants(matching: .any)
+                .matching(NSPredicate(format: "label CONTAINS %@", secret)).count,
+            0
+        )
+        XCTAssertFalse(sendButton.isEnabled)
+        XCTAssertFalse(composer.isEnabled)
         XCTAssertFalse(app.descendants(matching: .any)["welcome-page"].exists)
         XCTAssertFalse(app.descendants(matching: .any)["opening-plan-approval-card"].exists)
         XCTAssertFalse(app.descendants(matching: .any)["last-tool-receipt"].exists)
         XCTAssertFalse(app.descendants(matching: .any)["chapter-review-card"].exists)
 
-        app.terminate()
-        launchWithDeterministicTimestampSetting(app)
+        relaunchWithoutFixturePreservingDatabaseScope(app)
 
         XCTAssertTrue(app.staticTexts["你：" + userText].waitForExistence(timeout: 10))
-        let restoredSystemMessage = app.staticTexts[
-            "界面预览版：这句话已保存。当前只验证界面和导航，真正的模型对话从 S2 接入。"
-        ]
-        XCTAssertTrue(restoredSystemMessage.waitForExistence(timeout: 5))
+        let restoredCurrent = app.staticTexts["current-model-connection-header"]
+        XCTAssertTrue(restoredCurrent.waitForExistence(timeout: 5))
+        XCTAssertTrue(restoredCurrent.label.contains("我的测试连接"))
+        XCTAssertTrue(restoredCurrent.label.contains("gpt-fixture-tail"))
+        XCTAssertTrue(
+            app.staticTexts["model-connection-resume-notice"].waitForExistence(timeout: 5)
+        )
+        XCTAssertFalse(app.buttons["agent-send-button"].isEnabled)
+        XCTAssertFalse(app.textViews["agent-composer"].isEnabled)
         XCTAssertFalse(app.descendants(matching: .any)["welcome-page"].exists)
         XCTAssertFalse(app.descendants(matching: .any)["opening-plan-approval-card"].exists)
         XCTAssertFalse(app.descendants(matching: .any)["last-tool-receipt"].exists)

@@ -10,6 +10,7 @@ enum CangJieUITestFixtureBootstrap {
     private static let persistedNovelShelfFixture = "persisted-novel-shelf"
     private static let persistedReadableTwoBooksFixture = "persisted-readable-two-books"
     private static let persistedScaleAndRestoreFixture = "persisted-scale-and-restore"
+    private static let modelConnectionSetupFixture = "model-connection-setup"
 
     private enum FixtureBootstrapError: Error {
         case seedFailed
@@ -40,11 +41,25 @@ enum CangJieUITestFixtureBootstrap {
                 try seedPersistedReadableTwoBooks(in: database)
             case persistedScaleAndRestoreFixture:
                 try seedPersistedScaleAndRestore(in: database)
+            case modelConnectionSetupFixture:
+                break
             default:
                 throw FixtureBootstrapError.seedFailed
             }
+            let secrets = KeychainSecretRepository()
+            let discoveryClient: any ModelDiscoveryServing
+            if fixture == modelConnectionSetupFixture {
+                discoveryClient = ModelDiscoveryNetworkClient(
+                    transport: ModelConnectionSetupUITestTransport()
+                )
+            } else {
+                discoveryClient = ModelDiscoveryNetworkClient()
+            }
             return AppViewModel(
                 database: database,
+                keychain: secrets,
+                modelCredentialRepository: KeychainModelCredentialRepository(secrets: secrets),
+                modelDiscoveryClient: discoveryClient,
                 bundleIdentityLoader: identityLoader
             )
         } catch {
@@ -478,7 +493,8 @@ enum CangJieUITestFixtureBootstrap {
             "draft", "checkpoint", "novelProject", "toolReceipt", "agentArtifact",
             "agentConversation", "agentMessage", "agentSession", "agentRun",
             "approvalRequest", "chapterVersion", "chapterCalibration",
-            "chapterToolResultSnapshot", "s1ConversationDraft"
+            "chapterToolResultSnapshot", "s1ConversationDraft", "modelConnection",
+            "pendingModelIntent", "modelConnectionSetupJournal"
         ]
         for table in dataTables {
             let count = try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM \(table)") ?? 0
@@ -790,6 +806,42 @@ enum CangJieUITestFixtureBootstrap {
                 ChapterFingerprint.diagnosisHash([]),
                 now.addingTimeInterval(1).timeIntervalSince1970
             ]
+        )
+    }
+}
+
+private actor ModelConnectionSetupUITestTransport: ModelDiscoveryHTTPTransport {
+    nonisolated let customDestinationCapability: ModelDiscoveryCustomDestinationCapability = .unavailable
+
+    func authenticateCustomConnection(
+        _ request: URLRequest,
+        requestIdentity: ModelDiscoveryRequestIdentity,
+        maximumResponseBytes: Int,
+        verifiedDestination: ModelDiscoveryVerifiedDestination
+    ) async throws -> ModelDiscoveryAuthenticatedConnectionEvidence? {
+        nil
+    }
+
+    func send(
+        _ request: URLRequest,
+        requestIdentity: ModelDiscoveryRequestIdentity,
+        maximumResponseBytes: Int,
+        verifiedDestination: ModelDiscoveryVerifiedDestination?
+    ) async throws -> ModelDiscoveryTransportResponse {
+        guard let url = request.url else {
+            throw ModelDiscoveryNetworkError.invalidResponse
+        }
+        let modelIDs = ["gpt-fixture"]
+            + (1...40).map { "gpt-fixture-\($0)" }
+            + ["gpt-fixture-tail"]
+        let body = try JSONSerialization.data(
+            withJSONObject: ["data": modelIDs.map { ["id": $0] }]
+        )
+        return ModelDiscoveryTransportResponse(
+            requestIdentity: requestIdentity,
+            requestURL: url,
+            statusCode: 200,
+            body: body
         )
     }
 }

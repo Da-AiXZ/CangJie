@@ -290,6 +290,40 @@ final class ModelConnectionPersistenceTests: XCTestCase {
         }
     }
 
+    func testPendingIntentStoreRejectsSecondUnconsumedIntentForTheSameConversation() throws {
+        try withTemporaryDatabase { database in
+            let conversation = try database.ensureDefaultConversation()
+            let first = try PendingModelIntent(
+                id: UUID(),
+                conversationID: conversation.id,
+                projectID: nil,
+                branchID: nil,
+                userRequest: "first pending request",
+                createdAt: Date(timeIntervalSince1970: 2_036)
+            )
+            let second = try PendingModelIntent(
+                id: UUID(),
+                conversationID: conversation.id,
+                projectID: nil,
+                branchID: nil,
+                userRequest: "second pending request",
+                createdAt: Date(timeIntervalSince1970: 2_037)
+            )
+
+            XCTAssertEqual(try database.storePendingModelIntent(first), first)
+            XCTAssertThrowsError(try database.storePendingModelIntent(second)) { error in
+                XCTAssertEqual(
+                    error as? AppDatabaseError,
+                    .pendingModelIntentAlreadyExists
+                )
+            }
+            XCTAssertEqual(
+                try database.latestPendingModelIntent(conversationID: conversation.id),
+                first
+            )
+        }
+    }
+
     func testPendingIntentReplayConflictAndScopeTamperingFailClosed() throws {
         try withTemporaryDatabase { database in
             let firstConversation = try database.ensureDefaultConversation()

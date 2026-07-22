@@ -72,6 +72,8 @@ final class AppViewModel: ObservableObject {
     @Published private(set) var buildActivationMessage = "Checking executable identity..."
     @Published private(set) var buildIdentity: BuildIdentity
 
+    let modelConnectionSetup: ModelConnectionSetupController
+
     private enum ErrorDomain: CaseIterable {
         case persistent
         case composer
@@ -80,9 +82,15 @@ final class AppViewModel: ObservableObject {
     private var errorMessagesByDomain: [ErrorDomain: String] = [:]
 
     var status: String { errorMessage ?? businessStatus }
+    var displayedBusinessStatus: String {
+        modelConnectionSetup.conversationStatus(for: selectedConversationID) ?? businessStatus
+    }
     var isAgentExecutionAllowed: Bool { buildIdentity.isAgentExecutionAllowed }
     var isComposerAvailable: Bool {
-        database != nil && lifecyclePermitsMutations && isAgentExecutionAllowed
+        database != nil
+            && lifecyclePermitsMutations
+            && isAgentExecutionAllowed
+            && !modelConnectionSetup.blocksComposer(for: selectedConversationID)
     }
     var hasReadableContent: Bool { readableContent != nil }
     var chapterNeedsReview: Bool {
@@ -121,6 +129,8 @@ final class AppViewModel: ObservableObject {
         database: AppDatabase? = nil,
         databaseFactory: () throws -> AppDatabase = { try AppDatabase.makeDefault() },
         keychain: any SecretRepository = KeychainSecretRepository(),
+        modelCredentialRepository: (any ModelCredentialRepository)? = nil,
+        modelDiscoveryClient: any ModelDiscoveryServing = ModelDiscoveryNetworkClient(),
         isolationCanaryRepository: any IsolationCanaryRepository = KeychainIsolationCanaryRepository(),
         bundleInfo: [String: Any]? = BuildIdentityStamp.generated.infoDictionary,
         compiledBuildStamp: BuildIdentityStamp = .generated,
@@ -130,6 +140,8 @@ final class AppViewModel: ObservableObject {
         draftAutosaveDelayNanoseconds: UInt64 = 350_000_000
     ) {
         self.keychain = keychain
+        let resolvedModelCredentialRepository = modelCredentialRepository
+            ?? KeychainModelCredentialRepository(secrets: keychain)
         self.isolationCanaryRepository = isolationCanaryRepository
         self.buildActivationStore = buildActivationStore
         self.compiledBuildStamp = compiledBuildStamp
@@ -176,10 +188,11 @@ final class AppViewModel: ObservableObject {
             novelProgressByProjectID: [UUID: String],
             readableContent: S1ReadableContentProjection?,
             notice: String?,
-            error: String?
+            error: String?,
+            modelConnectionRecoveryBlocked: Bool
         )
         if !initialIdentity.isAgentExecutionAllowed {
-            databaseState = (nil, emptyWorkspace, [], [:], nil, nil, nil)
+            databaseState = (nil, emptyWorkspace, [], [:], nil, nil, nil, false)
         } else {
             do {
                 let resolved = try database ?? databaseFactory()
@@ -187,8 +200,11 @@ final class AppViewModel: ObservableObject {
                 do {
                     try ModelConnectionSetupService(
                         database: resolved,
-                        credentials: KeychainModelCredentialRepository(secrets: keychain)
+                        credentials: resolvedModelCredentialRepository
                     ).reconcilePendingSetups()
+                    guard try resolved.pendingModelConnectionSetups().isEmpty else {
+                        throw AppDatabaseError.invalidModelConnectionSetupJournal
+                    }
                     modelConnectionRecoveryError = nil
                 } catch {
                     modelConnectionRecoveryError = "Model connection recovery pending (MODEL-CONNECTION-RECOVERY)"
@@ -225,20 +241,37 @@ final class AppViewModel: ObservableObject {
                     progressResult.0,
                     readableContent,
                     restoredNotice,
-                    modelConnectionRecoveryError ?? progressResult.1
+                    modelConnectionRecoveryError ?? progressResult.1,
+                    modelConnectionRecoveryError != nil
                 )
             } catch {
-                databaseState = (nil, emptyWorkspace, [], [:], nil, nil, "SQLite initialization failed (DB-INIT)")
+                databaseState = (
+                    nil,
+                    emptyWorkspace,
+                    [],
+                    [:],
+                    nil,
+                    nil,
+                    "SQLite initialization failed (DB-INIT)",
+                    false
+                )
             }
         }
 
         self.database = databaseState.database
+        self.modelConnectionSetup = ModelConnectionSetupController(
+            database: databaseState.database,
+            credentials: resolvedModelCredentialRepository,
+            discoveryClient: modelDiscoveryClient,
+            allowsPendingResume: !databaseState.modelConnectionRecoveryBlocked
+        )
         runtime = nil
         selectedConversationID = databaseState.workspace.selectedConversation?.id
         conversations = databaseState.workspace.conversations
         draft = databaseState.workspace.draft
         conversationMessages = databaseState.workspace.messageWindow.messages.map(\.displayText)
         hasEarlierConversationMessages = databaseState.workspace.messageWindow.hasEarlierMessages
+        modelConnectionSetup.restorePendingIntent(for: selectedConversationID)
         projects = databaseState.projects
         novelProgressByProjectID = databaseState.novelProgressByProjectID
         readableContent = databaseState.readableContent
@@ -265,6 +298,11 @@ final class AppViewModel: ObservableObject {
             businessStatus = buildIdentity.isAgentExecutionAllowed
                 ? "暂时无法打开对话"
                 : "这个版本还没有完全启用，暂时不能改动内容"
+        }
+        if modelConnectionSetup.isPresented(for: selectedConversationID) {
+            businessStatus = modelConnectionSetup.resumeDecision == nil
+                ? ModelConnectionSetupConversationCopy.connectionRequired
+                : ModelConnectionSetupConversationCopy.connectionReady
         }
 
         if let notice = databaseState.notice {
@@ -580,6 +618,53 @@ final class AppViewModel: ObservableObject {
         }
     }
 
+    func sendModelDependentMessage() {
+        let rawRequest = draft
+        guard !rawRequest.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return
+        }
+        guard requireActiveBuildForAgentMutation() else { return }
+        guard flushPendingDraftAutosave() else { return }
+        guard let database else {
+            publishError("消息无法保存（DB-WRITE）", domain: .composer)
+            return
+        }
+
+        isAgentWorking = true
+        defer { isAgentWorking = false }
+        do {
+            let result = try database.appendPendingModelIntentTurn(
+                selectedConversationID: selectedConversationID,
+                rawRequest: rawRequest,
+                intentID: UUID()
+            )
+            applyS1ConversationWorkspace(result.workspace)
+            clearErrors(in: .composer)
+            businessStatus = modelConnectionSetup.conversationStatus(
+                for: selectedConversationID
+            ) ?? ModelConnectionSetupConversationCopy.connectionRequired
+        } catch AppDatabaseError.pendingModelIntentAlreadyExists {
+            modelConnectionSetup.restorePendingIntent(for: selectedConversationID)
+            publishError(
+                "这段对话还有一条等待模型处理的请求，请先完成它（S2-INTENT-PENDING）",
+                domain: .composer
+            )
+        } catch {
+            publishError("消息无法保存，原文仍然保留（S2-INTENT-SAVE）", domain: .composer)
+        }
+    }
+
+    func openModelConnectionSetup() {
+        modelConnectionSetup.restorePendingIntent(for: selectedConversationID)
+        if !modelConnectionSetup.isPresented(for: selectedConversationID) {
+            modelConnectionSetup.openManagement()
+        }
+    }
+
+    func closeModelConnectionManagement() {
+        modelConnectionSetup.closeManagement(returningTo: selectedConversationID)
+    }
+
     func startNewS1Conversation() {
         guard requireActiveBuildForMutation(.durableMutation) else { return }
         guard flushPendingDraftAutosave() else { return }
@@ -615,6 +700,14 @@ final class AppViewModel: ObservableObject {
         hasEarlierConversationMessages = workspace.messageWindow.hasEarlierMessages
         setDraftWithoutAutosave(workspace.draft)
         refreshS1ReadableContent()
+        modelConnectionSetup.restorePendingIntent(for: selectedConversationID)
+        if let connectionStatus = modelConnectionSetup.conversationStatus(
+            for: selectedConversationID
+        ) {
+            businessStatus = connectionStatus
+        } else if runtime == nil {
+            businessStatus = "当前只验证界面、导航和本地保存，尚未接入真正的模型任务"
+        }
     }
 
     private static func progressDescriptions(
@@ -886,6 +979,7 @@ final class AppViewModel: ObservableObject {
 
     private func pauseGovernedWork() {
         cancelDraftAutosaveTimer()
+        modelConnectionSetup.suspendDiscovery()
         streamGeneration = nil
         streamTask?.cancel()
         streamTask = nil

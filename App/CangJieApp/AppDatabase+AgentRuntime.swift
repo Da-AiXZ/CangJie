@@ -217,19 +217,20 @@ extension AppDatabase {
         return validatedTurn
     }
 
-    private struct PersistedS1PreviewTurn {
+    struct PersistedConversationTurn {
         let messages: [AgentMessage]
         let conversationTitle: String
     }
 
-    private static func persistS1PreviewTurn(
+    static func persistConversationMessages(
         conversationID: UUID,
         currentTitle: String,
-        turn: S1ConversationPreviewTurn,
+        userText: String,
+        systemContent: String,
         now: Date,
         minimumTimestamp: TimeInterval,
         in db: Database
-    ) throws -> PersistedS1PreviewTurn {
+    ) throws -> PersistedConversationTurn {
         let existingMessageCount = try Int.fetchOne(
             db,
             sql: "SELECT COUNT(*) FROM agentMessage WHERE conversationID = ?",
@@ -241,7 +242,7 @@ extension AppDatabase {
             arguments: [conversationID.uuidString]
         )
         let conversationTitle = existingMessageCount == 0
-            ? S1ConversationPreview.makeHistoryTitle(fromValidatedUserText: turn.userText)
+            ? S1ConversationPreview.makeHistoryTitle(fromValidatedUserText: userText)
             : currentTitle
         let effectiveTimestamp = max(
             minimumTimestamp,
@@ -251,13 +252,13 @@ extension AppDatabase {
         let userMessage = AgentMessage(
             id: UUID(),
             role: .user,
-            content: turn.userText,
+            content: userText,
             createdAt: effectiveDate
         )
         let systemMessage = AgentMessage(
             id: UUID(),
             role: .system,
-            content: turn.systemReceipt,
+            content: systemContent,
             createdAt: effectiveDate
         )
 
@@ -277,9 +278,28 @@ extension AppDatabase {
             sql: "UPDATE agentConversation SET title = ?, updatedAt = ? WHERE id = ?",
             arguments: [conversationTitle, effectiveTimestamp, conversationID.uuidString]
         )
-        return PersistedS1PreviewTurn(
+        return PersistedConversationTurn(
             messages: [userMessage, systemMessage],
             conversationTitle: conversationTitle
+        )
+    }
+
+    private static func persistS1PreviewTurn(
+        conversationID: UUID,
+        currentTitle: String,
+        turn: S1ConversationPreviewTurn,
+        now: Date,
+        minimumTimestamp: TimeInterval,
+        in db: Database
+    ) throws -> PersistedConversationTurn {
+        try persistConversationMessages(
+            conversationID: conversationID,
+            currentTitle: currentTitle,
+            userText: turn.userText,
+            systemContent: turn.systemReceipt,
+            now: now,
+            minimumTimestamp: minimumTimestamp,
+            in: db
         )
     }
 
@@ -645,7 +665,7 @@ extension AppDatabase {
         }
     }
 
-    private static func requireCurrentS1WorkspaceSelection(
+    static func requireCurrentS1WorkspaceSelection(
         _ expectedConversationID: UUID?,
         in db: Database
     ) throws {
@@ -667,7 +687,7 @@ extension AppDatabase {
         }
     }
 
-    private static func s1ConversationWorkspaceSnapshot(
+    static func s1ConversationWorkspaceSnapshot(
         in db: Database
     ) throws -> S1ConversationWorkspaceSnapshot {
         guard let workspaceRow = try Row.fetchOne(
@@ -777,7 +797,7 @@ extension AppDatabase {
         )
     }
 
-    private static func decodeConversation(_ row: Row) -> AgentConversation? {
+    static func decodeConversation(_ row: Row) -> AgentConversation? {
         guard let id = UUID(uuidString: row["id"]) else { return nil }
         return AgentConversation(id: id, title: row["title"], createdAt: Date(timeIntervalSince1970: row["createdAt"]), updatedAt: Date(timeIntervalSince1970: row["updatedAt"]))
     }

@@ -149,56 +149,70 @@ extension AppDatabase {
 
     func storePendingModelIntent(_ intent: PendingModelIntent) throws -> PendingModelIntent {
         try queue.write { db in
-            if let existingRow = try Row.fetchOne(
-                db,
-                sql: "SELECT * FROM pendingModelIntent WHERE id = ?",
-                arguments: [intent.id.uuidString]
-            ) {
-                let existing = try Self.decodePendingModelIntent(existingRow)
-                guard existing == intent else {
-                    throw AppDatabaseError.idempotencyConflict
-                }
-                return existing
-            }
-
-            guard try Self.rowExists(
-                table: .conversation,
-                id: intent.conversationID,
-                in: db
-            ) else {
-                throw AppDatabaseError.invalidPendingModelIntent
-            }
-            if let projectID = intent.projectID {
-                guard try Self.rowExists(table: .project, id: projectID, in: db) else {
-                    throw AppDatabaseError.invalidPendingModelIntent
-                }
-            }
-            guard intent.createdAt.timeIntervalSinceReferenceDate.isFinite else {
-                throw AppDatabaseError.invalidPendingModelIntent
-            }
-
-            let payloadJSON = try Self.encodePendingModelIntent(intent)
-            let payloadHash = Self.payloadHash(payloadJSON)
-            try db.execute(
-                sql: """
-                    INSERT INTO pendingModelIntent (
-                        id, conversationID, projectID, branchID,
-                        payloadVersion, payloadJSON, payloadHash, createdAt
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                    """,
-                arguments: [
-                    intent.id.uuidString,
-                    intent.conversationID.uuidString,
-                    intent.projectID?.uuidString,
-                    intent.branchID?.uuidString,
-                    Self.pendingModelIntentPayloadVersion,
-                    payloadJSON,
-                    payloadHash,
-                    intent.createdAt.timeIntervalSince1970
-                ]
-            )
-            return intent
+            try Self.storePendingModelIntent(intent, in: db)
         }
+    }
+
+    static func storePendingModelIntent(
+        _ intent: PendingModelIntent,
+        in db: Database
+    ) throws -> PendingModelIntent {
+        if let existingRow = try Row.fetchOne(
+            db,
+            sql: "SELECT * FROM pendingModelIntent WHERE id = ?",
+            arguments: [intent.id.uuidString]
+        ) {
+            let existing = try Self.decodePendingModelIntent(existingRow)
+            guard existing == intent else {
+                throw AppDatabaseError.idempotencyConflict
+            }
+            return existing
+        }
+
+        guard try Self.rowExists(
+            table: .conversation,
+            id: intent.conversationID,
+            in: db
+        ) else {
+            throw AppDatabaseError.invalidPendingModelIntent
+        }
+        if let projectID = intent.projectID {
+            guard try Self.rowExists(table: .project, id: projectID, in: db) else {
+                throw AppDatabaseError.invalidPendingModelIntent
+            }
+        }
+        guard intent.createdAt.timeIntervalSinceReferenceDate.isFinite else {
+            throw AppDatabaseError.invalidPendingModelIntent
+        }
+        guard try Row.fetchOne(
+            db,
+            sql: "SELECT 1 FROM pendingModelIntent WHERE conversationID = ? LIMIT 1",
+            arguments: [intent.conversationID.uuidString]
+        ) == nil else {
+            throw AppDatabaseError.pendingModelIntentAlreadyExists
+        }
+
+        let payloadJSON = try Self.encodePendingModelIntent(intent)
+        let payloadHash = Self.payloadHash(payloadJSON)
+        try db.execute(
+            sql: """
+                INSERT INTO pendingModelIntent (
+                    id, conversationID, projectID, branchID,
+                    payloadVersion, payloadJSON, payloadHash, createdAt
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+            arguments: [
+                intent.id.uuidString,
+                intent.conversationID.uuidString,
+                intent.projectID?.uuidString,
+                intent.branchID?.uuidString,
+                Self.pendingModelIntentPayloadVersion,
+                payloadJSON,
+                payloadHash,
+                intent.createdAt.timeIntervalSince1970
+            ]
+        )
+        return intent
     }
 
     func pendingModelIntent(id: UUID) throws -> PendingModelIntent? {
@@ -207,6 +221,25 @@ extension AppDatabase {
                 db,
                 sql: "SELECT * FROM pendingModelIntent WHERE id = ?",
                 arguments: [id.uuidString]
+            ) else {
+                return nil
+            }
+            return try Self.decodePendingModelIntent(row)
+        }
+    }
+
+    func latestPendingModelIntent(conversationID: UUID) throws -> PendingModelIntent? {
+        try queue.read { db in
+            guard let row = try Row.fetchOne(
+                db,
+                sql: """
+                    SELECT *
+                    FROM pendingModelIntent
+                    WHERE conversationID = ?
+                    ORDER BY createdAt DESC, rowid DESC
+                    LIMIT 1
+                    """,
+                arguments: [conversationID.uuidString]
             ) else {
                 return nil
             }
@@ -377,7 +410,7 @@ extension AppDatabase {
         )
     }
 
-    private static func decodePendingModelIntent(_ row: Row) throws -> PendingModelIntent {
+    static func decodePendingModelIntent(_ row: Row) throws -> PendingModelIntent {
         let rowID: String = row["id"]
         let conversationID: String = row["conversationID"]
         let projectID: String? = row["projectID"]

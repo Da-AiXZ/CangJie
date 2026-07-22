@@ -1,7 +1,7 @@
 # CangJie Project Control Center
 
 - Authority: current operational truth
-- Updated: 2026-07-21
+- Updated: 2026-07-22
 - Repository: `F:\project\CangJie`
 - Remote: `https://github.com/Da-AiXZ/CangJie`, branch `main`
 ## Agent Harness architecture decision
@@ -1671,3 +1671,28 @@ The failing branch is already isolated by `#if canImport(Darwin)`. On the Apple 
 Exact Darwin compile-repair commit `47f9e6fcb81f5f5c5e7e4c4505002ee09043d5a7` passed Core CI `29884171521`. iPadOS CI `29884171560` also passed the previous socket compile point and ran the complete main suites, but finished with three App XCTest failures out of 304 tests; all 20 main App UI tests passed. The complete log identifies two root-cause classes: `ModelConnectionSetupJournalTests.testStartupReconciliationRejectsRehashedModelAndBaseURLPathTamper` used a shared Custom setup fixture that still supplied an unverified raw catalog selection, while the two request-deadline tests observed cancellation only through `catch is CancellationError` and therefore did not record the cancelled task state on Apple.
 
 The local repair is test-only. The shared setup fixture now uses the existing transport-SPI `CredentialProvenCustomModelSelection` seam when it deliberately creates a valid Custom candidate, so the journal test reaches its intended rehashed model/path tamper assertions without weakening the production provenance gate. Both hanging test transports record `Task.isCancelled` in their task-exit `defer`, preserving the original absolute deadline, immediate fail-closed result and zero catalog-send assertions without depending on one platform's concrete sleep error. All three changed Swift test files parse, all eight repository Python contract scripts pass, SPI remains 12/12, the build-artifact suite remains 32 cases with one expected Windows skip, and `git diff --check` passes. Replacement exact-SHA Core/iPadOS CI is required; IPA remains blocked.
+
+## 2026-07-22 S2 discovery-hardening exact-candidate acceptance
+
+Exact commit `c27dd70f46658260606a06e68c900bf8a6cb8acc` completed the replacement acceptance chain:
+
+- Core CI `29885862452` passed.
+- iPadOS CI `29885862456` passed 304 App XCTest cases, all 20 main App UI tests, and the Keychain Isolation Probe suites.
+- TrollStore Candidate Set workflow `29886779892` passed for version `1.0`, build `32001`, Candidate Set ID `801b37a72491afaf1dc7619bdd0a5b2163392551b503da75b3ed3186413668e2`.
+- Main IPA SHA-256 is `b1d63c160f6f5ee38eef5c1166969edfc0552f7d91d1f52e36c1178695271653`; Probe IPA SHA-256 is `037c9e8da3ca8eb716af9da55c3a49d69c27f980d9320cd521abfdb6cf9d5d9c`.
+- The downloaded pair passed the repository metadata verifier. Independent inspection confirmed arm64 Mach-O payloads, `LC_CODE_SIGNATURE`, and the expected distinct Keychain entitlements; the macOS workflow also passed strict `codesign --verify`.
+- After receiving the exact installation, Probe, canary and recovery script, the user reported no problem and instructed development to continue. This record does not invent screenshots, exact on-device copy, or observations beyond that user report.
+
+This accepts the exact discovery/credential/journal hardening candidate and preserves the S1 regression baseline. It does **not** complete S2: the next vertical slice remains the user-operable central-conversation setup flow from explicit Provider and Key/Endpoint through connection test/model discovery, explicit model selection, named current connection, and resumption of the original pending intent. The real Provider request/Typed Tool/ToolReceipt loop remains later S2 work.
+
+## 2026-07-22 S2 central model-connection setup slice — local pre-commit evidence
+
+The next S2 vertical slice is now implemented locally without claiming Provider generation. A model-dependent first turn atomically creates or reuses the selected Conversation, saves the exact user request and an honest setup receipt, clears only the correctly bound draft, and persists one immutable `PendingModelIntent` bound to the Conversation and its focused project. The central control plane then owns an explicit Provider → official/custom endpoint → transient Key → bounded connection test/model discovery → explicit model selection → named current connection flow. Credentials are persisted only through the existing Keychain/SQLite setup journal and fresh verification path; shipping Custom remains fail closed without pinned transport.
+
+The pending request is a durable per-Conversation mutex until the real Provider loop consumes it. Both write paths reject a second unconsumed request, and an ordered migration first rejects ambiguous legacy duplicates before creating a unique `conversationID` index. Conversation switching rehydrates the exact Conversation's pending setup; inactive/active recovery preserves in-progress fields while cancelling discovery; explicit settings management temporarily detaches any Conversation intent and restores it only when management closes. An unresolved setup journal blocks current-connection verification, saving, switching and `prepareProviderRequest` admission.
+
+The SwiftUI root now directly observes the nested setup controller, so card visibility, current-connection header, ordinary status and composer gating update together. The model catalog has its own bounded scroll region, and the deterministic UI fixture returns a long catalog so the last model must become hittable before selection. Relaunch validation removes the fixture while preserving the database scope, requiring the original request, verified Keychain-backed named current connection, selected model and resume notice to restore without reseeding.
+
+Local evidence: all changed/new Swift files pass `swiftc -frontend -parse`; every repository Python contract script passes, including the 12/12 Core SPI boundary and the 32-case artifact verifier with one expected Windows skip; `swift test --enable-code-coverage` passes 139 XCTest cases plus 15 Swift Testing cases; secret-pattern scan and `git diff --check` pass. Read-only code, test and security reviews reported no P0; all reported P1/P2 findings were repaired and the final two fixes received a targeted follow-up review. Apple Simulator App XCTest/XCUITest remains the authoritative next gate after commit and push.
+
+This slice still does **not** send a real Provider request, create a Provider-backed `AgentRun`, authorize a Typed Tool, or emit a `ToolReceipt`. It must not be described as S2 completion until those later boundaries are implemented and verified.

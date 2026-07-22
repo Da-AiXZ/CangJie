@@ -3,7 +3,7 @@ import Foundation
 import XCTest
 @testable import CangJie
 
-final class ModelConnectionRecoveryViewModelTests: XCTestCase {
+final class ModelConnectionRecoveryViewModelTests: XCTestCase, ModelConnectionSetupServiceTestSupport {
     private struct FailingSecretRepository: SecretRepository {
         private struct Failure: Error {}
 
@@ -72,6 +72,83 @@ final class ModelConnectionRecoveryViewModelTests: XCTestCase {
             )
             XCTAssertFalse(viewModel.diagnosticErrorMessage?.contains("DB-INIT") == true)
             XCTAssertEqual(try database.pendingModelConnectionSetups().count, 1)
+        }
+    }
+
+    @MainActor
+    func testUnresolvedSetupJournalBlocksPendingIntentResumeDespiteVerifiedCurrentConnection() throws {
+        try withDatabase { database in
+            let pending = try database.appendPendingModelIntentTurn(
+                selectedConversationID: nil,
+                rawRequest: "未解决的凭证事务不能恢复模型请求",
+                intentID: UUID(),
+                now: Date(timeIntervalSince1970: 1_100)
+            )
+            let credentials = RecordingCredentialRepository()
+            let currentCandidate = try ModelConnectionTestFixture.makeSetupCandidate(
+                name: "已验证连接",
+                selectedModel: "gpt-current",
+                secret: "verified-current-secret"
+            )
+            _ = try ModelConnectionSetupService(
+                database: database,
+                credentials: credentials
+            ).persist(
+                currentCandidate,
+                expectedCredentialBinding: currentCandidate.credentialBinding,
+                makeCurrent: true,
+                now: Date(timeIntervalSince1970: 1_101)
+            )
+            let unresolvedCandidate = try ModelConnectionTestFixture.makeSetupCandidate(
+                name: "未完成连接",
+                selectedModel: "gpt-unresolved",
+                secret: "unresolved-secret"
+            )
+            _ = try database.stageModelConnectionSetup(
+                unresolvedCandidate.connection,
+                credentialBinding: unresolvedCandidate.credentialBinding,
+                makeCurrent: false,
+                now: Date(timeIntervalSince1970: 1_102)
+            )
+            try database.queue.write { db in
+                try db.execute(
+                    sql: "UPDATE modelConnectionSetupJournal SET payloadJSON = '{}' WHERE connectionID = ?",
+                    arguments: [unresolvedCandidate.connection.id.uuidString]
+                )
+            }
+
+            let viewModel = AppViewModel(
+                database: database,
+                keychain: FailingSecretRepository(),
+                isolationCanaryRepository: StubIsolationCanaryRepository(),
+                modelCredentialRepository: credentials,
+                modelDiscoveryClient: ModelDiscoveryNetworkClient(
+                    transport: RecordingTransport(responses: [])
+                ),
+                compiledBuildStamp: .generated,
+                buildActivationStore: StubBuildActivationStore(),
+                bundleIdentityLoader: nil,
+                taskID: UUID()
+            )
+
+            XCTAssertEqual(viewModel.modelConnectionSetup.pendingIntent, pending.pendingIntent)
+            XCTAssertEqual(
+                viewModel.modelConnectionSetup.currentMetadata?.connection,
+                currentCandidate.connection
+            )
+            XCTAssertNil(viewModel.modelConnectionSetup.currentConnection)
+            XCTAssertNil(viewModel.modelConnectionSetup.resumeDecision)
+            XCTAssertFalse(viewModel.isComposerAvailable)
+            XCTAssertTrue(
+                viewModel.diagnosticErrorMessage?.contains("MODEL-CONNECTION-RECOVERY") == true
+            )
+            let journalCount = try database.queue.read { db in
+                try Int.fetchOne(
+                    db,
+                    sql: "SELECT COUNT(*) FROM modelConnectionSetupJournal"
+                ) ?? 0
+            }
+            XCTAssertEqual(journalCount, 1)
         }
     }
 
