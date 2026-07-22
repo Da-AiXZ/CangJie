@@ -1,6 +1,6 @@
 import Foundation
 import XCTest
-@testable import CangJieCore
+@_spi(ModelCredentialVerification) @_spi(ModelDiscoveryCredentialBinding) @_spi(ModelDiscoveryTransport) @testable import CangJieCore
 
 final class ModelConnectionContractTests: XCTestCase {
     func testOfficialConnectorRegistryMatchesFrozenUserChoicesAndEndpoints() {
@@ -62,6 +62,9 @@ final class ModelConnectionContractTests: XCTestCase {
     func testBuildsConnectionFromExplicitProviderCredentialReferenceAndSelectedModel() throws {
         let connectionID = UUID(uuidString: "10000000-0000-0000-0000-000000000001")!
         let credentialID = UUID(uuidString: "20000000-0000-0000-0000-000000000002")!
+        let credentialVersionID = UUID(
+            uuidString: "30000000-0000-0000-0000-000000000003"
+        )!
 
         let connection = try ModelConnection.make(
             id: connectionID,
@@ -69,6 +72,7 @@ final class ModelConnectionContractTests: XCTestCase {
             provider: .deepSeek,
             baseURL: URL(string: "https://api.deepseek.com")!,
             credentialID: credentialID,
+            credentialVersionID: credentialVersionID,
             selectedModel: "  deepseek-chat  "
         )
 
@@ -82,10 +86,145 @@ final class ModelConnectionContractTests: XCTestCase {
                 id: credentialID,
                 connectionID: connectionID,
                 provider: .deepSeek,
-                allowedHost: "api.deepseek.com"
+                allowedHost: "api.deepseek.com",
+                versionID: credentialVersionID
             )
         )
         XCTAssertEqual(connection.selectedModel, "deepseek-chat")
+    }
+
+    func testPublicConnectionCreationConsumesDiscoverySelectionEvidence() throws {
+        let discoveryID = UUID(
+            uuidString: "30000000-0000-0000-0000-000000000003"
+        )!
+        let connectionID = UUID(
+            uuidString: "40000000-0000-0000-0000-000000000004"
+        )!
+        let credentialID = UUID(
+            uuidString: "50000000-0000-0000-0000-000000000005"
+        )!
+        let credentialBinding = try ModelDiscoveryCredentialBinding(
+            credentialID: credentialID,
+            connectionID: connectionID,
+            provider: .openAI,
+            baseURL: URL(string: "https://api.openai.com/v1")!,
+            versionID: UUID(
+                uuidString: "60000000-0000-0000-0000-000000000006"
+            )!,
+            versionProof: String(repeating: "a", count: 64)
+        )
+        let start = try ModelDiscoveryFlow.start(
+            discoveryID: discoveryID,
+            credentialBinding: credentialBinding
+        )
+        guard case let .ready(session) = start else {
+            return XCTFail("OpenAI discovery should not require a separate probe")
+        }
+        let result = try ModelDiscoveryFlow.receive(
+            ModelDiscoveryResponse(
+                requestIdentity: session.request.identity,
+                requestURL: session.request.url,
+                statusCode: 200,
+                body: Data(#"{"data":[{"id":"gpt-selected"}]}"#.utf8)
+            ),
+            for: session
+        )
+        let selection = try ModelDiscoveryFlow.selectModel(
+            "gpt-selected",
+            from: result
+        )
+
+        let connection = try ModelConnection.make(
+            name: "Selected OpenAI",
+            selection: selection
+        )
+
+        XCTAssertEqual(selection.discoveryID, discoveryID)
+        XCTAssertEqual(connection.id, connectionID)
+        XCTAssertEqual(connection.provider, .openAI)
+        XCTAssertEqual(connection.selectedModel, "gpt-selected")
+        XCTAssertEqual(connection.credential.id, credentialID)
+        XCTAssertEqual(connection.credential.versionID, credentialBinding.versionID)
+        XCTAssertThrowsError(
+            try CredentialProvenCustomModelSelection(selection: selection)
+        ) { error in
+            XCTAssertEqual(
+                error as? ModelConnectionError,
+                .unverifiedModelSelection
+            )
+        }
+    }
+
+    func testRawCustomSelectionsRequireCredentialProvenCapability() throws {
+        let credentialBinding = try ModelDiscoveryCredentialBinding(
+            credentialID: UUID(),
+            connectionID: UUID(),
+            provider: .custom,
+            baseURL: URL(string: "https://models.example/v1")!,
+            versionID: UUID(),
+            versionProof: String(repeating: "a", count: 64)
+        )
+        let start = try ModelDiscoveryFlow.start(
+            discoveryID: UUID(),
+            credentialBinding: credentialBinding
+        )
+        guard case let .ready(session) = start else {
+            return XCTFail("Custom discovery should start with its catalog request")
+        }
+        let catalogResult = try ModelDiscoveryFlow.receive(
+            ModelDiscoveryResponse(
+                requestIdentity: session.request.identity,
+                requestURL: session.request.url,
+                statusCode: 200,
+                body: Data(#"{"data":[{"id":"custom-model"}]}"#.utf8)
+            ),
+            for: session
+        )
+        let catalogSelection = try ModelDiscoveryFlow.selectModel(
+            "custom-model",
+            from: catalogResult
+        )
+        let unsupportedResult = try ModelDiscoveryFlow.receive(
+            ModelDiscoveryResponse(
+                requestIdentity: session.request.identity,
+                requestURL: session.request.url,
+                statusCode: 404,
+                body: Data()
+            ),
+            for: session
+        )
+        guard case let .manualEntryAllowed(authorization) = unsupportedResult else {
+            return XCTFail("Unsupported custom discovery should scope manual entry")
+        }
+        let manualSelection = try authorization.selectModel("manual-model")
+
+        for selection in [catalogSelection, manualSelection] {
+            XCTAssertThrowsError(
+                try ModelConnection.make(
+                    name: "Unverified custom",
+                    selection: selection
+                )
+            ) { error in
+                XCTAssertEqual(
+                    error as? ModelConnectionError,
+                    .unverifiedModelSelection
+                )
+            }
+
+            let credentialProvenSelection = try CredentialProvenCustomModelSelection(
+                selection: selection
+            )
+            let connection = try ModelConnection.make(
+                name: "Verified custom",
+                credentialProvenSelection: credentialProvenSelection
+            )
+
+            XCTAssertEqual(connection.id, selection.connectionID)
+            XCTAssertEqual(connection.provider, .custom)
+            XCTAssertEqual(connection.baseURL, selection.baseURL)
+            XCTAssertEqual(connection.credential.id, selection.credentialBinding.credentialID)
+            XCTAssertEqual(connection.selectedModel, selection.modelID)
+        }
     }
 
     func testConnectionRequiresNamedProfileAndExplicitSelectedModel() {
@@ -198,6 +337,36 @@ final class ModelConnectionContractTests: XCTestCase {
                     selectedModel: "model-a"
                 ),
                 "Expected rejection for \(endpoint)"
+            ) { error in
+                XCTAssertEqual(error as? ModelConnectionError, .unsafeBaseURL)
+            }
+        }
+    }
+
+    func testCustomEndpointRejectsOversizedHostPathAndInvalidPort() {
+        let oversizedHost = String(repeating: "a", count: 254)
+        let oversizedPath = String(repeating: "p", count: 2_049)
+        let endpoints = [
+            "https://\(oversizedHost)/v1",
+            "https://models.example/\(oversizedPath)",
+            "https://models.example:0/v1",
+            "https://models.example:65536/v1"
+        ]
+
+        for endpoint in endpoints {
+            guard let url = URL(string: endpoint) else {
+                return XCTFail("Foundation must parse the validation fixture: \(endpoint)")
+            }
+            XCTAssertThrowsError(
+                try ModelConnection.make(
+                    id: UUID(),
+                    name: "Custom",
+                    provider: .custom,
+                    baseURL: url,
+                    credentialID: UUID(),
+                    selectedModel: "model-a"
+                ),
+                "Expected bounded custom endpoint rejection for \(endpoint)"
             ) { error in
                 XCTAssertEqual(error as? ModelConnectionError, .unsafeBaseURL)
             }
@@ -396,12 +565,13 @@ final class ModelConnectionContractTests: XCTestCase {
             credentialID: UUID(),
             selectedModel: "gpt-test"
         )
+        let verifiedConnection = try verified(connection)
 
         let decision = try ModelRequestAdmission.decide(
             rawRequest: "继续刚才的请求",
             intentID: intentID,
             conversationID: conversationID,
-            currentConnection: connection,
+            currentConnection: verifiedConnection,
             now: now
         )
 
@@ -416,7 +586,7 @@ final class ModelConnectionContractTests: XCTestCase {
                     userRequest: "继续刚才的请求",
                     createdAt: now
                 ),
-                connection: connection
+                verifiedConnection: verifiedConnection
             )
         )
     }
@@ -438,10 +608,133 @@ final class ModelConnectionContractTests: XCTestCase {
             credentialID: UUID(),
             selectedModel: "provider/model"
         )
+        let verifiedConnection = try verified(connection)
 
         XCTAssertEqual(
-            ModelRequestAdmission.resume(intent, with: connection),
-            .prepareProviderRequest(intent: intent, connection: connection)
+            ModelRequestAdmission.resume(intent, with: verifiedConnection),
+            .prepareProviderRequest(
+                intent: intent,
+                verifiedConnection: verifiedConnection
+            )
+        )
+    }
+
+    func testCredentialVerificationFromAnotherVersionCannotAuthorizeTheConnection() throws {
+        let connectionID = UUID()
+        let credentialID = UUID()
+        let connection = try ModelConnection.make(
+            id: connectionID,
+            name: "Version one",
+            provider: .openAI,
+            baseURL: URL(string: "https://api.openai.com/v1")!,
+            credentialID: credentialID,
+            credentialVersionID: UUID(),
+            selectedModel: "gpt-test"
+        )
+        let rotated = try ModelConnection.make(
+            id: connectionID,
+            name: "Version one",
+            provider: .openAI,
+            baseURL: URL(string: "https://api.openai.com/v1")!,
+            credentialID: credentialID,
+            credentialVersionID: UUID(),
+            selectedModel: "gpt-test"
+        )
+
+        XCTAssertThrowsError(
+            try VerifiedModelConnection(
+                connection: connection,
+                credentialVerification: ModelCredentialVerification(
+                    reference: rotated.credential,
+                    credentialVersionProof: String(repeating: "b", count: 64),
+                    credentialPayloadHash: String(repeating: "a", count: 64)
+                )
+            )
+        ) { error in
+            XCTAssertEqual(error as? ModelConnectionError, .credentialBindingMismatch)
+        }
+    }
+
+    func testCredentialVerificationCarriesCanonicalOptionalSetupAuthorization() throws {
+        let connection = try ModelConnection.make(
+            id: UUID(),
+            name: "Proof-bound",
+            provider: .openAI,
+            baseURL: URL(string: "https://api.openai.com/v1")!,
+            credentialID: UUID(),
+            credentialVersionID: UUID(),
+            selectedModel: "gpt-test"
+        )
+        let proof = String(repeating: "b", count: 64)
+        let setupAuthorizationHash = String(repeating: "c", count: 64)
+        let verification = try ModelCredentialVerification(
+            reference: connection.credential,
+            credentialVersionProof: proof,
+            credentialPayloadHash: String(repeating: "a", count: 64),
+            setupAuthorizationHash: setupAuthorizationHash
+        )
+
+        XCTAssertEqual(verification.credentialVersionProof, proof)
+        XCTAssertEqual(
+            verification.setupAuthorizationHash,
+            setupAuthorizationHash
+        )
+        XCTAssertNil(
+            try ModelCredentialVerification(
+                reference: connection.credential,
+                credentialVersionProof: proof,
+                credentialPayloadHash: String(repeating: "a", count: 64)
+            ).setupAuthorizationHash
+        )
+        for invalidProof in [
+            String(repeating: "a", count: 63),
+            String(repeating: "A", count: 64),
+            String(repeating: "g", count: 64)
+        ] {
+            XCTAssertThrowsError(
+                try ModelCredentialVerification(
+                    reference: connection.credential,
+                    credentialVersionProof: invalidProof,
+                    credentialPayloadHash: String(repeating: "a", count: 64)
+                )
+            ) { error in
+                XCTAssertEqual(
+                    error as? ModelConnectionError,
+                    .credentialBindingMismatch
+                )
+            }
+        }
+        for invalidAuthorizationHash in [
+            String(repeating: "a", count: 63),
+            String(repeating: "A", count: 64),
+            String(repeating: "g", count: 64)
+        ] {
+            XCTAssertThrowsError(
+                try ModelCredentialVerification(
+                    reference: connection.credential,
+                    credentialVersionProof: proof,
+                    credentialPayloadHash: String(repeating: "a", count: 64),
+                    setupAuthorizationHash: invalidAuthorizationHash
+                )
+            ) { error in
+                XCTAssertEqual(
+                    error as? ModelConnectionError,
+                    .credentialBindingMismatch
+                )
+            }
+        }
+    }
+
+    private func verified(
+        _ connection: ModelConnection
+    ) throws -> VerifiedModelConnection {
+        try VerifiedModelConnection(
+            connection: connection,
+            credentialVerification: ModelCredentialVerification(
+                reference: connection.credential,
+                credentialVersionProof: String(repeating: "b", count: 64),
+                credentialPayloadHash: String(repeating: "a", count: 64)
+            )
         )
     }
 }

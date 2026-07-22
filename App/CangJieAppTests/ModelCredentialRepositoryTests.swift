@@ -5,16 +5,23 @@ import XCTest
 
 final class ModelCredentialRepositoryTests: XCTestCase {
     private final class MemorySecretRepository: SecretRepository {
+        private struct InjectedFailure: Error {}
+
         var values: [String: String] = [:]
         var saveCount = 0
         var discardWrites = false
         var ignoreDeletes = false
         var ignoredDeleteAccounts: Set<String> = []
+        var failBeforeSaveCounts: Set<Int> = []
+        var failAfterSaveCounts: Set<Int> = []
         var transformNextSaveAccount: String?
         var transformNextSave: ((String) throws -> String)?
 
         func save(_ secret: String, account: String) throws {
             saveCount += 1
+            if failBeforeSaveCounts.contains(saveCount) {
+                throw InjectedFailure()
+            }
             guard !discardWrites else { return }
             if let transformNextSave,
                transformNextSaveAccount == nil || transformNextSaveAccount == account {
@@ -23,6 +30,9 @@ final class ModelCredentialRepositoryTests: XCTestCase {
                 values[account] = try transformNextSave(secret)
             } else {
                 values[account] = secret
+            }
+            if failAfterSaveCounts.contains(saveCount) {
+                throw InjectedFailure()
             }
         }
 
@@ -45,8 +55,14 @@ final class ModelCredentialRepositoryTests: XCTestCase {
         let repository = KeychainModelCredentialRepository(secrets: secrets)
         let connection = try makeConnection()
         let secret = "fixture-key-value"
+        let setupAuthorizationHash = String(repeating: "c", count: 64)
 
-        try repository.save(secret, for: connection)
+        try saveCredential(
+            secret,
+            setupAuthorizationHash: setupAuthorizationHash,
+            in: repository,
+            for: connection
+        )
 
         let account = KeychainModelCredentialRepository.credentialAccount(
             for: connection.credential.id
@@ -59,18 +75,92 @@ final class ModelCredentialRepositoryTests: XCTestCase {
                 )
             )
         )
+        let resolved = try XCTUnwrap(repository.resolve(for: connection))
+        XCTAssertEqual(resolved.reference, connection.credential)
+        XCTAssertEqual(resolved.secret, secret)
         XCTAssertEqual(
-            try repository.resolve(for: connection),
-            KeychainBoundModelCredential(
-                reference: connection.credential,
-                secret: secret
-            )
+            resolved.credentialVersionProof,
+            versionProof(for: connection)
+        )
+        XCTAssertEqual(resolved.credentialPayloadHash.utf8.count, 64)
+        XCTAssertEqual(
+            resolved.setupAuthorizationHash,
+            setupAuthorizationHash
+        )
+        let credentialObject = try XCTUnwrap(
+            JSONSerialization.jsonObject(
+                with: Data(try XCTUnwrap(secrets.read(account: account)).utf8)
+            ) as? [String: Any]
+        )
+        XCTAssertEqual(
+            credentialObject["setupAuthorizationHash"] as? String,
+            setupAuthorizationHash
+        )
+        let verificationObject = try XCTUnwrap(
+            JSONSerialization.jsonObject(
+                with: Data(
+                    try XCTUnwrap(
+                        secrets.read(
+                            account: KeychainModelCredentialRepository.verificationAccount(
+                                for: connection.credential.id
+                            )
+                        )
+                    ).utf8
+                )
+            ) as? [String: Any]
+        )
+        XCTAssertEqual(
+            verificationObject["setupAuthorizationHash"] as? String,
+            setupAuthorizationHash
+        )
+        XCTAssertEqual(
+            try repository.verifiedConnection(for: connection)?.connection,
+            connection
         )
 
-        try repository.save("replacement-fixture-key", for: connection)
+        XCTAssertThrowsError(
+            try saveCredential(
+                "replacement-fixture-key",
+                in: repository,
+                for: connection
+            )
+        ) { error in
+            XCTAssertEqual(
+                error as? ModelCredentialRepositoryError,
+                .credentialVersionConflict
+            )
+        }
+        XCTAssertEqual(try repository.resolve(for: connection)?.secret, secret)
+    }
+
+    func testNewCredentialVersionInvalidatesThePreviousConnectionSnapshot() throws {
+        let secrets = MemorySecretRepository()
+        let repository = KeychainModelCredentialRepository(secrets: secrets)
+        let connectionID = UUID()
+        let credentialID = UUID()
+        let first = try makeConnection(
+            id: connectionID,
+            credentialID: credentialID,
+            credentialVersionID: UUID()
+        )
+        let rotated = try makeConnection(
+            id: connectionID,
+            credentialID: credentialID,
+            credentialVersionID: UUID()
+        )
+
+        try saveCredential("first-version-key", in: repository, for: first)
+        try saveCredential("rotated-version-key", in: repository, for: rotated)
+
+        XCTAssertThrowsError(try repository.resolve(for: first)) { error in
+            XCTAssertEqual(
+                error as? ModelCredentialRepositoryError,
+                .credentialBindingMismatch
+            )
+        }
         XCTAssertEqual(
-            try repository.resolve(for: connection)?.secret,
-            "replacement-fixture-key"
+            try repository.resolve(for: rotated)?.secret,
+            "rotated-version-key"
         )
     }
 
@@ -79,24 +169,53 @@ final class ModelCredentialRepositoryTests: XCTestCase {
         let repository = KeychainModelCredentialRepository(secrets: secrets)
         let connection = try makeConnection()
 
-        XCTAssertThrowsError(try repository.save("   ", for: connection)) { error in
+        XCTAssertThrowsError(
+            try saveCredential("   ", in: repository, for: connection)
+        ) { error in
             XCTAssertEqual(error as? ModelCredentialRepositoryError, .emptySecret)
         }
         XCTAssertThrowsError(
-            try repository.save(
+            try saveCredential(
                 String(
                     repeating: "k",
                     count: KeychainModelCredentialRepository.maximumSecretUTF8Bytes + 1
                 ),
+                in: repository,
                 for: connection
             )
         ) { error in
             XCTAssertEqual(error as? ModelCredentialRepositoryError, .secretTooLarge)
         }
         XCTAssertThrowsError(
-            try repository.save("line-one\nline-two", for: connection)
+            try saveCredential(
+                "line-one\nline-two",
+                in: repository,
+                for: connection
+            )
         ) { error in
             XCTAssertEqual(error as? ModelCredentialRepositoryError, .invalidSecret)
+        }
+        XCTAssertEqual(secrets.saveCount, 0)
+        XCTAssertTrue(secrets.values.isEmpty)
+    }
+
+    func testInvalidSetupAuthorizationHashFailsBeforeAnyKeychainMutation() throws {
+        let secrets = MemorySecretRepository()
+        let repository = KeychainModelCredentialRepository(secrets: secrets)
+        let connection = try makeConnection()
+
+        XCTAssertThrowsError(
+            try repository.save(
+                "fixture-key-value",
+                versionProof: versionProof(for: connection),
+                setupAuthorizationHash: String(repeating: "A", count: 64),
+                for: connection
+            )
+        ) { error in
+            XCTAssertEqual(
+                error as? ModelCredentialRepositoryError,
+                .invalidStoredCredential
+            )
         }
         XCTAssertEqual(secrets.saveCount, 0)
         XCTAssertTrue(secrets.values.isEmpty)
@@ -118,14 +237,18 @@ final class ModelCredentialRepositoryTests: XCTestCase {
             provider: .custom,
             baseURL: URL(string: "https://other.example.com:9443/v1")!
         )
-        try repository.save("original-key", for: original)
+        try saveCredential("original-key", in: repository, for: original)
         let account = KeychainModelCredentialRepository.credentialAccount(
             for: credentialID
         )
         let before = try XCTUnwrap(secrets.read(account: account))
 
         XCTAssertThrowsError(
-            try repository.save("replacement-key", for: retargeted)
+            try saveCredential(
+                "replacement-key",
+                in: repository,
+                for: retargeted
+            )
         ) { error in
             XCTAssertEqual(
                 error as? ModelCredentialRepositoryError,
@@ -143,7 +266,7 @@ final class ModelCredentialRepositoryTests: XCTestCase {
         let secrets = MemorySecretRepository()
         let repository = KeychainModelCredentialRepository(secrets: secrets)
         let connection = try makeConnection()
-        try repository.save("fixture-key-value", for: connection)
+        try saveCredential("fixture-key-value", in: repository, for: connection)
         let account = KeychainModelCredentialRepository.credentialAccount(
             for: connection.credential.id
         )
@@ -175,13 +298,49 @@ final class ModelCredentialRepositoryTests: XCTestCase {
         }
     }
 
+    func testResolveRejectsSetupAuthorizationMismatchBetweenPayloadAndMarker() throws {
+        let secrets = MemorySecretRepository()
+        let repository = KeychainModelCredentialRepository(secrets: secrets)
+        let connection = try makeConnection()
+        try saveCredential(
+            "fixture-key-value",
+            setupAuthorizationHash: String(repeating: "c", count: 64),
+            in: repository,
+            for: connection
+        )
+        let verificationAccount = KeychainModelCredentialRepository.verificationAccount(
+            for: connection.credential.id
+        )
+        let raw = try XCTUnwrap(secrets.read(account: verificationAccount))
+        var object = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: Data(raw.utf8)) as? [String: Any]
+        )
+        object["setupAuthorizationHash"] = String(repeating: "d", count: 64)
+        secrets.values[verificationAccount] = try XCTUnwrap(
+            String(
+                data: JSONSerialization.data(
+                    withJSONObject: object,
+                    options: [.sortedKeys, .withoutEscapingSlashes]
+                ),
+                encoding: .utf8
+            )
+        )
+
+        XCTAssertThrowsError(try repository.resolve(for: connection)) { error in
+            XCTAssertEqual(
+                error as? ModelCredentialRepositoryError,
+                .invalidStoredCredential
+            )
+        }
+    }
+
     func testDeleteRequiresExactBindingAndVerifiesRemoval() throws {
         let secrets = MemorySecretRepository()
         let repository = KeychainModelCredentialRepository(secrets: secrets)
         let credentialID = UUID()
         let original = try makeConnection(id: UUID(), credentialID: credentialID)
         let other = try makeConnection(id: UUID(), credentialID: credentialID)
-        try repository.save("fixture-key-value", for: original)
+        try saveCredential("fixture-key-value", in: repository, for: original)
 
         XCTAssertThrowsError(try repository.delete(for: other)) { error in
             XCTAssertEqual(
@@ -202,7 +361,11 @@ final class ModelCredentialRepositoryTests: XCTestCase {
         let connection = try makeConnection()
 
         XCTAssertThrowsError(
-            try repository.save("fixture-key-value", for: connection)
+            try saveCredential(
+                "fixture-key-value",
+                in: repository,
+                for: connection
+            )
         ) { error in
             XCTAssertEqual(
                 error as? ModelCredentialRepositoryError,
@@ -233,7 +396,11 @@ final class ModelCredentialRepositoryTests: XCTestCase {
         let repository = KeychainModelCredentialRepository(secrets: secrets)
 
         XCTAssertThrowsError(
-            try repository.save("fixture-key-value", for: connection)
+            try saveCredential(
+                "fixture-key-value",
+                in: repository,
+                for: connection
+            )
         ) { error in
             XCTAssertEqual(
                 error as? ModelCredentialRepositoryError,
@@ -250,11 +417,37 @@ final class ModelCredentialRepositoryTests: XCTestCase {
         XCTAssertNil(try repository.resolve(for: connection))
     }
 
+    func testActivationFailureAndRevocationFailureAreReportedExplicitly() throws {
+        let secrets = MemorySecretRepository()
+        secrets.failAfterSaveCounts = [3]
+        secrets.failBeforeSaveCounts = [4]
+        let repository = KeychainModelCredentialRepository(secrets: secrets)
+        let connection = try makeConnection()
+
+        XCTAssertThrowsError(
+            try saveCredential(
+                "fixture-key-value",
+                in: repository,
+                for: connection
+            )
+        ) { error in
+            XCTAssertEqual(
+                error as? ModelCredentialRepositoryError,
+                .revocationCompensationFailed
+            )
+        }
+        XCTAssertEqual(
+            try repository.resolve(for: connection)?.secret,
+            "fixture-key-value",
+            "The explicit unsafe-compensation error must not be mistaken for a clean rollback"
+        )
+    }
+
     func testDeleteFailureAfterRevocationNeverLeavesTheCredentialActive() throws {
         let secrets = MemorySecretRepository()
         let repository = KeychainModelCredentialRepository(secrets: secrets)
         let connection = try makeConnection()
-        try repository.save("fixture-key-value", for: connection)
+        try saveCredential("fixture-key-value", in: repository, for: connection)
         secrets.ignoreDeletes = true
 
         XCTAssertThrowsError(try repository.delete(for: connection)) { error in
@@ -274,7 +467,7 @@ final class ModelCredentialRepositoryTests: XCTestCase {
         let secrets = MemorySecretRepository()
         let repository = KeychainModelCredentialRepository(secrets: secrets)
         let connection = try makeConnection()
-        try repository.save("fixture-key-value", for: connection)
+        try saveCredential("fixture-key-value", in: repository, for: connection)
         let credentialAccount = KeychainModelCredentialRepository.credentialAccount(
             for: connection.credential.id
         )
@@ -302,7 +495,7 @@ final class ModelCredentialRepositoryTests: XCTestCase {
         let secrets = MemorySecretRepository()
         let repository = KeychainModelCredentialRepository(secrets: secrets)
         let connection = try makeConnection()
-        try repository.save("fixture-key-value", for: connection)
+        try saveCredential("fixture-key-value", in: repository, for: connection)
         let credentialAccount = KeychainModelCredentialRepository.credentialAccount(
             for: connection.credential.id
         )
@@ -332,7 +525,7 @@ final class ModelCredentialRepositoryTests: XCTestCase {
         let secret = "signed-simulator-fixture-key"
         defer { try? repository.delete(for: connection) }
 
-        try repository.save(secret, for: connection)
+        try saveCredential(secret, in: repository, for: connection)
         let rawKeychain = KeychainSecretRepository()
         XCTAssertNotEqual(
             try rawKeychain.read(
@@ -358,16 +551,38 @@ final class ModelCredentialRepositoryTests: XCTestCase {
     private func makeConnection(
         id: UUID = UUID(),
         credentialID: UUID = UUID(),
+        credentialVersionID: UUID = UUID(),
         provider: ModelProvider = .openAI,
         baseURL: URL = URL(string: "https://api.openai.com/v1")!
     ) throws -> ModelConnection {
-        try ModelConnection.make(
+        try ModelConnectionTestFixture.makeConnection(
             id: id,
             name: "Test connection",
             provider: provider,
             baseURL: baseURL,
             credentialID: credentialID,
+            credentialVersionID: credentialVersionID,
             selectedModel: "test-model"
         )
+    }
+
+    private func saveCredential(
+        _ secret: String,
+        setupAuthorizationHash: String? = nil,
+        in repository: KeychainModelCredentialRepository,
+        for connection: ModelConnection
+    ) throws {
+        try repository.save(
+            secret,
+            versionProof: versionProof(for: connection),
+            setupAuthorizationHash: setupAuthorizationHash,
+            for: connection
+        )
+    }
+
+    private func versionProof(for connection: ModelConnection) -> String {
+        let compact = connection.credential.versionID.uuidString
+            .replacingOccurrences(of: "-", with: "").lowercased()
+        return compact + compact
     }
 }

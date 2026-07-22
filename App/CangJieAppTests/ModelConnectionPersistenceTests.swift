@@ -62,7 +62,7 @@ final class ModelConnectionPersistenceTests: XCTestCase {
             )
             XCTAssertEqual(replay, first)
 
-            let changed = try ModelConnection.make(
+            let changed = try ModelConnectionTestFixture.makeConnection(
                 id: connectionID,
                 name: "OpenAI changed",
                 provider: .openAI,
@@ -159,6 +159,27 @@ final class ModelConnectionPersistenceTests: XCTestCase {
         }
     }
 
+    func testStoredCredentialVersionMirrorMustMatchTheConnectionPayload() throws {
+        try withTemporaryDatabase { database in
+            let connection = try makeConnection(id: UUID(), credentialID: UUID())
+            _ = try database.storeModelConnection(
+                connection,
+                makeCurrent: true,
+                now: Date(timeIntervalSince1970: 2_021)
+            )
+            try database.queue.write { db in
+                try db.execute(
+                    sql: "UPDATE modelConnection SET credentialVersionID = ? WHERE id = ?",
+                    arguments: [UUID().uuidString, connection.id.uuidString]
+                )
+            }
+
+            XCTAssertThrowsError(try database.currentModelConnection()) { error in
+                XCTAssertEqual(error as? AppDatabaseError, .invalidModelConnection)
+            }
+        }
+    }
+
     func testTamperedConnectionPayloadCannotReplaceTheSelectedModel() throws {
         try withTemporaryDatabase { database in
             let connection = try makeConnection(id: UUID(), credentialID: UUID())
@@ -184,7 +205,7 @@ final class ModelConnectionPersistenceTests: XCTestCase {
 
     func testTamperedCustomConnectionPayloadCannotReplaceTheBaseURLPath() throws {
         try withTemporaryDatabase { database in
-            let connection = try ModelConnection.make(
+            let connection = try ModelConnectionTestFixture.makeConnection(
                 id: UUID(),
                 name: "Custom",
                 provider: .custom,
@@ -444,8 +465,144 @@ final class ModelConnectionPersistenceTests: XCTestCase {
         }
     }
 
+    func testModelConnectionSetupJournalSurvivesReopenAndCommitsAtomically() throws {
+        try withTemporaryDatabasePath { path in
+            let candidate = try ModelConnectionTestFixture.makeSetupCandidate(
+                credentialVersionID: UUID(),
+                secret: "journal-key"
+            )
+            let stagedAt = Date(timeIntervalSince1970: 2_060)
+            let pending: PendingModelConnectionSetup
+            do {
+                let database = try AppDatabase(path: path)
+                pending = try database.stageModelConnectionSetup(
+                    candidate.connection,
+                    credentialBinding: candidate.credentialBinding,
+                    makeCurrent: true,
+                    now: stagedAt
+                ).pending
+            }
+
+            do {
+                let reopened = try AppDatabase(path: path)
+                XCTAssertEqual(try reopened.pendingModelConnectionSetups(), [pending])
+                let stored = try reopened.commitModelConnectionSetup(
+                    candidate.connection,
+                    credentialBinding: candidate.credentialBinding,
+                    expectedMakeCurrent: true,
+                    now: Date(timeIntervalSince1970: 2_061)
+                )
+                XCTAssertEqual(try reopened.currentModelConnection(), stored)
+                XCTAssertTrue(try reopened.pendingModelConnectionSetups().isEmpty)
+            }
+        }
+    }
+
+    func testModelConnectionSetupJournalRejectsAnotherAttemptForTheSameCredentialVersion() throws {
+        try withTemporaryDatabase { database in
+            let connectionID = UUID()
+            let credentialID = UUID()
+            let credentialVersionID = UUID()
+            let staged = try ModelConnectionTestFixture.makeSetupCandidate(
+                id: connectionID,
+                credentialID: credentialID,
+                credentialVersionID: credentialVersionID,
+                secret: "same-key"
+            )
+            let otherAttempt = try ModelConnectionTestFixture.makeSetupCandidate(
+                id: connectionID,
+                credentialID: credentialID,
+                credentialVersionID: credentialVersionID,
+                secret: "same-key"
+            )
+            XCTAssertNotEqual(
+                staged.credentialBinding.versionProof,
+                otherAttempt.credentialBinding.versionProof
+            )
+            _ = try database.stageModelConnectionSetup(
+                staged.connection,
+                credentialBinding: staged.credentialBinding,
+                makeCurrent: false,
+                now: Date(timeIntervalSince1970: 2_062)
+            )
+
+            XCTAssertThrowsError(
+                try database.commitModelConnectionSetup(
+                    staged.connection,
+                    credentialBinding: otherAttempt.credentialBinding,
+                    expectedMakeCurrent: false,
+                    now: Date(timeIntervalSince1970: 2_063)
+                )
+            ) { error in
+                XCTAssertEqual(
+                    error as? AppDatabaseError,
+                    .invalidModelConnectionSetupJournal
+                )
+            }
+            XCTAssertEqual(try database.pendingModelConnectionSetups().count, 1)
+            XCTAssertTrue(try database.listModelConnections().isEmpty)
+        }
+    }
+
+    func testModelConnectionSetupJournalRejectsTamperedPayload() throws {
+        try withTemporaryDatabase { database in
+            let candidate = try ModelConnectionTestFixture.makeSetupCandidate(
+                secret: "tamper-key"
+            )
+            _ = try database.stageModelConnectionSetup(
+                candidate.connection,
+                credentialBinding: candidate.credentialBinding,
+                makeCurrent: false,
+                now: Date(timeIntervalSince1970: 2_064)
+            )
+            try database.queue.write { db in
+                try db.execute(
+                    sql: "UPDATE modelConnectionSetupJournal SET payloadJSON = '{}' WHERE connectionID = ?",
+                    arguments: [candidate.connection.id.uuidString]
+                )
+            }
+
+            XCTAssertThrowsError(try database.pendingModelConnectionSetups()) { error in
+                XCTAssertEqual(
+                    error as? AppDatabaseError,
+                    .invalidModelConnectionSetupJournal
+                )
+            }
+            XCTAssertTrue(try database.listModelConnections().isEmpty)
+        }
+    }
+
+    func testModelConnectionSetupJournalRejectsTamperedCurrentSelectionIntent() throws {
+        try withTemporaryDatabase { database in
+            let candidate = try ModelConnectionTestFixture.makeSetupCandidate(
+                secret: "current-intent-key"
+            )
+            _ = try database.stageModelConnectionSetup(
+                candidate.connection,
+                credentialBinding: candidate.credentialBinding,
+                makeCurrent: false,
+                now: Date(timeIntervalSince1970: 2_065)
+            )
+            try database.queue.write { db in
+                try db.execute(
+                    sql: "UPDATE modelConnectionSetupJournal SET makeCurrent = 1 WHERE connectionID = ?",
+                    arguments: [candidate.connection.id.uuidString]
+                )
+            }
+
+            XCTAssertThrowsError(try database.pendingModelConnectionSetups()) { error in
+                XCTAssertEqual(
+                    error as? AppDatabaseError,
+                    .invalidModelConnectionSetupJournal
+                )
+            }
+            XCTAssertNil(try database.currentModelConnection())
+            XCTAssertTrue(try database.listModelConnections().isEmpty)
+        }
+    }
+
     private func makeConnection(id: UUID, credentialID: UUID) throws -> ModelConnection {
-        try ModelConnection.make(
+        try ModelConnectionTestFixture.makeConnection(
             id: id,
             name: "OpenAI",
             provider: .openAI,

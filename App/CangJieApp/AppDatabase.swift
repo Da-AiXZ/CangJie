@@ -140,6 +140,7 @@ enum AppDatabaseError: Error, Equatable {
     case invalidUITestDatabaseScope
     case invalidAgentRun
     case invalidModelConnection
+    case invalidModelConnectionSetupJournal
     case invalidPendingModelIntent
     case invalidToolReceiptReference
     case idempotencyConflict
@@ -641,7 +642,7 @@ final class AppDatabase {
         try directory.setResourceValues(values)
     }
 
-    private static var migrator: DatabaseMigrator {
+    static var migrator: DatabaseMigrator {
         var migrator = DatabaseMigrator()
         migrator.registerMigration("m0-v1") { db in
             try db.create(table: "draft") { table in
@@ -1268,6 +1269,72 @@ final class AppDatabase {
                 on: "pendingModelIntent",
                 columns: ["conversationID", "createdAt"]
             )
+        }
+        migrator.registerMigration("s2-model-connection-credential-version-v2") { db in
+            try db.execute(
+                sql: "ALTER TABLE modelConnection ADD COLUMN credentialVersionID TEXT NOT NULL DEFAULT ''"
+            )
+            for row in try Row.fetchAll(db, sql: "SELECT * FROM modelConnection") {
+                let migrated = try Self.migrateLegacyModelConnection(row)
+                try db.execute(
+                    sql: """
+                        UPDATE modelConnection
+                        SET credentialVersionID = ?, payloadJSON = ?, payloadHash = ?
+                        WHERE id = ?
+                        """,
+                    arguments: [
+                        migrated.connection.credential.versionID.uuidString,
+                        migrated.payloadJSON,
+                        migrated.payloadHash,
+                        migrated.connection.id.uuidString
+                    ]
+                )
+                guard db.changesCount == 1 else {
+                    throw AppDatabaseError.invalidModelConnection
+                }
+            }
+            let missingVersionCount = try Int.fetchOne(
+                db,
+                sql: "SELECT COUNT(*) FROM modelConnection WHERE credentialVersionID = ''"
+            ) ?? 0
+            guard missingVersionCount == 0 else {
+                throw AppDatabaseError.invalidModelConnection
+            }
+            try db.execute(sql: """
+                CREATE TRIGGER modelConnection_credential_version_insert_guard
+                BEFORE INSERT ON modelConnection
+                WHEN NEW.credentialVersionID = ''
+                BEGIN
+                    SELECT RAISE(ABORT, 'model connection credential version required');
+                END
+                """)
+            try db.execute(sql: """
+                CREATE TRIGGER modelConnection_credential_version_update_guard
+                BEFORE UPDATE OF credentialVersionID ON modelConnection
+                WHEN NEW.credentialVersionID = ''
+                BEGIN
+                    SELECT RAISE(ABORT, 'model connection credential version required');
+                END
+                """)
+        }
+        migrator.registerMigration("s2-model-connection-setup-journal-v1") { db in
+            try db.execute(sql: """
+                CREATE TABLE modelConnectionSetupJournal (
+                    connectionID TEXT PRIMARY KEY NOT NULL,
+                    credentialID TEXT NOT NULL UNIQUE,
+                    credentialVersionID TEXT NOT NULL,
+                    credentialVersionProof TEXT NOT NULL
+                        CHECK (
+                            length(credentialVersionProof) = 64
+                            AND credentialVersionProof NOT GLOB '*[^0-9a-f]*'
+                        ),
+                    makeCurrent INTEGER NOT NULL CHECK (makeCurrent IN (0, 1)),
+                    payloadVersion INTEGER NOT NULL CHECK (payloadVersion = 1),
+                    payloadJSON TEXT NOT NULL,
+                    payloadHash TEXT NOT NULL,
+                    createdAt DOUBLE NOT NULL
+                )
+                """)
         }
         return migrator
     }

@@ -1219,3 +1219,39 @@ Separate method-level Keychain locks do not protect the interval between previou
 ## P-289 Immutable connection replay must not rewrite credentials
 
 SQLite deciding that a connection row is an idempotent replay after Keychain has already been overwritten is too late. A delayed old create request can roll a newer key back even while current-selection replay protection works. For an existing immutable connection, verify that the active bound credential exactly matches the replay input, return the historical metadata, and neither write Keychain nor reapply `makeCurrent`. A differing key is a replay conflict. Legitimate key rotation must use a separate versioned replacement operation with its own identity and recovery contract, not reuse connection creation as an ambiguous update.
+
+## P-290 Published migrations are immutable evidence
+
+Once a migration has shipped, adding a mirrored identity column by editing the old migration destroys the only trustworthy upgrade path and makes tests on fresh databases misleading. Keep the published block byte-for-byte unchanged, add a new ordered migration, and test by running the real historical migrator to the published boundary before inserting the legacy row. Never forge `grdb_migrations` or a reduced imitation schema as upgrade evidence.
+
+## P-291 Credential generation evidence must remain exact across every store
+
+A connection ID or credential ID alone cannot distinguish retries, replacement generations or recovered baselines. Carry the exact generation ID and independent opaque proof through discovery, the selected connection, Keychain payload and marker, SQLite mirrors, setup journal, compensation and request admission. Never regenerate or silently substitute the proof at an adapter boundary, and never derive the proof from the API key.
+
+## P-292 Migration-pending and deletion tombstones are different states
+
+A generic revoked marker cannot safely mean both “resume an interrupted v1-to-v2 migration” and “this credential is being deleted.” If resolve treats every revoked v2 marker as migration permission, a crash during deletion can resurrect a still-active v1 item. Persist an explicit migration-pending state, permit retry only from that state, and keep deletion/failure tombstones non-resurrecting.
+
+## P-293 Revoke the legacy reader before activating its replacement
+
+Activating v2 and only then revoking v1 creates a downgrade window: a crash leaves the old binary able to use credentials without the new generation/proof checks. Prepare and verify the replacement while it is inactive, revoke and verify the legacy marker, then activate the replacement. Every boundary must be resumable or fail closed, and cleanup retries must never make the legacy reader active again.
+
+## P-294 A DB-only journal hash is integrity metadata, not recovery authorization
+
+An unkeyed SQLite hash can detect accidental corruption, but anyone able to rewrite the row can also recompute it. Startup must not use that value alone to authorize a changed selected model, Custom URL path, `makeCurrent` choice or timestamp. Bind a canonical full-candidate authorization hash into Keychain-side activation evidence and require an exact cross-store match before committing pending metadata. The hash must not be derived from the secret.
+
+## P-295 Public capability factories must enforce provenance
+
+Rejecting unsafe selections in one App adapter is insufficient when a public Core factory can still consume the same raw value. Make the safe factory require an opaque capability that only the reviewed boundary can mint, bind it to the exact attempt and credential scope, and keep raw catalog/manual selections rejected. CI should also compile-fail unauthorized construction paths where language access control can prove the boundary.
+
+## P-296 A successful Custom catalog response is not credential authentication
+
+A pinned `200 /models` endpoint may be public, and an unsupported `404` proves only that discovery is unavailable. Neither response proves the supplied key was accepted. Keep ordinary catalog transport separate from an explicit per-attempt authentication operation; only exact authentication evidence bound to the request identity, credential binding, URL and pinned destination may unlock Custom connection persistence. If the shipping transport cannot provide that operation, fail closed.
+
+## P-297 IPv6 public classification needs conservative special-range handling
+
+Treating all of `2000::/3` as public admits reserved protocol assignments such as parts of `2001::/23`. Reject non-global, documentation, transition, benchmark, local and reserved allocations before attaching credentials, including IPv4-mapped forms. Tests need both rejected representatives and accepted boundary addresses so a broad deny rule does not silently block legitimate global unicast.
+
+## P-298 SPI scanning follows build-target membership, not directory names
+
+A directory named `Tests` can still be compiled into production, while a production adapter may live outside `App/`. Derive scan roots from every non-test target in the build manifest, scan nested production files regardless of their names, reject missing or repository-escaping roots, and exclude only actual test target types. Detect both same-line and split-line `@testable`/SPI imports; an allowlist is safe only when the source inventory is complete.

@@ -24,6 +24,8 @@ jobs:
           persist-credentials: false
       - name: Verify App module import contracts
         run: python scripts/tests/test-app-module-import-contract.py
+      - name: Verify production Core SPI import boundary
+        run: python scripts/tests/test-core-spi-import-contract.py
       - name: Install and audit pinned Swift toolchain
         shell: pwsh
         run: ./scripts/windows/install-swift-ci.ps1 -SwiftVersion 6.3.3

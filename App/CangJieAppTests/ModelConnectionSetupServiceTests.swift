@@ -1,10 +1,11 @@
 import CangJieCore
 import Dispatch
 import Foundation
+import GRDB
 import XCTest
 @testable import CangJie
 
-final class ModelConnectionSetupServiceTests: XCTestCase {
+final class ModelConnectionSetupServiceTests: XCTestCase, ModelConnectionSetupServiceTestSupport {
     private final class LockedErrorCapture: @unchecked Sendable {
         private let lock = NSLock()
         private var storedError: Error?
@@ -22,66 +23,6 @@ final class ModelConnectionSetupServiceTests: XCTestCase {
         }
     }
 
-    private final class RecordingCredentialRepository: ModelCredentialRepository {
-        var credentials: [UUID: KeychainBoundModelCredential] = [:]
-        var failSave = false
-        var failNextSaveAfterMutation = false
-        var failDelete = false
-        var suppressResolve = false
-        var blockVerificationResolve = false
-        var events: [String] = []
-        let verificationResolveStarted = DispatchSemaphore(value: 0)
-        let verificationResolveMayFinish = DispatchSemaphore(value: 0)
-        private var resolveCount = 0
-
-        func save(_ secret: String, for connection: ModelConnection) throws {
-            events.append("credential.save")
-            if failSave { throw Failure.save }
-            if let existing = credentials[connection.credential.id],
-               existing.reference != connection.credential {
-                throw ModelCredentialRepositoryError.credentialBindingMismatch
-            }
-            credentials[connection.credential.id] = KeychainBoundModelCredential(
-                reference: connection.credential,
-                secret: secret
-            )
-            if failNextSaveAfterMutation {
-                failNextSaveAfterMutation = false
-                throw Failure.save
-            }
-        }
-
-        func resolve(for connection: ModelConnection) throws -> KeychainBoundModelCredential? {
-            events.append("credential.resolve")
-            resolveCount += 1
-            if blockVerificationResolve, resolveCount == 2 {
-                verificationResolveStarted.signal()
-                verificationResolveMayFinish.wait()
-            }
-            guard !suppressResolve else { return nil }
-            guard let credential = credentials[connection.credential.id] else { return nil }
-            guard credential.reference == connection.credential else {
-                throw ModelCredentialRepositoryError.credentialBindingMismatch
-            }
-            return credential
-        }
-
-        func delete(for connection: ModelConnection) throws {
-            events.append("credential.delete")
-            if failDelete { throw Failure.delete }
-            if let existing = credentials[connection.credential.id],
-               existing.reference != connection.credential {
-                throw ModelCredentialRepositoryError.credentialBindingMismatch
-            }
-            credentials[connection.credential.id] = nil
-        }
-
-        enum Failure: Error, Equatable {
-            case save
-            case delete
-        }
-    }
-
     func testVerifiedCredentialIsSavedBeforeMetadataAndCurrentSelection() throws {
         try withTemporaryDatabase { database in
             let credentials = RecordingCredentialRepository()
@@ -90,10 +31,13 @@ final class ModelConnectionSetupServiceTests: XCTestCase {
                 credentials: credentials
             )
             let connection = try makeConnection()
+            let candidate = try makeCandidate(
+                for: connection,
+                secret: "fixture-key-value"
+            )
 
             let stored = try service.persist(
-                connection: connection,
-                secret: "fixture-key-value",
+                candidate,
                 makeCurrent: true,
                 now: Date(timeIntervalSince1970: 3_000)
             )
@@ -105,9 +49,15 @@ final class ModelConnectionSetupServiceTests: XCTestCase {
                 "fixture-key-value"
             )
             XCTAssertEqual(
+                try credentials.resolve(for: connection)?
+                    .setupAuthorizationHash?.utf8.count,
+                64
+            )
+            XCTAssertEqual(
                 Array(credentials.events.prefix(3)),
                 ["credential.resolve", "credential.save", "credential.resolve"]
             )
+            XCTAssertTrue(try database.pendingModelConnectionSetups().isEmpty)
             XCTAssertNil(try database.latestToolReceipt())
         }
     }
@@ -123,13 +73,80 @@ final class ModelConnectionSetupServiceTests: XCTestCase {
 
             XCTAssertThrowsError(
                 try service.persist(
-                    connection: makeConnection(),
-                    secret: "fixture-key-value",
+                    makeCandidate(secret: "fixture-key-value"),
                     makeCurrent: true
                 )
             )
             XCTAssertTrue(try database.listModelConnections().isEmpty)
             XCTAssertNil(try database.currentModelConnection())
+            XCTAssertTrue(try database.pendingModelConnectionSetups().isEmpty)
+        }
+    }
+
+    func testStaleCandidateVersionIsRejectedBeforeKeychainOrSQLiteMutation() throws {
+        try withTemporaryDatabase { database in
+            let credentials = RecordingCredentialRepository()
+            let service = ModelConnectionSetupService(
+                database: database,
+                credentials: credentials
+            )
+            let connectionID = UUID()
+            let credentialID = UUID()
+            let staleCandidate = try ModelConnectionTestFixture.makeSetupCandidate(
+                id: connectionID,
+                credentialID: credentialID,
+                credentialVersionID: UUID(),
+                secret: "stale-secret"
+            )
+            let currentCandidate = try ModelConnectionTestFixture.makeSetupCandidate(
+                id: connectionID,
+                credentialID: credentialID,
+                credentialVersionID: UUID(),
+                secret: "current-secret"
+            )
+
+            XCTAssertThrowsError(
+                try service.persist(
+                    staleCandidate,
+                    expectedCredentialBinding: currentCandidate.credentialBinding,
+                    makeCurrent: true
+                )
+            ) { error in
+                XCTAssertEqual(
+                    error as? ModelConnectionSetupError,
+                    .candidateBindingMismatch
+                )
+            }
+            XCTAssertTrue(credentials.events.isEmpty)
+            XCTAssertTrue(try database.listModelConnections().isEmpty)
+            XCTAssertNil(try database.currentModelConnection())
+        }
+    }
+
+    func testNonCanonicalCredentialPayloadHashCannotCommitMetadata() throws {
+        try withTemporaryDatabase { database in
+            let credentials = RecordingCredentialRepository()
+            credentials.credentialPayloadHash = String(repeating: "z", count: 64)
+            let service = ModelConnectionSetupService(
+                database: database,
+                credentials: credentials
+            )
+            let candidate = try makeCandidate(secret: "fixture-key-value")
+
+            XCTAssertThrowsError(
+                try service.persist(
+                    candidate,
+                    expectedCredentialBinding: candidate.credentialBinding,
+                    makeCurrent: false
+                )
+            ) { error in
+                XCTAssertEqual(
+                    error as? ModelConnectionSetupError,
+                    .credentialVerificationFailed
+                )
+            }
+            XCTAssertNil(credentials.credentials[candidate.connection.credential.id])
+            XCTAssertTrue(try database.listModelConnections().isEmpty)
         }
     }
 
@@ -137,20 +154,28 @@ final class ModelConnectionSetupServiceTests: XCTestCase {
         try withTemporaryDatabase { database in
             let credentials = RecordingCredentialRepository()
             let connection = try makeConnection()
+            let previousProof = String(repeating: "b", count: 64)
+            let previousAuthorizationHash = String(repeating: "e", count: 64)
             credentials.credentials[connection.credential.id] = KeychainBoundModelCredential(
                 reference: connection.credential,
-                secret: "previous-key"
+                secret: "previous-key",
+                credentialVersionProof: previousProof,
+                credentialPayloadHash: credentials.credentialPayloadHash,
+                setupAuthorizationHash: previousAuthorizationHash
             )
             credentials.failNextSaveAfterMutation = true
             let service = ModelConnectionSetupService(
                 database: database,
                 credentials: credentials
             )
+            let candidate = try makeCandidate(
+                for: connection,
+                secret: "replacement-key"
+            )
 
             XCTAssertThrowsError(
                 try service.persist(
-                    connection: connection,
-                    secret: "replacement-key",
+                    candidate,
                     makeCurrent: false
                 )
             ) { error in
@@ -162,6 +187,14 @@ final class ModelConnectionSetupServiceTests: XCTestCase {
             XCTAssertEqual(
                 credentials.credentials[connection.credential.id]?.secret,
                 "previous-key"
+            )
+            XCTAssertEqual(
+                credentials.credentials[connection.credential.id]?.credentialVersionProof,
+                previousProof
+            )
+            XCTAssertEqual(
+                credentials.credentials[connection.credential.id]?.setupAuthorizationHash,
+                previousAuthorizationHash
             )
             XCTAssertTrue(try database.listModelConnections().isEmpty)
         }
@@ -176,11 +209,14 @@ final class ModelConnectionSetupServiceTests: XCTestCase {
                 database: database,
                 credentials: credentials
             )
+            let candidate = try makeCandidate(
+                for: connection,
+                secret: "fixture-key-value"
+            )
 
             XCTAssertThrowsError(
                 try service.persist(
-                    connection: connection,
-                    secret: "fixture-key-value",
+                    candidate,
                     makeCurrent: false
                 )
             ) { error in
@@ -213,17 +249,23 @@ final class ModelConnectionSetupServiceTests: XCTestCase {
             )
             credentials.credentials[credentialID] = KeychainBoundModelCredential(
                 reference: conflicting.credential,
-                secret: "previous-orphan-key"
+                secret: "previous-orphan-key",
+                credentialVersionProof: String(repeating: "c", count: 64),
+                credentialPayloadHash: String(repeating: "c", count: 64),
+                setupAuthorizationHash: nil
             )
             let service = ModelConnectionSetupService(
                 database: database,
                 credentials: credentials
             )
+            let candidate = try makeCandidate(
+                for: conflicting,
+                secret: "replacement-key"
+            )
 
             XCTAssertThrowsError(
                 try service.persist(
-                    connection: conflicting,
-                    secret: "replacement-key",
+                    candidate,
                     makeCurrent: false,
                     now: Date(timeIntervalSince1970: 3_011)
                 )
@@ -263,11 +305,14 @@ final class ModelConnectionSetupServiceTests: XCTestCase {
                 database: database,
                 credentials: credentials
             )
+            let candidate = try makeCandidate(
+                for: conflicting,
+                secret: "new-key"
+            )
 
             XCTAssertThrowsError(
                 try service.persist(
-                    connection: conflicting,
-                    secret: "new-key",
+                    candidate,
                     makeCurrent: false,
                     now: Date(timeIntervalSince1970: 3_021)
                 )
@@ -285,56 +330,93 @@ final class ModelConnectionSetupServiceTests: XCTestCase {
 
     func testDatabaseFailureRestoresThePreviousCredential() throws {
         try withTemporaryDatabase { database in
+            try installModelConnectionCommitFailure(in: database)
             let credentials = RecordingCredentialRepository()
             let connection = try makeConnection()
+            let previousProof = String(repeating: "d", count: 64)
+            let previousAuthorizationHash = String(repeating: "f", count: 64)
             credentials.credentials[connection.credential.id] = KeychainBoundModelCredential(
                 reference: connection.credential,
-                secret: "previous-key"
+                secret: "previous-key",
+                credentialVersionProof: previousProof,
+                credentialPayloadHash: credentials.credentialPayloadHash,
+                setupAuthorizationHash: previousAuthorizationHash
             )
             let service = ModelConnectionSetupService(
                 database: database,
                 credentials: credentials
             )
+            let candidate = try makeCandidate(
+                for: connection,
+                secret: "replacement-key"
+            )
 
             XCTAssertThrowsError(
                 try service.persist(
-                    connection: connection,
-                    secret: "replacement-key",
+                    candidate,
                     makeCurrent: false,
-                    now: Date(timeIntervalSinceReferenceDate: .infinity)
+                    now: Date(timeIntervalSinceReferenceDate: 0.1)
                 )
             ) { error in
-                XCTAssertEqual(error as? AppDatabaseError, .invalidModelConnection)
+                XCTAssertNotNil(error as? DatabaseError)
             }
             XCTAssertEqual(
                 credentials.credentials[connection.credential.id]?.secret,
                 "previous-key"
             )
+            XCTAssertEqual(
+                credentials.credentials[connection.credential.id]?.credentialVersionProof,
+                previousProof
+            )
+            XCTAssertEqual(
+                credentials.credentials[connection.credential.id]?.setupAuthorizationHash,
+                previousAuthorizationHash
+            )
+            XCTAssertEqual(
+                credentials.events,
+                [
+                    "credential.resolve", "credential.save", "credential.resolve",
+                    "credential.save", "credential.resolve"
+                ]
+            )
             XCTAssertTrue(try database.listModelConnections().isEmpty)
+            XCTAssertTrue(try database.pendingModelConnectionSetups().isEmpty)
         }
     }
 
     func testDatabaseFailureDeletesANewCredentialWithoutMetadata() throws {
         try withTemporaryDatabase { database in
+            try installModelConnectionCommitFailure(in: database)
             let credentials = RecordingCredentialRepository()
             let connection = try makeConnection()
             let service = ModelConnectionSetupService(
                 database: database,
                 credentials: credentials
             )
+            let candidate = try makeCandidate(
+                for: connection,
+                secret: "new-key"
+            )
 
             XCTAssertThrowsError(
                 try service.persist(
-                    connection: connection,
-                    secret: "new-key",
+                    candidate,
                     makeCurrent: false,
-                    now: Date(timeIntervalSinceReferenceDate: .infinity)
+                    now: Date(timeIntervalSince1970: 3_022.125)
                 )
             ) { error in
-                XCTAssertEqual(error as? AppDatabaseError, .invalidModelConnection)
+                XCTAssertNotNil(error as? DatabaseError)
             }
             XCTAssertNil(credentials.credentials[connection.credential.id])
+            XCTAssertEqual(
+                credentials.events,
+                [
+                    "credential.resolve", "credential.save", "credential.resolve",
+                    "credential.delete", "credential.resolve"
+                ]
+            )
             XCTAssertTrue(try database.listModelConnections().isEmpty)
+            XCTAssertTrue(try database.pendingModelConnectionSetups().isEmpty)
         }
     }
 
@@ -347,23 +429,28 @@ final class ModelConnectionSetupServiceTests: XCTestCase {
             )
             let first = try makeConnection()
             let second = try makeConnection()
+            let firstCandidate = try makeCandidate(
+                for: first,
+                secret: "first-key"
+            )
+            let secondCandidate = try makeCandidate(
+                for: second,
+                secret: "second-key"
+            )
             _ = try service.persist(
-                connection: first,
-                secret: "first-key",
+                firstCandidate,
                 makeCurrent: true,
                 now: Date(timeIntervalSince1970: 3_030)
             )
             let selected = try service.persist(
-                connection: second,
-                secret: "second-key",
+                secondCandidate,
                 makeCurrent: true,
                 now: Date(timeIntervalSince1970: 3_031)
             )
             let eventsBeforeReplay = credentials.events.count
 
             _ = try service.persist(
-                connection: first,
-                secret: "first-key",
+                firstCandidate,
                 makeCurrent: true,
                 now: Date(timeIntervalSince1970: 3_032)
             )
@@ -384,18 +471,24 @@ final class ModelConnectionSetupServiceTests: XCTestCase {
                 credentials: credentials
             )
             let connection = try makeConnection()
+            let candidate = try makeCandidate(
+                for: connection,
+                secret: "original-key"
+            )
             let stored = try service.persist(
-                connection: connection,
-                secret: "original-key",
+                candidate,
                 makeCurrent: true,
                 now: Date(timeIntervalSince1970: 3_040)
             )
-            try credentials.save("newer-key", for: connection)
+            try credentials.save(
+                "newer-key",
+                versionProof: candidate.credentialBinding.versionProof,
+                for: connection
+            )
 
             XCTAssertThrowsError(
                 try service.persist(
-                    connection: connection,
-                    secret: "original-key",
+                    candidate,
                     makeCurrent: true,
                     now: Date(timeIntervalSince1970: 3_041)
                 )
@@ -413,6 +506,53 @@ final class ModelConnectionSetupServiceTests: XCTestCase {
         }
     }
 
+    func testLateReplayRequiresTheOriginalCredentialActivationProof() throws {
+        try withTemporaryDatabase { database in
+            let credentials = RecordingCredentialRepository()
+            let service = ModelConnectionSetupService(
+                database: database,
+                credentials: credentials
+            )
+            let connection = try makeConnection()
+            let originalCandidate = try makeCandidate(
+                for: connection,
+                secret: "shared-key"
+            )
+            let replayFromAnotherAttempt = try makeCandidate(
+                for: connection,
+                secret: "shared-key"
+            )
+            XCTAssertNotEqual(
+                originalCandidate.credentialBinding.versionProof,
+                replayFromAnotherAttempt.credentialBinding.versionProof
+            )
+            let stored = try service.persist(
+                originalCandidate,
+                makeCurrent: true,
+                now: Date(timeIntervalSince1970: 3_042)
+            )
+
+            XCTAssertThrowsError(
+                try service.persist(
+                    replayFromAnotherAttempt,
+                    makeCurrent: true,
+                    now: Date(timeIntervalSince1970: 3_043)
+                )
+            ) { error in
+                XCTAssertEqual(
+                    error as? ModelConnectionSetupError,
+                    .credentialReplayConflict
+                )
+            }
+
+            XCTAssertEqual(try database.currentModelConnection(), stored)
+            XCTAssertEqual(
+                try credentials.resolve(for: connection)?.credentialVersionProof,
+                originalCandidate.credentialBinding.versionProof
+            )
+        }
+    }
+
     func testSetupHoldsTheSharedCredentialCoordinatorAcrossVerification() throws {
         try withTemporaryDatabase { database in
             let credentials = RecordingCredentialRepository()
@@ -427,12 +567,15 @@ final class ModelConnectionSetupServiceTests: XCTestCase {
             let competitorAttempted = DispatchSemaphore(value: 0)
             let competitorEntered = DispatchSemaphore(value: 0)
             let setupError = LockedErrorCapture()
+            let candidate = try makeCandidate(
+                for: connection,
+                secret: "fixture-key-value"
+            )
 
             DispatchQueue.global(qos: .userInitiated).async {
                 do {
                     _ = try service.persist(
-                        connection: connection,
-                        secret: "fixture-key-value",
+                        candidate,
                         makeCurrent: false
                     )
                 } catch {
@@ -480,11 +623,11 @@ final class ModelConnectionSetupServiceTests: XCTestCase {
                 database: database,
                 credentials: credentials
             )
+            let candidate = try makeCandidate(secret: "fixture-key-value")
 
             XCTAssertThrowsError(
                 try service.persist(
-                    connection: makeConnection(),
-                    secret: "fixture-key-value",
+                    candidate,
                     makeCurrent: false
                 )
             ) { error in
@@ -497,30 +640,4 @@ final class ModelConnectionSetupServiceTests: XCTestCase {
         }
     }
 
-    private func makeConnection(
-        id: UUID = UUID(),
-        credentialID: UUID = UUID()
-    ) throws -> ModelConnection {
-        try ModelConnection.make(
-            id: id,
-            name: "Setup test",
-            provider: .openAI,
-            baseURL: URL(string: "https://api.openai.com/v1")!,
-            credentialID: credentialID,
-            selectedModel: "test-model"
-        )
-    }
-
-    private func withTemporaryDatabase(_ body: (AppDatabase) throws -> Void) throws {
-        let directory = FileManager.default.temporaryDirectory
-            .appendingPathComponent(UUID().uuidString, isDirectory: true)
-        try FileManager.default.createDirectory(
-            at: directory,
-            withIntermediateDirectories: true
-        )
-        defer { try? FileManager.default.removeItem(at: directory) }
-        try body(
-            AppDatabase(path: directory.appendingPathComponent("test.sqlite").path)
-        )
-    }
 }

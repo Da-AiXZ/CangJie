@@ -183,6 +183,16 @@ final class AppViewModel: ObservableObject {
         } else {
             do {
                 let resolved = try database ?? databaseFactory()
+                let modelConnectionRecoveryError: String?
+                do {
+                    try ModelConnectionSetupService(
+                        database: resolved,
+                        credentials: KeychainModelCredentialRepository(secrets: keychain)
+                    ).reconcilePendingSetups()
+                    modelConnectionRecoveryError = nil
+                } catch {
+                    modelConnectionRecoveryError = "Model connection recovery pending (MODEL-CONNECTION-RECOVERY)"
+                }
                 let workspace = try resolved.restoreS1ConversationWorkspace()
                 let projects = try resolved.listProjects()
                 let progressResult: ([UUID: String], String?)
@@ -215,7 +225,7 @@ final class AppViewModel: ObservableObject {
                     progressResult.0,
                     readableContent,
                     restoredNotice,
-                    progressResult.1
+                    modelConnectionRecoveryError ?? progressResult.1
                 )
             } catch {
                 databaseState = (nil, emptyWorkspace, [], [:], nil, nil, "SQLite initialization failed (DB-INIT)")

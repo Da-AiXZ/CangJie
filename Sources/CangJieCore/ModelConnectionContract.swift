@@ -112,19 +112,22 @@ public struct ModelCredentialReference: Hashable, Codable, Sendable {
     public let provider: ModelProvider
     public let allowedHost: String
     public let allowedPort: Int?
+    public let versionID: UUID
 
     init(
         id: UUID,
         connectionID: UUID,
         provider: ModelProvider,
         allowedHost: String,
-        allowedPort: Int? = nil
+        allowedPort: Int? = nil,
+        versionID: UUID
     ) {
         self.id = id
         self.connectionID = connectionID
         self.provider = provider
         self.allowedHost = allowedHost
         self.allowedPort = allowedPort
+        self.versionID = versionID
     }
 }
 
@@ -138,11 +141,15 @@ public enum ModelConnectionError: Error, Equatable, Sendable {
     case unsafeBaseURL
     case providerBaseURLMismatch
     case credentialBindingMismatch
+    case unverifiedModelSelection
 }
 
 public struct ModelConnection: Identifiable, Equatable, Codable, Sendable {
     public static let maximumNameUTF8Bytes = 256
     public static let maximumModelIdentifierUTF8Bytes = 1_024
+    public static let maximumBaseURLUTF8Bytes = 4_096
+    public static let maximumBaseURLHostUTF8Bytes = 253
+    public static let maximumBaseURLPathUTF8Bytes = 2_048
 
     public let id: UUID
     public let name: String
@@ -176,12 +183,13 @@ public struct ModelConnection: Identifiable, Equatable, Codable, Sendable {
         self.selectedModel = selectedModel
     }
 
-    public static func make(
+    static func make(
         id: UUID,
         name rawName: String,
         provider: ModelProvider,
         baseURL: URL,
         credentialID: UUID,
+        credentialVersionID: UUID = UUID(),
         selectedModel rawSelectedModel: String
     ) throws -> ModelConnection {
         let fields = try validatedFields(
@@ -195,7 +203,8 @@ public struct ModelConnection: Identifiable, Equatable, Codable, Sendable {
             connectionID: id,
             provider: provider,
             allowedHost: try validatedHost(fields.baseURL),
-            allowedPort: validatedPort(fields.baseURL)
+            allowedPort: validatedPort(fields.baseURL),
+            versionID: credentialVersionID
         )
 
         return ModelConnection(
@@ -205,6 +214,44 @@ public struct ModelConnection: Identifiable, Equatable, Codable, Sendable {
             baseURL: fields.baseURL,
             credential: credential,
             selectedModel: fields.selectedModel
+        )
+    }
+
+    public static func make(
+        name rawName: String,
+        selection: ModelSelection
+    ) throws -> ModelConnection {
+        switch selection.source {
+        case .discovered, .publicCatalogAfterCredentialProbe:
+            break
+        case .customCatalogWithoutCredentialProbe,
+             .manualAfterUnsupportedDiscovery:
+            throw ModelConnectionError.unverifiedModelSelection
+        }
+        return try make(
+            id: selection.connectionID,
+            name: rawName,
+            provider: selection.provider,
+            baseURL: selection.baseURL,
+            credentialID: selection.credentialBinding.credentialID,
+            credentialVersionID: selection.credentialBinding.versionID,
+            selectedModel: selection.modelID
+        )
+    }
+
+    public static func make(
+        name rawName: String,
+        credentialProvenSelection: CredentialProvenCustomModelSelection
+    ) throws -> ModelConnection {
+        let selection = credentialProvenSelection.selection
+        return try make(
+            id: selection.connectionID,
+            name: rawName,
+            provider: selection.provider,
+            baseURL: selection.baseURL,
+            credentialID: selection.credentialBinding.credentialID,
+            credentialVersionID: selection.credentialBinding.versionID,
+            selectedModel: selection.modelID
         )
     }
 
@@ -251,11 +298,19 @@ public struct ModelConnection: Identifiable, Equatable, Codable, Sendable {
     private static func isSafeBaseURL(_ url: URL) -> Bool {
         guard let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
               components.scheme?.lowercased() == "https",
-              components.host?.isEmpty == false,
+              let host = components.host,
+              !host.isEmpty,
               components.user == nil,
               components.password == nil,
               components.query == nil,
-              components.fragment == nil else {
+              components.fragment == nil,
+              url.absoluteString.utf8.count <= maximumBaseURLUTF8Bytes,
+              host.utf8.count <= maximumBaseURLHostUTF8Bytes,
+              components.percentEncodedPath.utf8.count <= maximumBaseURLPathUTF8Bytes else {
+            return false
+        }
+        if let port = components.port,
+           !(1...65_535).contains(port) {
             return false
         }
         return true
@@ -293,17 +348,10 @@ public struct ModelConnection: Identifiable, Equatable, Codable, Sendable {
             throw ModelConnectionError.unsafeBaseURL
         }
 
-        let storedBaseURL: URL
-        if provider == .custom {
-            storedBaseURL = baseURL
-        } else {
-            let connector = ProviderConnectorRegistry.connector(for: provider)
-            guard let expectedBaseURL = connector.defaultBaseURL,
-                  equivalentEndpoint(baseURL, expectedBaseURL) else {
-                throw ModelConnectionError.providerBaseURLMismatch
-            }
-            storedBaseURL = expectedBaseURL
-        }
+        let storedBaseURL = try validatedBaseURL(
+            provider: provider,
+            baseURL: baseURL
+        )
 
         return (name, storedBaseURL, selectedModel)
     }
@@ -326,7 +374,26 @@ public struct ModelConnection: Identifiable, Equatable, Codable, Sendable {
         URLComponents(url: url, resolvingAgainstBaseURL: false)?.port
     }
 
-    private static func containsUnsafeDisplayControl(_ text: String) -> Bool {
+    static func validatedBaseURL(
+        provider: ModelProvider,
+        baseURL: URL
+    ) throws -> URL {
+        guard isSafeBaseURL(baseURL) else {
+            throw ModelConnectionError.unsafeBaseURL
+        }
+        guard provider != .custom else {
+            return baseURL
+        }
+
+        let connector = ProviderConnectorRegistry.connector(for: provider)
+        guard let expectedBaseURL = connector.defaultBaseURL,
+              equivalentEndpoint(baseURL, expectedBaseURL) else {
+            throw ModelConnectionError.providerBaseURLMismatch
+        }
+        return expectedBaseURL
+    }
+
+    static func containsUnsafeDisplayControl(_ text: String) -> Bool {
         text.unicodeScalars.contains { scalar in
             if CharacterSet.controlCharacters.contains(scalar) {
                 return true
@@ -425,9 +492,81 @@ public struct PendingModelIntent: Identifiable, Equatable, Codable, Sendable {
     }
 }
 
+public struct ModelCredentialVerification: Equatable, Sendable {
+    public let credentialID: UUID
+    public let connectionID: UUID
+    public let provider: ModelProvider
+    public let allowedHost: String
+    public let allowedPort: Int?
+    public let versionID: UUID
+    public let credentialVersionProof: String
+    public let credentialPayloadHash: String
+    public let setupAuthorizationHash: String?
+
+    @_spi(ModelCredentialVerification)
+    public init(
+        reference: ModelCredentialReference,
+        credentialVersionProof: String,
+        credentialPayloadHash: String,
+        setupAuthorizationHash: String? = nil
+    ) throws {
+        guard Self.isCanonicalSHA256Hex(credentialVersionProof),
+              Self.isCanonicalSHA256Hex(credentialPayloadHash),
+              setupAuthorizationHash.map(Self.isCanonicalSHA256Hex) ?? true else {
+            throw ModelConnectionError.credentialBindingMismatch
+        }
+        credentialID = reference.id
+        connectionID = reference.connectionID
+        provider = reference.provider
+        allowedHost = reference.allowedHost
+        allowedPort = reference.allowedPort
+        versionID = reference.versionID
+        self.credentialVersionProof = credentialVersionProof
+        self.credentialPayloadHash = credentialPayloadHash
+        self.setupAuthorizationHash = setupAuthorizationHash
+    }
+
+    private static func isCanonicalSHA256Hex(_ value: String) -> Bool {
+        value.utf8.count == 64
+            && value.unicodeScalars.allSatisfy { scalar in
+                switch scalar.value {
+                case 0x30...0x39, 0x61...0x66:
+                    return true
+                default:
+                    return false
+                }
+            }
+    }
+}
+
+public struct VerifiedModelConnection: Equatable, Sendable {
+    public let connection: ModelConnection
+    public let credentialVerification: ModelCredentialVerification
+
+    @_spi(ModelCredentialVerification)
+    public init(
+        connection: ModelConnection,
+        credentialVerification: ModelCredentialVerification
+    ) throws {
+        guard credentialVerification.credentialID == connection.credential.id,
+              credentialVerification.connectionID == connection.id,
+              credentialVerification.provider == connection.provider,
+              credentialVerification.allowedHost == connection.credential.allowedHost,
+              credentialVerification.allowedPort == connection.credential.allowedPort,
+              credentialVerification.versionID == connection.credential.versionID else {
+            throw ModelConnectionError.credentialBindingMismatch
+        }
+        self.connection = connection
+        self.credentialVerification = credentialVerification
+    }
+}
+
 public enum ModelRequestAdmissionDecision: Equatable, Sendable {
     case modelConnectionRequired(PendingModelIntent)
-    case prepareProviderRequest(intent: PendingModelIntent, connection: ModelConnection)
+    case prepareProviderRequest(
+        intent: PendingModelIntent,
+        verifiedConnection: VerifiedModelConnection
+    )
 }
 
 public enum ModelRequestAdmission {
@@ -437,7 +576,7 @@ public enum ModelRequestAdmission {
         conversationID: UUID,
         projectID: UUID? = nil,
         branchID: UUID? = nil,
-        currentConnection: ModelConnection?,
+        currentConnection: VerifiedModelConnection?,
         now: Date
     ) throws -> ModelRequestAdmissionDecision {
         let intent = try PendingModelIntent(
@@ -454,14 +593,14 @@ public enum ModelRequestAdmission {
         }
         return .prepareProviderRequest(
             intent: intent,
-            connection: currentConnection
+            verifiedConnection: currentConnection
         )
     }
 
     public static func resume(
         _ intent: PendingModelIntent,
-        with connection: ModelConnection
+        with connection: VerifiedModelConnection
     ) -> ModelRequestAdmissionDecision {
-        .prepareProviderRequest(intent: intent, connection: connection)
+        .prepareProviderRequest(intent: intent, verifiedConnection: connection)
     }
 }

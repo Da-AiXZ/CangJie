@@ -9,6 +9,23 @@ struct StoredModelConnection: Equatable {
     let updatedAt: Date
 }
 
+private struct LegacyModelCredentialReference: Decodable {
+    let id: UUID
+    let connectionID: UUID
+    let provider: ModelProvider
+    let allowedHost: String
+    let allowedPort: Int?
+}
+
+private struct LegacyModelConnectionPayload: Decodable {
+    let id: UUID
+    let name: String
+    let provider: ModelProvider
+    let baseURL: URL
+    let credential: LegacyModelCredentialReference
+    let selectedModel: String
+}
+
 extension AppDatabase {
     private enum IdentityTable {
         case conversation
@@ -27,69 +44,84 @@ extension AppDatabase {
         now: Date = Date()
     ) throws -> StoredModelConnection {
         try queue.write { db in
-            guard now.timeIntervalSinceReferenceDate.isFinite else {
-                throw AppDatabaseError.invalidModelConnection
-            }
-            if let existingRow = try Row.fetchOne(
-                db,
-                sql: "SELECT * FROM modelConnection WHERE id = ?",
-                arguments: [connection.id.uuidString]
-            ) {
-                let existing = try Self.decodeStoredModelConnection(existingRow)
-                guard existing.connection == connection else {
-                    throw AppDatabaseError.idempotencyConflict
-                }
-                // Replaying the immutable save must not overwrite a newer,
-                // explicit current-connection selection. Call the dedicated
-                // selection method for a new user choice.
-                return existing
-            }
-
-            let reusedCredentialCount = try Int.fetchOne(
-                db,
-                sql: "SELECT COUNT(*) FROM modelConnection WHERE credentialID = ?",
-                arguments: [connection.credential.id.uuidString]
-            ) ?? 0
-            guard reusedCredentialCount == 0 else {
-                throw AppDatabaseError.idempotencyConflict
-            }
-
-            let payloadJSON = try Self.encodeModelConnection(connection)
-            let payloadHash = Self.payloadHash(payloadJSON)
-            try db.execute(
-                sql: """
-                    INSERT INTO modelConnection (
-                        id, credentialID, credentialProvider, credentialAllowedHost,
-                        credentialAllowedPort, payloadVersion, payloadJSON, payloadHash,
-                        createdAt, updatedAt
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """,
-                arguments: [
-                    connection.id.uuidString,
-                    connection.credential.id.uuidString,
-                    connection.credential.provider.rawValue,
-                    connection.credential.allowedHost,
-                    connection.credential.allowedPort,
-                    Self.modelConnectionPayloadVersion,
-                    payloadJSON,
-                    payloadHash,
-                    now.timeIntervalSince1970,
-                    now.timeIntervalSince1970
-                ]
-            )
-            if makeCurrent {
-                try Self.selectCurrentModelConnection(
-                    id: connection.id,
-                    now: now,
-                    in: db
-                )
-            }
-            return StoredModelConnection(
-                connection: connection,
-                createdAt: now,
-                updatedAt: now
+            try Self.storeModelConnection(
+                connection,
+                makeCurrent: makeCurrent,
+                now: now,
+                in: db
             )
         }
+    }
+
+    static func storeModelConnection(
+        _ connection: ModelConnection,
+        makeCurrent: Bool,
+        now: Date,
+        in db: Database
+    ) throws -> StoredModelConnection {
+        guard now.timeIntervalSinceReferenceDate.isFinite else {
+            throw AppDatabaseError.invalidModelConnection
+        }
+        if let existingRow = try Row.fetchOne(
+            db,
+            sql: "SELECT * FROM modelConnection WHERE id = ?",
+            arguments: [connection.id.uuidString]
+        ) {
+            let existing = try Self.decodeStoredModelConnection(existingRow)
+            guard existing.connection == connection else {
+                throw AppDatabaseError.idempotencyConflict
+            }
+            // Replaying the immutable save must not overwrite a newer,
+            // explicit current-connection selection. Call the dedicated
+            // selection method for a new user choice.
+            return existing
+        }
+
+        let reusedCredentialCount = try Int.fetchOne(
+            db,
+            sql: "SELECT COUNT(*) FROM modelConnection WHERE credentialID = ?",
+            arguments: [connection.credential.id.uuidString]
+        ) ?? 0
+        guard reusedCredentialCount == 0 else {
+            throw AppDatabaseError.idempotencyConflict
+        }
+
+        let payloadJSON = try Self.encodeModelConnection(connection)
+        let payloadHash = Self.payloadHash(payloadJSON)
+        try db.execute(
+            sql: """
+                INSERT INTO modelConnection (
+                    id, credentialID, credentialVersionID, credentialProvider,
+                    credentialAllowedHost, credentialAllowedPort, payloadVersion,
+                    payloadJSON, payloadHash, createdAt, updatedAt
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+            arguments: [
+                connection.id.uuidString,
+                connection.credential.id.uuidString,
+                connection.credential.versionID.uuidString,
+                connection.credential.provider.rawValue,
+                connection.credential.allowedHost,
+                connection.credential.allowedPort,
+                Self.modelConnectionPayloadVersion,
+                payloadJSON,
+                payloadHash,
+                now.timeIntervalSince1970,
+                now.timeIntervalSince1970
+            ]
+        )
+        if makeCurrent {
+            try Self.selectCurrentModelConnection(
+                id: connection.id,
+                now: now,
+                in: db
+            )
+        }
+        return StoredModelConnection(
+            connection: connection,
+            createdAt: now,
+            updatedAt: now
+        )
     }
 
     func listModelConnections() throws -> [StoredModelConnection] {
@@ -204,7 +236,7 @@ extension AppDatabase {
         }
     }
 
-    private static func encodeModelConnection(_ connection: ModelConnection) throws -> String {
+    static func encodeModelConnection(_ connection: ModelConnection) throws -> String {
         do {
             return try encodeJSON(connection)
         } catch {
@@ -231,7 +263,7 @@ extension AppDatabase {
         return json
     }
 
-    private static func decodeJSON<Value: Decodable>(
+    static func decodeJSON<Value: Decodable>(
         _ type: Value.Type,
         from data: Data
     ) throws -> Value {
@@ -240,15 +272,81 @@ extension AppDatabase {
         return try decoder.decode(type, from: data)
     }
 
-    private static func payloadHash(_ payloadJSON: String) -> String {
+    static func payloadHash(_ payloadJSON: String) -> String {
         SHA256.hash(data: Data(payloadJSON.utf8))
             .map { String(format: "%02x", $0) }
             .joined()
     }
 
+    static func migrateLegacyModelConnection(
+        _ row: Row
+    ) throws -> (connection: ModelConnection, payloadJSON: String, payloadHash: String) {
+        let rowID: String = row["id"]
+        let credentialID: String = row["credentialID"]
+        let credentialProvider: String = row["credentialProvider"]
+        let credentialAllowedHost: String = row["credentialAllowedHost"]
+        let credentialAllowedPort: Int? = row["credentialAllowedPort"]
+        let payloadVersion: Int = row["payloadVersion"]
+        let payloadJSON: String = row["payloadJSON"]
+        let storedPayloadHash: String = row["payloadHash"]
+        let createdAtValue: Double = row["createdAt"]
+        let updatedAtValue: Double = row["updatedAt"]
+
+        guard payloadVersion == modelConnectionPayloadVersion,
+              storedPayloadHash == payloadHash(payloadJSON),
+              createdAtValue.isFinite,
+              updatedAtValue.isFinite,
+              let data = payloadJSON.data(using: .utf8),
+              let legacy = try? decodeJSON(
+                LegacyModelConnectionPayload.self,
+                from: data
+              ),
+              legacy.id.uuidString == rowID,
+              legacy.credential.id.uuidString == credentialID,
+              legacy.credential.connectionID == legacy.id,
+              legacy.credential.provider == legacy.provider,
+              legacy.credential.provider.rawValue == credentialProvider,
+              legacy.credential.allowedHost == credentialAllowedHost,
+              legacy.credential.allowedPort == credentialAllowedPort else {
+            throw AppDatabaseError.invalidModelConnection
+        }
+
+        guard let rawObject = try? JSONSerialization.jsonObject(with: data),
+              var object = rawObject as? [String: Any],
+              var credential = object["credential"] as? [String: Any] else {
+            throw AppDatabaseError.invalidModelConnection
+        }
+        credential["versionID"] = legacy.credential.id.uuidString
+        object["credential"] = credential
+        guard let migratedData = try? JSONSerialization.data(
+            withJSONObject: object,
+            options: [.sortedKeys, .withoutEscapingSlashes]
+        ),
+              let connection = try? decodeJSON(
+                ModelConnection.self,
+                from: migratedData
+              ),
+              connection.id == legacy.id,
+              connection.name == legacy.name,
+              connection.provider == legacy.provider,
+              connection.baseURL == legacy.baseURL,
+              connection.selectedModel == legacy.selectedModel,
+              connection.credential.allowedHost == legacy.credential.allowedHost,
+              connection.credential.allowedPort == legacy.credential.allowedPort else {
+            throw AppDatabaseError.invalidModelConnection
+        }
+        let migratedPayload = try encodeModelConnection(connection)
+        return (
+            connection: connection,
+            payloadJSON: migratedPayload,
+            payloadHash: payloadHash(migratedPayload)
+        )
+    }
+
     private static func decodeStoredModelConnection(_ row: Row) throws -> StoredModelConnection {
         let rowID: String = row["id"]
         let credentialID: String = row["credentialID"]
+        let credentialVersionID: String = row["credentialVersionID"]
         let credentialProvider: String = row["credentialProvider"]
         let credentialAllowedHost: String = row["credentialAllowedHost"]
         let credentialAllowedPort: Int? = row["credentialAllowedPort"]
@@ -266,6 +364,7 @@ extension AppDatabase {
               let connection = try? decodeJSON(ModelConnection.self, from: data),
               connection.id.uuidString == rowID,
               connection.credential.id.uuidString == credentialID,
+              connection.credential.versionID.uuidString == credentialVersionID,
               connection.credential.provider.rawValue == credentialProvider,
               connection.credential.allowedHost == credentialAllowedHost,
               connection.credential.allowedPort == credentialAllowedPort else {
