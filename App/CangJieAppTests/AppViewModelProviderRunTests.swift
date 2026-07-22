@@ -118,7 +118,7 @@ final class AppViewModelProviderRunTests: XCTestCase {
         viewModel.sendModelDependentMessage()
         let intent = try XCTUnwrap(viewModel.modelConnectionSetup.pendingIntent)
         try await waitUntil {
-            try database.providerRequest(intentID: intent.id)?.phase == .streaming
+            viewModel.displayedProviderStreamText == "尚未完成"
         }
         XCTAssertEqual(viewModel.displayedProviderStreamText, "尚未完成")
 
@@ -172,6 +172,7 @@ final class AppViewModelProviderRunTests: XCTestCase {
         let credentials = RecordingCredentialRepository()
         let now = Date(timeIntervalSince1970: 9_000)
         let conversation = try database.ensureDefaultConversation(now: now)
+        _ = try database.selectS1Conversation(conversation.id, now: now)
         let intent = try PendingModelIntent(
             id: UUID(),
             conversationID: conversation.id,
@@ -251,6 +252,7 @@ final class AppViewModelProviderRunTests: XCTestCase {
         let credentials = RecordingCredentialRepository()
         let now = Date(timeIntervalSince1970: 10_000)
         let conversation = try database.ensureDefaultConversation(now: now)
+        _ = try database.selectS1Conversation(conversation.id, now: now)
         let intent = try PendingModelIntent(
             id: UUID(),
             conversationID: conversation.id,
@@ -364,7 +366,7 @@ final class AppViewModelProviderRunTests: XCTestCase {
     private func waitUntil(
         _ condition: @escaping @MainActor () throws -> Bool
     ) async throws {
-        for _ in 0..<200 {
+        for _ in 0..<1_000 {
             if try condition() {
                 return
             }

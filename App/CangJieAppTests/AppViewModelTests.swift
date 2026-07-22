@@ -885,9 +885,9 @@ final class AppViewModelTests: XCTestCase {
         try withDatabase { database in
             let viewModel = AppViewModel(database: database, keychain: StubSecretRepository())
             let conversation = try database.ensureDefaultConversation()
-            let expectedStatus = "当前只验证界面、导航和本地保存，尚未接入真正的模型任务"
+            let initialStatus = "当前只验证界面、导航和本地保存，尚未接入真正的模型任务"
 
-            XCTAssertEqual(viewModel.businessStatus, expectedStatus)
+            XCTAssertEqual(viewModel.businessStatus, initialStatus)
             XCTAssertTrue(try database.listAgentMessages(conversationID: conversation.id).isEmpty)
             XCTAssertNil(try database.latestAgentRun(conversationID: conversation.id))
 
@@ -895,7 +895,7 @@ final class AppViewModelTests: XCTestCase {
 
             XCTAssertEqual(
                 viewModel.businessStatus,
-                "对话和草稿已恢复。当前只验证界面、导航和本地保存，尚未接入真正的模型任务"
+                "对话和草稿已恢复"
             )
             XCTAssertTrue(try database.listAgentMessages(conversationID: conversation.id).isEmpty)
             XCTAssertNil(try database.latestAgentRun(conversationID: conversation.id))

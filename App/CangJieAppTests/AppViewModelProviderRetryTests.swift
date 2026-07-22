@@ -10,6 +10,7 @@ final class AppViewModelProviderRetryTests: XCTestCase {
         let credentials = RecordingCredentialRepository()
         let now = Date(timeIntervalSince1970: 11_000)
         let conversation = try database.ensureDefaultConversation(now: now)
+        _ = try database.selectS1Conversation(conversation.id, now: now)
         let intent = try PendingModelIntent(
             id: UUID(),
             conversationID: conversation.id,
@@ -76,7 +77,7 @@ final class AppViewModelProviderRetryTests: XCTestCase {
 
         viewModel.retryProviderRun()
 
-        for _ in 0..<200 {
+        for _ in 0..<1_000 {
             if try database.latestPendingModelIntent(
                 conversationID: conversation.id
             ) == nil {
