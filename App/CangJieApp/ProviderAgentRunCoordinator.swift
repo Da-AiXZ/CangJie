@@ -58,15 +58,20 @@ final class ProviderAgentRunCoordinator {
     ) async throws -> ProviderRunCompletion {
         var request: ProviderRequestSnapshot
         if let existing = try database.providerRequest(intentID: intent.id) {
-            try Self.validateExisting(
-                existing,
-                intent: intent,
-                verifiedConnection: verifiedConnection
-            )
             switch ProviderRequestRecovery.nextAction(for: existing) {
             case .sendPersistedRequest:
+                try Self.validateExisting(
+                    existing,
+                    intent: intent,
+                    verifiedConnection: verifiedConnection
+                )
                 request = existing
             case .continueFromDurableResponse:
+                try Self.validateExisting(
+                    existing,
+                    intent: intent,
+                    verifiedConnection: verifiedConnection
+                )
                 return ProviderRunCompletion(
                     request: existing,
                     response: try response(for: existing)
@@ -74,7 +79,23 @@ final class ProviderAgentRunCoordinator {
             case .reconcileUnknownOutcome:
                 throw ProviderAgentRunError.requiresReconciliation
             case .terminal:
-                throw ProviderAgentRunError.terminalRequest
+                guard existing.phase == .failed
+                        || existing.phase == .cancelled else {
+                    throw ProviderAgentRunError.terminalRequest
+                }
+                try Self.validateIntentScope(existing, intent: intent)
+                request = try Self.makePreparedRequest(
+                    intent: intent,
+                    verifiedConnection: verifiedConnection,
+                    attemptNumber: existing.identity.attemptNumber + 1,
+                    turnSequence: 1,
+                    previousRequestID: existing.identity.requestID,
+                    now: now()
+                )
+                request = try database.persistPreparedProviderRequest(
+                    request,
+                    verifiedConnection: verifiedConnection
+                )
             }
         } else {
             request = try Self.makePreparedRequest(
@@ -247,6 +268,9 @@ final class ProviderAgentRunCoordinator {
     static func makePreparedRequest(
         intent: PendingModelIntent,
         verifiedConnection: VerifiedModelConnection,
+        attemptNumber: Int = 1,
+        turnSequence: Int = 1,
+        previousRequestID: UUID? = nil,
         now: Date
     ) throws -> ProviderRequestSnapshot {
         try makePreparedRequest(
@@ -255,6 +279,9 @@ final class ProviderAgentRunCoordinator {
             requestID: UUID(),
             runID: UUID(),
             responseAssetID: UUID(),
+            attemptNumber: attemptNumber,
+            turnSequence: turnSequence,
+            previousRequestID: previousRequestID,
             now: now
         )
     }
@@ -265,13 +292,19 @@ final class ProviderAgentRunCoordinator {
         requestID: UUID,
         runID: UUID,
         responseAssetID: UUID,
+        attemptNumber: Int,
+        turnSequence: Int,
+        previousRequestID: UUID?,
         now: Date
     ) throws -> ProviderRequestSnapshot {
         let connection = verifiedConnection.connection
         return try ProviderRequestLifecycle.prepare(
             requestID: requestID,
             runID: runID,
-            idempotencyKey: "provider.request.\(intent.id.uuidString).1",
+            idempotencyKey: "provider.request.\(intent.id.uuidString).\(attemptNumber).\(turnSequence)",
+            attemptNumber: attemptNumber,
+            turnSequence: turnSequence,
+            previousRequestID: previousRequestID,
             intent: intent,
             verifiedConnection: verifiedConnection,
             responseAssetID: responseAssetID,
@@ -304,7 +337,7 @@ final class ProviderAgentRunCoordinator {
                 "usage=required",
                 "max-response-bytes=262144"
             ]),
-            now: intent.createdAt
+            now: now
         )
     }
 
@@ -319,6 +352,9 @@ final class ProviderAgentRunCoordinator {
             requestID: request.identity.requestID,
             runID: request.identity.runID,
             responseAssetID: request.responseAssetID,
+            attemptNumber: request.identity.attemptNumber,
+            turnSequence: request.identity.turnSequence,
+            previousRequestID: request.identity.previousRequestID,
             now: request.createdAt
         )
         guard request.identity == expected.identity,
@@ -330,6 +366,18 @@ final class ProviderAgentRunCoordinator {
               request.disclosureScopeHash == expected.disclosureScopeHash,
               request.requestPolicyHash == expected.requestPolicyHash,
               request.createdAt == expected.createdAt else {
+            throw ProviderAgentRunError.connectionInvalid
+        }
+    }
+
+    private static func validateIntentScope(
+        _ request: ProviderRequestSnapshot,
+        intent: PendingModelIntent
+    ) throws {
+        guard request.identity.intentID == intent.id,
+              request.identity.conversationID == intent.conversationID,
+              request.identity.projectID == intent.projectID,
+              request.identity.branchID == intent.branchID else {
             throw ProviderAgentRunError.connectionInvalid
         }
     }

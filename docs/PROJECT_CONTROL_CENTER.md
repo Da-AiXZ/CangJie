@@ -46,8 +46,8 @@ Formal prose generation is outside S2.
 | S1 cockpit and workspace | Frozen | Complete | Passed | Accepted |
 | Provider/credential/discovery hardening | Frozen | Complete for slice | Passed | Accepted on Candidate 32 |
 | Central model-connection setup | Frozen | Complete for slice | Passed | Accepted on Candidate 33 |
-| Real Provider generation | Frozen boundary | Not implemented | None | None |
-| Provider-backed AgentRun | Frozen boundary | Not implemented | None | None |
+| Real Provider generation | Frozen boundary | OpenAI-compatible streaming transport implemented for DeepSeek, OpenAI and OpenRouter | Passed on `313165a` | None |
+| Provider-backed AgentRun | Frozen boundary | Durable request, stream, usage and unknown-outcome projection implemented | Passed on `313165a` | None |
 | Typed Tool and ToolReceipt continuation | Frozen boundary | Not implemented | None | None |
 | Force-quit recovery of the real S2 loop | Frozen boundary | Not implemented | None | None |
 
@@ -101,13 +101,12 @@ Typed Tool, ToolReceipt and recovery loop has not yet been implemented.
 
 ## Immediate queue
 
-1. Add the durable Provider request lifecycle and streaming checkpoint.
-2. Create the Provider-backed `AgentRun` state projection.
-3. Add the minimum versioned Typed Tools for project creation and status query.
-4. Persist the exact `ToolReceipt` in the same governed transaction.
-5. Consume the pending intent only when continuation is durably committed.
-6. Prove unknown-outcome reconciliation and force-quit recovery.
-7. Build the next candidate only when a device-observable boundary changes.
+1. Validate the linear multi-request migration and strict versioned Typed Tool contracts.
+2. Execute project creation/status and persist the exact `ToolReceipt` in one governed transaction.
+3. Return Tool results to the model and consume the pending intent only with the durable final continuation.
+4. Wire streaming, cancellation and recovery into the central Conversation surface.
+5. Prove unknown-outcome reconciliation and force-quit recovery.
+6. Build the next candidate only when the complete S2 loop becomes device-observable.
 
 ## Stable decision routing
 

@@ -226,6 +226,72 @@ final class ProviderRequestContractTests: XCTestCase {
             request.identity.credentialPayloadHash,
             verification.credentialPayloadHash
         )
+        XCTAssertEqual(request.identity.attemptNumber, 1)
+        XCTAssertEqual(request.identity.turnSequence, 1)
+        XCTAssertNil(request.identity.previousRequestID)
+    }
+
+    func testRequestCoordinatesRequireOneLinearPredecessorAfterTheFirstTurn() throws {
+        let runID = UUID()
+        let previousRequestID = UUID()
+
+        XCTAssertNoThrow(
+            try makePreparedRequest(
+                attemptNumber: 1,
+                turnSequence: 2,
+                previousRequestID: previousRequestID,
+                runID: runID
+            )
+        )
+        XCTAssertNoThrow(
+            try makePreparedRequest(
+                attemptNumber: 2,
+                turnSequence: 1,
+                previousRequestID: previousRequestID,
+                runID: UUID()
+            )
+        )
+        for invalid in [
+            (0, 1, previousRequestID),
+            (1, 0, previousRequestID),
+            (1, 1, previousRequestID),
+            (1, 2, nil)
+        ] as [(Int, Int, UUID?)] {
+            XCTAssertThrowsError(
+                try makePreparedRequest(
+                    attemptNumber: invalid.0,
+                    turnSequence: invalid.1,
+                    previousRequestID: invalid.2,
+                    runID: runID
+                )
+            ) { error in
+                XCTAssertEqual(
+                    error as? ProviderRequestError,
+                    .invalidIdentity
+                )
+            }
+        }
+    }
+
+    func testPublishedV1IdentityDecodesAsFirstAttemptAndFirstTurn() throws {
+        let prepared = try makePreparedRequest()
+        let data = try JSONEncoder().encode(prepared)
+        let object = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: data) as? [String: Any]
+        )
+        let identity = try XCTUnwrap(object["identity"] as? [String: Any])
+
+        XCTAssertNil(identity["attemptNumber"])
+        XCTAssertNil(identity["turnSequence"])
+        XCTAssertNil(identity["previousRequestID"])
+
+        let decoded = try JSONDecoder().decode(
+            ProviderRequestSnapshot.self,
+            from: data
+        )
+        XCTAssertEqual(decoded.identity.attemptNumber, 1)
+        XCTAssertEqual(decoded.identity.turnSequence, 1)
+        XCTAssertNil(decoded.identity.previousRequestID)
     }
 
     func testDecodedSnapshotMustSatisfyLifecycleInvariants() throws {
@@ -297,7 +363,11 @@ final class ProviderRequestContractTests: XCTestCase {
     }
 
     private func makePreparedRequest(
-        promptManifestHash: String? = nil
+        promptManifestHash: String? = nil,
+        attemptNumber: Int = 1,
+        turnSequence: Int = 1,
+        previousRequestID: UUID? = nil,
+        runID: UUID = UUID()
     ) throws -> ProviderRequestSnapshot {
         try ProviderRequestLifecycle.prepare(
             identity: ProviderRequestIdentity(
@@ -307,7 +377,10 @@ final class ProviderRequestContractTests: XCTestCase {
                 conversationID: UUID(),
                 projectID: nil,
                 branchID: nil,
-                runID: UUID(),
+                runID: runID,
+                attemptNumber: attemptNumber,
+                turnSequence: turnSequence,
+                previousRequestID: previousRequestID,
                 connectionID: UUID(),
                 credentialID: UUID(),
                 credentialVersionID: UUID(),

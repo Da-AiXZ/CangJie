@@ -254,6 +254,148 @@ final class ProviderRequestPersistenceTests: XCTestCase {
         }
     }
 
+    func testDefiniteFailureAllowsANewAttemptButUnknownOutcomeDoesNot() throws {
+        let retryFixture = try makeFixture()
+        let first = try retryFixture.database.persistPreparedProviderRequest(
+            retryFixture.request,
+            verifiedConnection: retryFixture.verifiedConnection
+        )
+        let failed = try ProviderRequestLifecycle.failBeforeSend(
+            first,
+            failure: .authentication,
+            now: retryFixture.now.addingTimeInterval(1)
+        )
+        try retryFixture.database.updateProviderRequest(failed)
+        let retry = try makeRequest(
+            intent: retryFixture.intent,
+            verifiedConnection: retryFixture.verifiedConnection,
+            requestID: UUID(),
+            runID: UUID(),
+            responseAssetID: UUID(),
+            attemptNumber: 2,
+            turnSequence: 1,
+            previousRequestID: first.identity.requestID,
+            now: retryFixture.now.addingTimeInterval(2)
+        )
+
+        XCTAssertEqual(
+            try retryFixture.database.persistPreparedProviderRequest(
+                retry,
+                verifiedConnection: retryFixture.verifiedConnection
+            ),
+            retry
+        )
+        XCTAssertEqual(
+            try retryFixture.database.providerRequest(
+                intentID: retryFixture.intent.id
+            ),
+            retry
+        )
+
+        let unknownFixture = try makeFixture()
+        let unknownFirst = try unknownFixture.database.persistPreparedProviderRequest(
+            unknownFixture.request,
+            verifiedConnection: unknownFixture.verifiedConnection
+        )
+        let sending = try ProviderRequestLifecycle.markSending(
+            unknownFirst,
+            now: unknownFixture.now.addingTimeInterval(1)
+        )
+        try unknownFixture.database.updateProviderRequest(sending)
+        let unknown = try ProviderRequestLifecycle.markOutcomeUnknown(
+            sending,
+            reason: .network,
+            now: unknownFixture.now.addingTimeInterval(2)
+        )
+        try unknownFixture.database.updateProviderRequest(unknown)
+        let forbiddenRetry = try makeRequest(
+            intent: unknownFixture.intent,
+            verifiedConnection: unknownFixture.verifiedConnection,
+            requestID: UUID(),
+            runID: UUID(),
+            responseAssetID: UUID(),
+            attemptNumber: 2,
+            turnSequence: 1,
+            previousRequestID: unknownFirst.identity.requestID,
+            now: unknownFixture.now.addingTimeInterval(3)
+        )
+        XCTAssertThrowsError(
+            try unknownFixture.database.persistPreparedProviderRequest(
+                forbiddenRetry,
+                verifiedConnection: unknownFixture.verifiedConnection
+            )
+        ) { error in
+            XCTAssertEqual(
+                error as? AppDatabaseError,
+                .invalidProviderRequest
+            )
+        }
+    }
+
+    func testToolResultContinuationReusesRunAndAdvancesLinearTurn() throws {
+        let fixture = try makeFixture()
+        let first = try fixture.database.persistPreparedProviderRequest(
+            fixture.request,
+            verifiedConnection: fixture.verifiedConnection
+        )
+        let sending = try ProviderRequestLifecycle.markSending(
+            first,
+            now: fixture.now.addingTimeInterval(1)
+        )
+        try fixture.database.updateProviderRequest(sending)
+        let payloadJSON = #"{"finishReason":"tool_calls","text":"","toolCalls":[{"argumentsJSON":"{}","id":"call-1","index":0,"name":"project_status"}]}"#
+        let streaming = try ProviderRequestLifecycle.checkpointStream(
+            sending,
+            cursor: 1,
+            receivedUTF8Bytes: payloadJSON.utf8.count,
+            responseHash: AppDatabase.payloadHash(payloadJSON),
+            now: fixture.now.addingTimeInterval(2)
+        )
+        try fixture.database.checkpointProviderResponse(
+            streaming,
+            responsePayloadJSON: payloadJSON
+        )
+        let completed = try ProviderRequestLifecycle.complete(
+            streaming,
+            responseHash: AppDatabase.payloadHash(payloadJSON),
+            usage: ProviderUsage(
+                inputTokens: 10,
+                outputTokens: 3,
+                totalTokens: 13
+            ),
+            now: fixture.now.addingTimeInterval(3)
+        )
+        try fixture.database.completeProviderResponse(completed)
+        let continuation = try makeRequest(
+            intent: fixture.intent,
+            verifiedConnection: fixture.verifiedConnection,
+            requestID: UUID(),
+            runID: first.identity.runID,
+            responseAssetID: UUID(),
+            attemptNumber: 1,
+            turnSequence: 2,
+            previousRequestID: first.identity.requestID,
+            now: fixture.now.addingTimeInterval(4)
+        )
+
+        _ = try fixture.database.persistPreparedProviderRequest(
+            continuation,
+            verifiedConnection: fixture.verifiedConnection
+        )
+
+        XCTAssertEqual(
+            try fixture.database.providerRequest(intentID: fixture.intent.id),
+            continuation
+        )
+        XCTAssertEqual(
+            try fixture.database.agentRun(
+                id: first.identity.runID,
+                conversationID: fixture.intent.conversationID
+            )?.currentStage,
+            "provider.prepared"
+        )
+    }
+
     private func makeFixture() throws -> (
         database: AppDatabase,
         intent: PendingModelIntent,
@@ -317,12 +459,18 @@ final class ProviderRequestPersistenceTests: XCTestCase {
         requestID: UUID,
         runID: UUID,
         responseAssetID: UUID,
+        attemptNumber: Int = 1,
+        turnSequence: Int = 1,
+        previousRequestID: UUID? = nil,
         now: Date = Date(timeIntervalSince1970: 2_000)
     ) throws -> ProviderRequestSnapshot {
         try ProviderRequestLifecycle.prepare(
             requestID: requestID,
             runID: runID,
-            idempotencyKey: "provider.request.\(intent.id.uuidString).1",
+            idempotencyKey: "provider.request.\(intent.id.uuidString).\(attemptNumber).\(turnSequence)",
+            attemptNumber: attemptNumber,
+            turnSequence: turnSequence,
+            previousRequestID: previousRequestID,
             intent: intent,
             verifiedConnection: verifiedConnection,
             responseAssetID: responseAssetID,

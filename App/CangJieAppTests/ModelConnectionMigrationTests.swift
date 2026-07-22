@@ -165,6 +165,88 @@ final class ModelConnectionMigrationTests: XCTestCase {
         }
     }
 
+    func testProviderRequestLinearMigrationCreatesBoundedChainIndexes() throws {
+        try withTemporaryDatabasePath { path in
+            let database = try AppDatabase(path: path)
+            let state = try database.queue.read { db -> (String, [String], Int) in
+                let tableSQL = try String.fetchOne(
+                    db,
+                    sql: """
+                        SELECT sql FROM sqlite_master
+                        WHERE type = 'table' AND name = 'providerRequest'
+                        """
+                ) ?? ""
+                let indexes = try Row.fetchAll(
+                    db,
+                    sql: """
+                        SELECT name FROM pragma_index_list('providerRequest')
+                        WHERE name LIKE 'providerRequest_%'
+                        ORDER BY name
+                        """
+                ).map { row -> String in row["name"] }
+                let migrationCount = try Int.fetchOne(
+                    db,
+                    sql: "SELECT COUNT(*) FROM grdb_migrations WHERE identifier = ?",
+                    arguments: ["s2-provider-request-linear-v2"]
+                ) ?? 0
+                return (tableSQL, indexes, migrationCount)
+            }
+
+            XCTAssertTrue(state.0.contains("attemptNumber INTEGER NOT NULL"))
+            XCTAssertTrue(state.0.contains("turnSequence INTEGER NOT NULL"))
+            XCTAssertTrue(state.0.contains("previousRequestID TEXT"))
+            XCTAssertFalse(state.0.contains("intentID TEXT NOT NULL UNIQUE"))
+            XCTAssertFalse(state.0.contains("runID TEXT NOT NULL UNIQUE"))
+            XCTAssertEqual(
+                state.1,
+                [
+                    "providerRequest_conversation_updated",
+                    "providerRequest_intent_active",
+                    "providerRequest_intent_attempt_turn",
+                    "providerRequest_previous_unique",
+                    "providerRequest_run_sequence"
+                ]
+            )
+            XCTAssertEqual(state.2, 1)
+        }
+    }
+
+    func testProviderRequestLinearMigrationPreservesPublishedV1Payload() throws {
+        try withTemporaryDatabasePath { path in
+            let legacy = try makePublishedV1ProviderRequestDatabase(at: path)
+
+            let database = try AppDatabase(path: path)
+            let restored = try XCTUnwrap(
+                database.providerRequest(
+                    id: legacy.request.identity.requestID
+                )
+            )
+            let stored = try database.queue.read { db -> (String, String, Int, Int) in
+                let row = try XCTUnwrap(Row.fetchOne(
+                    db,
+                    sql: """
+                        SELECT payloadJSON, payloadHash, attemptNumber, turnSequence
+                        FROM providerRequest WHERE id = ?
+                        """,
+                    arguments: [legacy.request.identity.requestID.uuidString]
+                ))
+                return (
+                    row["payloadJSON"],
+                    row["payloadHash"],
+                    row["attemptNumber"],
+                    row["turnSequence"]
+                )
+            }
+
+            XCTAssertEqual(restored, legacy.request)
+            XCTAssertEqual(stored.0, legacy.payloadJSON)
+            XCTAssertEqual(stored.1, legacy.payloadHash)
+            XCTAssertEqual(stored.2, 1)
+            XCTAssertEqual(stored.3, 1)
+            XCTAssertNil(restored.identity.previousRequestID)
+        }
+    }
+
     private func makeLegacyModelConnectionDatabase(
         at path: String,
         corruptPayloadHash: Bool = false
@@ -274,12 +356,191 @@ final class ModelConnectionMigrationTests: XCTestCase {
         return expected
     }
 
+    private func makePublishedV1ProviderRequestDatabase(
+        at path: String
+    ) throws -> (
+        request: ProviderRequestSnapshot,
+        payloadJSON: String,
+        payloadHash: String
+    ) {
+        let now = Date(timeIntervalSince1970: 2_200)
+        let conversationID = UUID()
+        let intent = try PendingModelIntent(
+            id: UUID(),
+            conversationID: conversationID,
+            projectID: nil,
+            branchID: nil,
+            userRequest: "创建一本迁移测试小说",
+            createdAt: now
+        )
+        let connection = try ModelConnectionTestFixture.makeConnection(
+            provider: .deepSeek,
+            baseURL: URL(string: "https://api.deepseek.com")!,
+            credentialID: UUID(),
+            selectedModel: "deepseek-chat",
+            secret: "fixture-secret"
+        )
+        let verification = try ModelCredentialVerification(
+            reference: connection.credential,
+            credentialVersionProof: String(repeating: "a", count: 64),
+            credentialPayloadHash: String(repeating: "b", count: 64)
+        )
+        let verified = try VerifiedModelConnection(
+            connection: connection,
+            credentialVerification: verification
+        )
+        let request = try ProviderRequestLifecycle.prepare(
+            requestID: UUID(),
+            runID: UUID(),
+            idempotencyKey: "provider.request.\(intent.id.uuidString).1",
+            intent: intent,
+            verifiedConnection: verified,
+            responseAssetID: UUID(),
+            promptManifestHash: String(repeating: "1", count: 64),
+            contextManifestHash: String(repeating: "2", count: 64),
+            toolCatalogManifestHash: String(repeating: "3", count: 64),
+            disclosureScopeHash: String(repeating: "4", count: 64),
+            requestPolicyHash: String(repeating: "5", count: 64),
+            now: now
+        )
+        let requestPayload = try encodeProviderRequest(request)
+        let requestHash = AppDatabase.payloadHash(requestPayload)
+        let intentPayload = try encodePendingIntent(intent)
+        let connectionPayload = try AppDatabase.encodeModelConnection(connection)
+
+        var configuration = Configuration()
+        configuration.foreignKeysEnabled = true
+        let queue = try DatabaseQueue(path: path, configuration: configuration)
+        try AppDatabase.migrator.migrate(
+            queue,
+            upTo: "s2-provider-request-runtime-v1"
+        )
+        try queue.write { db in
+            try db.execute(
+                sql: """
+                    INSERT INTO agentConversation (id, title, createdAt, updatedAt)
+                    VALUES (?, ?, ?, ?)
+                    """,
+                arguments: [
+                    conversationID.uuidString,
+                    "Published v1 request",
+                    now.timeIntervalSince1970,
+                    now.timeIntervalSince1970
+                ]
+            )
+            try db.execute(
+                sql: """
+                    INSERT INTO pendingModelIntent (
+                        id, conversationID, projectID, branchID, payloadVersion,
+                        payloadJSON, payloadHash, createdAt, consumedAt,
+                        continuationRequestID
+                    ) VALUES (?, ?, NULL, NULL, 1, ?, ?, ?, NULL, NULL)
+                    """,
+                arguments: [
+                    intent.id.uuidString,
+                    conversationID.uuidString,
+                    intentPayload,
+                    AppDatabase.payloadHash(intentPayload),
+                    now.timeIntervalSince1970
+                ]
+            )
+            try db.execute(
+                sql: """
+                    INSERT INTO modelConnection (
+                        id, credentialID, credentialProvider,
+                        credentialAllowedHost, credentialAllowedPort,
+                        payloadVersion, payloadJSON, payloadHash, createdAt,
+                        updatedAt, credentialVersionID
+                    ) VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?)
+                    """,
+                arguments: [
+                    connection.id.uuidString,
+                    connection.credential.id.uuidString,
+                    connection.credential.provider.rawValue,
+                    connection.credential.allowedHost,
+                    connection.credential.allowedPort,
+                    connectionPayload,
+                    AppDatabase.payloadHash(connectionPayload),
+                    now.timeIntervalSince1970,
+                    now.timeIntervalSince1970,
+                    connection.credential.versionID.uuidString
+                ]
+            )
+            try db.execute(
+                sql: """
+                    INSERT INTO agentRun (
+                        id, conversationID, projectID, kind, status,
+                        idempotencyKey, currentStage, startedAt, updatedAt
+                    ) VALUES (?, ?, NULL, 'providerTurn', 'running', ?, ?, ?, ?)
+                    """,
+                arguments: [
+                    request.identity.runID.uuidString,
+                    conversationID.uuidString,
+                    "agent.run.\(intent.id.uuidString)",
+                    "provider.prepared",
+                    now.timeIntervalSince1970,
+                    now.timeIntervalSince1970
+                ]
+            )
+            try db.execute(
+                sql: """
+                    INSERT INTO providerResponseAsset (
+                        id, payloadVersion, payloadJSON, payloadHash,
+                        createdAt, updatedAt
+                    ) VALUES (?, 1, ?, ?, ?, ?)
+                    """,
+                arguments: [
+                    request.responseAssetID.uuidString,
+                    ProviderResponsePayload.emptyJSON,
+                    AppDatabase.payloadHash(ProviderResponsePayload.emptyJSON),
+                    now.timeIntervalSince1970,
+                    now.timeIntervalSince1970
+                ]
+            )
+            try db.execute(
+                sql: """
+                    INSERT INTO providerRequest (
+                        id, idempotencyKey, intentID, conversationID, projectID,
+                        runID, connectionID, responseAssetID, phase,
+                        payloadVersion, payloadJSON, payloadHash, createdAt,
+                        updatedAt
+                    ) VALUES (?, ?, ?, ?, NULL, ?, ?, ?, 'prepared', 1, ?, ?, ?, ?)
+                    """,
+                arguments: [
+                    request.identity.requestID.uuidString,
+                    request.identity.idempotencyKey,
+                    intent.id.uuidString,
+                    conversationID.uuidString,
+                    request.identity.runID.uuidString,
+                    connection.id.uuidString,
+                    request.responseAssetID.uuidString,
+                    requestPayload,
+                    requestHash,
+                    now.timeIntervalSince1970,
+                    now.timeIntervalSince1970
+                ]
+            )
+        }
+        return (request, requestPayload, requestHash)
+    }
+
     private func encodePendingIntent(_ intent: PendingModelIntent) throws -> String {
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .secondsSince1970
         encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
         return try XCTUnwrap(
             String(data: encoder.encode(intent), encoding: .utf8)
+        )
+    }
+
+    private func encodeProviderRequest(
+        _ request: ProviderRequestSnapshot
+    ) throws -> String {
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .secondsSince1970
+        encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
+        return try XCTUnwrap(
+            String(data: encoder.encode(request), encoding: .utf8)
         )
     }
 

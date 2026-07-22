@@ -24,7 +24,7 @@ public struct ApprovalBinding: Codable, Equatable, Sendable {
     }
 
     public var bindingHash: String {
-        let digest = SHA256.digest(canonicalBindingBytes)
+        let digest = CangJieSHA256.digest(canonicalBindingBytes)
         return "\(Self.bindingHashAlgorithm):\(digest.hexadecimalString)"
     }
 
@@ -194,7 +194,7 @@ public struct ApprovalBinding: Codable, Equatable, Sendable {
     }
 
     private var canonicalBindingBytes: [UInt8] {
-        var encoder = CanonicalBindingEncoder()
+        var encoder = CanonicalFieldEncoder()
         encoder.append(name: "schema", value: "cangjie.approval-binding.v1")
         encoder.append(name: "approvalRequestID", value: approvalRequestID.canonicalString)
         encoder.append(name: "conversationID", value: conversationID.canonicalString)
@@ -344,7 +344,7 @@ public enum ApprovalValidationResult: Codable, Equatable, Sendable {
     case requiresReapproval(reasons: Set<ApprovalInvalidationReason>)
 }
 
-private struct CanonicalBindingEncoder {
+struct CanonicalFieldEncoder {
     private(set) var bytes: [UInt8] = []
 
     mutating func append(name: String, value: String) {
@@ -365,7 +365,7 @@ private struct CanonicalBindingEncoder {
     }
 }
 
-private enum SHA256 {
+enum CangJieSHA256 {
     private static let initialHash: [UInt32] = [
         0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a,
         0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19
@@ -478,7 +478,7 @@ private enum SHA256 {
     }
 }
 
-private extension Array where Element == UInt8 {
+extension Array where Element == UInt8 {
     var hexadecimalString: String {
         let alphabet = Array("0123456789abcdef".utf8)
         var output = [UInt8]()
@@ -499,7 +499,7 @@ private extension String {
     }
 }
 
-private extension UUID {
+extension UUID {
     var canonicalString: String {
         uuidString.lowercased()
     }

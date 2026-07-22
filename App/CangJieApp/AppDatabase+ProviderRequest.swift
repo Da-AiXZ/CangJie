@@ -117,10 +117,10 @@ extension AppDatabase {
 
             if let existingRow = try Row.fetchOne(
                 db,
-                sql: "SELECT * FROM providerRequest WHERE id = ? OR intentID = ? LIMIT 1",
+                sql: "SELECT * FROM providerRequest WHERE id = ? OR idempotencyKey = ? LIMIT 1",
                 arguments: [
                     validated.identity.requestID.uuidString,
-                    validated.identity.intentID.uuidString
+                    validated.identity.idempotencyKey
                 ]
             ) {
                 let existing = try Self.decodeProviderRequest(existingRow)
@@ -130,16 +130,48 @@ extension AppDatabase {
                 return existing
             }
 
-            let run = AgentRunSnapshot(
-                id: validated.identity.runID,
-                projectID: validated.identity.projectID,
-                kind: "providerTurn",
-                status: .running,
-                idempotencyKey: "agent.run.\(validated.identity.intentID.uuidString)",
-                currentStage: "provider.prepared",
-                startedAt: validated.createdAt,
-                updatedAt: validated.updatedAt
-            )
+            try Self.validateProviderRequestPredecessor(validated, in: db)
+
+            let run: AgentRunSnapshot
+            if validated.identity.turnSequence == 1 {
+                run = AgentRunSnapshot(
+                    id: validated.identity.runID,
+                    projectID: validated.identity.projectID,
+                    kind: "providerTurn",
+                    status: .running,
+                    idempotencyKey: "agent.run.\(validated.identity.intentID.uuidString).\(validated.identity.attemptNumber)",
+                    currentStage: "provider.prepared",
+                    startedAt: validated.createdAt,
+                    updatedAt: validated.updatedAt
+                )
+            } else {
+                guard let runRow = try Row.fetchOne(
+                    db,
+                    sql: "SELECT * FROM agentRun WHERE id = ? AND conversationID = ?",
+                    arguments: [
+                        validated.identity.runID.uuidString,
+                        validated.identity.conversationID.uuidString
+                    ]
+                ) else {
+                    throw AppDatabaseError.invalidAgentRun
+                }
+                let existingRun = try Self.decodeAgentRun(runRow)
+                guard existingRun.kind == "providerTurn",
+                      existingRun.projectID == validated.identity.projectID,
+                      existingRun.status == .running else {
+                    throw AppDatabaseError.invalidAgentRun
+                }
+                run = AgentRunSnapshot(
+                    id: existingRun.id,
+                    projectID: existingRun.projectID,
+                    kind: existingRun.kind,
+                    status: existingRun.status,
+                    idempotencyKey: existingRun.idempotencyKey,
+                    currentStage: "provider.prepared",
+                    startedAt: existingRun.startedAt,
+                    updatedAt: validated.updatedAt
+                )
+            }
             try Self.upsertAgentRun(
                 run,
                 conversationID: validated.identity.conversationID,
@@ -187,7 +219,12 @@ extension AppDatabase {
         try queue.read { db in
             guard let row = try Row.fetchOne(
                 db,
-                sql: "SELECT * FROM providerRequest WHERE intentID = ?",
+                sql: """
+                    SELECT * FROM providerRequest
+                    WHERE intentID = ?
+                    ORDER BY attemptNumber DESC, turnSequence DESC
+                    LIMIT 1
+                    """,
                 arguments: [intentID.uuidString]
             ) else {
                 return nil
@@ -381,9 +418,10 @@ extension AppDatabase {
             sql: """
                 INSERT INTO providerRequest (
                     id, idempotencyKey, intentID, conversationID, projectID,
-                    runID, connectionID, responseAssetID, phase,
-                    payloadVersion, payloadJSON, payloadHash, createdAt, updatedAt
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    runID, attemptNumber, turnSequence, previousRequestID,
+                    connectionID, responseAssetID, phase, payloadVersion,
+                    payloadJSON, payloadHash, createdAt, updatedAt
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
             arguments: [
                 request.identity.requestID.uuidString,
@@ -392,6 +430,9 @@ extension AppDatabase {
                 request.identity.conversationID.uuidString,
                 request.identity.projectID?.uuidString,
                 request.identity.runID.uuidString,
+                request.identity.attemptNumber,
+                request.identity.turnSequence,
+                request.identity.previousRequestID?.uuidString,
                 request.identity.connectionID.uuidString,
                 request.responseAssetID.uuidString,
                 request.phase.rawValue,
@@ -484,6 +525,107 @@ extension AppDatabase {
         )
     }
 
+    private static func validateProviderRequestPredecessor(
+        _ request: ProviderRequestSnapshot,
+        in db: Database
+    ) throws {
+        let identity = request.identity
+        let latestRow = try Row.fetchOne(
+            db,
+            sql: """
+                SELECT * FROM providerRequest
+                WHERE intentID = ?
+                ORDER BY attemptNumber DESC, turnSequence DESC
+                LIMIT 1
+                """,
+            arguments: [identity.intentID.uuidString]
+        )
+        if identity.attemptNumber == 1 && identity.turnSequence == 1 {
+            guard latestRow == nil else {
+                throw AppDatabaseError.idempotencyConflict
+            }
+            return
+        }
+        guard let previousRequestID = identity.previousRequestID,
+              let latestRow,
+              let previousRow = try Row.fetchOne(
+                db,
+                sql: "SELECT * FROM providerRequest WHERE id = ?",
+                arguments: [previousRequestID.uuidString]
+              ) else {
+            throw AppDatabaseError.invalidProviderRequest
+        }
+        let latest = try decodeProviderRequest(latestRow)
+        let previous = try decodeProviderRequest(previousRow)
+        guard latest.identity.requestID == previous.identity.requestID,
+              previous.identity.intentID == identity.intentID,
+              previous.identity.conversationID == identity.conversationID,
+              previous.identity.projectID == identity.projectID,
+              previous.identity.branchID == identity.branchID else {
+            throw AppDatabaseError.invalidProviderRequest
+        }
+        if identity.turnSequence > 1 {
+            guard identity.attemptNumber == previous.identity.attemptNumber,
+                  identity.turnSequence == previous.identity.turnSequence + 1,
+                  identity.runID == previous.identity.runID,
+                  previous.phase == .responseComplete,
+                  sameProviderConnection(previous.identity, identity),
+                  let responseJSON = try providerResponsePayload(
+                    assetID: previous.responseAssetID,
+                    in: db
+                  ) else {
+                throw AppDatabaseError.invalidProviderRequest
+            }
+            let response = try decodeProviderResponse(responseJSON)
+            try response.validate(allowIncompleteToolCalls: false)
+            guard !response.toolCalls.isEmpty else {
+                throw AppDatabaseError.invalidProviderRequest
+            }
+        } else {
+            guard identity.attemptNumber == previous.identity.attemptNumber + 1,
+                  identity.runID != previous.identity.runID,
+                  previous.phase == .failed || previous.phase == .cancelled else {
+                throw AppDatabaseError.invalidProviderRequest
+            }
+        }
+    }
+
+    private static func sameProviderConnection(
+        _ lhs: ProviderRequestIdentity,
+        _ rhs: ProviderRequestIdentity
+    ) -> Bool {
+        lhs.connectionID == rhs.connectionID
+            && lhs.credentialID == rhs.credentialID
+            && lhs.credentialVersionID == rhs.credentialVersionID
+            && lhs.credentialVersionProof == rhs.credentialVersionProof
+            && lhs.credentialPayloadHash == rhs.credentialPayloadHash
+            && lhs.setupAuthorizationHash == rhs.setupAuthorizationHash
+            && lhs.provider == rhs.provider
+            && lhs.baseURL == rhs.baseURL
+            && lhs.modelID == rhs.modelID
+    }
+
+    private static func providerResponsePayload(
+        assetID: UUID,
+        in db: Database
+    ) throws -> String? {
+        guard let row = try Row.fetchOne(
+            db,
+            sql: "SELECT * FROM providerResponseAsset WHERE id = ?",
+            arguments: [assetID.uuidString]
+        ) else {
+            return nil
+        }
+        let version: Int = row["payloadVersion"]
+        let json: String = row["payloadJSON"]
+        let storedHash: String = row["payloadHash"]
+        guard version == providerResponsePayloadVersion,
+              storedHash == payloadHash(json) else {
+            throw AppDatabaseError.invalidProviderResponseAsset
+        }
+        return json
+    }
+
     private static func decodeProviderRequest(
         _ row: Row
     ) throws -> ProviderRequestSnapshot {
@@ -509,6 +651,9 @@ extension AppDatabase {
         let conversationID: String = row["conversationID"]
         let projectID: String? = row["projectID"]
         let runID: String = row["runID"]
+        let attemptNumber: Int = row["attemptNumber"]
+        let turnSequence: Int = row["turnSequence"]
+        let previousRequestID: String? = row["previousRequestID"]
         let connectionID: String = row["connectionID"]
         let responseAssetID: String = row["responseAssetID"]
         let phase: String = row["phase"]
@@ -520,6 +665,9 @@ extension AppDatabase {
               conversationID == request.identity.conversationID.uuidString,
               projectID == request.identity.projectID?.uuidString,
               runID == request.identity.runID.uuidString,
+              attemptNumber == request.identity.attemptNumber,
+              turnSequence == request.identity.turnSequence,
+              previousRequestID == request.identity.previousRequestID?.uuidString,
               connectionID == request.identity.connectionID.uuidString,
               responseAssetID == request.responseAssetID.uuidString,
               phase == request.phase.rawValue,

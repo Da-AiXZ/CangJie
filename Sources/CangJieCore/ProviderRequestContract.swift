@@ -64,6 +64,9 @@ public struct ProviderRequestIdentity: Codable, Equatable, Sendable {
     public let projectID: UUID?
     public let branchID: UUID?
     public let runID: UUID
+    public let attemptNumber: Int
+    public let turnSequence: Int
+    public let previousRequestID: UUID?
     public let connectionID: UUID
     public let credentialID: UUID
     public let credentialVersionID: UUID
@@ -82,6 +85,9 @@ public struct ProviderRequestIdentity: Codable, Equatable, Sendable {
         projectID: UUID?,
         branchID: UUID?,
         runID: UUID,
+        attemptNumber: Int = 1,
+        turnSequence: Int = 1,
+        previousRequestID: UUID? = nil,
         connectionID: UUID,
         credentialID: UUID,
         credentialVersionID: UUID,
@@ -99,6 +105,9 @@ public struct ProviderRequestIdentity: Codable, Equatable, Sendable {
         self.projectID = projectID
         self.branchID = branchID
         self.runID = runID
+        self.attemptNumber = attemptNumber
+        self.turnSequence = turnSequence
+        self.previousRequestID = previousRequestID
         self.connectionID = connectionID
         self.credentialID = credentialID
         self.credentialVersionID = credentialVersionID
@@ -108,6 +117,102 @@ public struct ProviderRequestIdentity: Codable, Equatable, Sendable {
         self.provider = provider
         self.baseURL = baseURL
         self.modelID = modelID
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(
+            requestID: try container.decode(UUID.self, forKey: .requestID),
+            idempotencyKey: try container.decode(String.self, forKey: .idempotencyKey),
+            intentID: try container.decode(UUID.self, forKey: .intentID),
+            conversationID: try container.decode(UUID.self, forKey: .conversationID),
+            projectID: try container.decodeIfPresent(UUID.self, forKey: .projectID),
+            branchID: try container.decodeIfPresent(UUID.self, forKey: .branchID),
+            runID: try container.decode(UUID.self, forKey: .runID),
+            attemptNumber: try container.decodeIfPresent(
+                Int.self,
+                forKey: .attemptNumber
+            ) ?? 1,
+            turnSequence: try container.decodeIfPresent(
+                Int.self,
+                forKey: .turnSequence
+            ) ?? 1,
+            previousRequestID: try container.decodeIfPresent(
+                UUID.self,
+                forKey: .previousRequestID
+            ),
+            connectionID: try container.decode(UUID.self, forKey: .connectionID),
+            credentialID: try container.decode(UUID.self, forKey: .credentialID),
+            credentialVersionID: try container.decode(
+                UUID.self,
+                forKey: .credentialVersionID
+            ),
+            credentialVersionProof: try container.decode(
+                String.self,
+                forKey: .credentialVersionProof
+            ),
+            credentialPayloadHash: try container.decode(
+                String.self,
+                forKey: .credentialPayloadHash
+            ),
+            setupAuthorizationHash: try container.decodeIfPresent(
+                String.self,
+                forKey: .setupAuthorizationHash
+            ),
+            provider: try container.decode(ModelProvider.self, forKey: .provider),
+            baseURL: try container.decode(URL.self, forKey: .baseURL),
+            modelID: try container.decode(String.self, forKey: .modelID)
+        )
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(requestID, forKey: .requestID)
+        try container.encode(idempotencyKey, forKey: .idempotencyKey)
+        try container.encode(intentID, forKey: .intentID)
+        try container.encode(conversationID, forKey: .conversationID)
+        try container.encodeIfPresent(projectID, forKey: .projectID)
+        try container.encodeIfPresent(branchID, forKey: .branchID)
+        try container.encode(runID, forKey: .runID)
+        if attemptNumber != 1 || turnSequence != 1 || previousRequestID != nil {
+            try container.encode(attemptNumber, forKey: .attemptNumber)
+            try container.encode(turnSequence, forKey: .turnSequence)
+            try container.encodeIfPresent(previousRequestID, forKey: .previousRequestID)
+        }
+        try container.encode(connectionID, forKey: .connectionID)
+        try container.encode(credentialID, forKey: .credentialID)
+        try container.encode(credentialVersionID, forKey: .credentialVersionID)
+        try container.encode(credentialVersionProof, forKey: .credentialVersionProof)
+        try container.encode(credentialPayloadHash, forKey: .credentialPayloadHash)
+        try container.encodeIfPresent(
+            setupAuthorizationHash,
+            forKey: .setupAuthorizationHash
+        )
+        try container.encode(provider, forKey: .provider)
+        try container.encode(baseURL, forKey: .baseURL)
+        try container.encode(modelID, forKey: .modelID)
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case requestID
+        case idempotencyKey
+        case intentID
+        case conversationID
+        case projectID
+        case branchID
+        case runID
+        case attemptNumber
+        case turnSequence
+        case previousRequestID
+        case connectionID
+        case credentialID
+        case credentialVersionID
+        case credentialVersionProof
+        case credentialPayloadHash
+        case setupAuthorizationHash
+        case provider
+        case baseURL
+        case modelID
     }
 }
 
@@ -289,6 +394,9 @@ public enum ProviderRequestRecovery {
 }
 
 public enum ProviderRequestLifecycle {
+    public static let maximumAttempts = 8
+    public static let maximumTurnsPerAttempt = 8
+
     public static func validateTransition(
         from current: ProviderRequestSnapshot,
         to next: ProviderRequestSnapshot
@@ -368,6 +476,9 @@ public enum ProviderRequestLifecycle {
         requestID: UUID,
         runID: UUID,
         idempotencyKey: String,
+        attemptNumber: Int = 1,
+        turnSequence: Int = 1,
+        previousRequestID: UUID? = nil,
         intent: PendingModelIntent,
         verifiedConnection: VerifiedModelConnection,
         responseAssetID: UUID,
@@ -388,6 +499,9 @@ public enum ProviderRequestLifecycle {
             projectID: intent.projectID,
             branchID: intent.branchID,
             runID: runID,
+            attemptNumber: attemptNumber,
+            turnSequence: turnSequence,
+            previousRequestID: previousRequestID,
             connectionID: connection.id,
             credentialID: verification.credentialID,
             credentialVersionID: verification.versionID,
@@ -667,6 +781,10 @@ public enum ProviderRequestLifecycle {
         guard !identity.idempotencyKey.isEmpty,
               identity.idempotencyKey.utf8.count <= 512,
               !containsUnsafeDisplayControl(identity.idempotencyKey),
+              (1...maximumAttempts).contains(identity.attemptNumber),
+              (1...maximumTurnsPerAttempt).contains(identity.turnSequence),
+              ((identity.attemptNumber == 1 && identity.turnSequence == 1)
+                  == (identity.previousRequestID == nil)),
               !modelID.isEmpty,
               modelID.utf8.count <= ModelConnection.maximumModelIdentifierUTF8Bytes,
               !containsUnsafeDisplayControl(modelID),

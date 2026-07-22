@@ -194,6 +194,76 @@ final class ProviderAgentRunCoordinatorTests: XCTestCase {
         XCTAssertEqual(service.callCount, 0)
     }
 
+    func testDefiniteFailureCanRetryAsANewAttemptAndRun() async throws {
+        let fixture = try makeFixture(saveCredential: false)
+        let firstService = RecordingProviderGenerationService(events: [])
+        let firstCoordinator = ProviderAgentRunCoordinator(
+            database: fixture.database,
+            credentials: fixture.credentials,
+            generation: firstService,
+            now: { fixture.now }
+        )
+        do {
+            _ = try await firstCoordinator.run(
+                intent: fixture.intent,
+                verifiedConnection: fixture.verifiedConnection
+            )
+            XCTFail("Expected connection invalid")
+        } catch {
+            XCTAssertEqual(
+                error as? ProviderAgentRunError,
+                .connectionInvalid
+            )
+        }
+        let first = try XCTUnwrap(
+            fixture.database.providerRequest(intentID: fixture.intent.id)
+        )
+        try fixture.credentials.save(
+            "fixture-secret",
+            versionProof: first.identity.credentialVersionProof,
+            setupAuthorizationHash: first.identity.setupAuthorizationHash,
+            for: fixture.verifiedConnection.connection
+        )
+        let retryService = RecordingProviderGenerationService(
+            events: [
+                .textDelta("已恢复"),
+                .finished(reason: "stop"),
+                .usage(
+                    ProviderUsage(
+                        inputTokens: 5,
+                        outputTokens: 2,
+                        totalTokens: 7
+                    )
+                )
+            ]
+        )
+        let retryCoordinator = ProviderAgentRunCoordinator(
+            database: fixture.database,
+            credentials: fixture.credentials,
+            generation: retryService,
+            now: { fixture.now }
+        )
+
+        let completion = try await retryCoordinator.run(
+            intent: fixture.intent,
+            verifiedConnection: fixture.verifiedConnection
+        )
+
+        XCTAssertEqual(completion.request.identity.attemptNumber, 2)
+        XCTAssertEqual(completion.request.identity.turnSequence, 1)
+        XCTAssertEqual(
+            completion.request.identity.previousRequestID,
+            first.identity.requestID
+        )
+        XCTAssertNotEqual(
+            completion.request.identity.runID,
+            first.identity.runID
+        )
+        XCTAssertEqual(completion.response.text, "已恢复")
+        XCTAssertEqual(firstService.callCount, 0)
+        XCTAssertEqual(retryService.callCount, 1)
+    }
+
     private func makeFixture(
         saveCredential: Bool
     ) throws -> (
