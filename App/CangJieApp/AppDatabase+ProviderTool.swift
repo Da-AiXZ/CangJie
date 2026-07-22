@@ -305,20 +305,38 @@ extension AppDatabase {
         guard run.kind == "providerTurn", run.status == .running else {
             throw AppDatabaseError.invalidAgentRun
         }
-        try upsertAgentRun(
-            AgentRunSnapshot(
-                id: run.id,
-                projectID: projectID,
-                kind: run.kind,
-                status: run.status,
-                idempotencyKey: run.idempotencyKey,
-                currentStage: "provider.toolExecuted",
-                startedAt: run.startedAt,
-                updatedAt: now
-            ),
-            conversationID: invocation.conversationID,
-            in: db
+        switch invocation.arguments {
+        case .create:
+            guard run.projectID == nil, projectID != nil else {
+                throw AppDatabaseError.invalidAgentRun
+            }
+        case .status:
+            guard run.projectID == projectID else {
+                throw AppDatabaseError.invalidAgentRun
+            }
+        }
+        try db.execute(
+            sql: """
+                UPDATE agentRun
+                SET projectID = ?, currentStage = ?, updatedAt = ?
+                WHERE id = ?
+                  AND conversationID = ?
+                  AND projectID IS ?
+                  AND kind = 'providerTurn'
+                  AND status = 'running'
+                """,
+            arguments: [
+                projectID?.uuidString,
+                "provider.toolExecuted",
+                now.timeIntervalSince1970,
+                run.id.uuidString,
+                invocation.conversationID.uuidString,
+                run.projectID?.uuidString
+            ]
         )
+        guard db.changesCount == 1 else {
+            throw AppDatabaseError.idempotencyConflict
+        }
     }
 
     private static func focusProject(
