@@ -2,16 +2,6 @@ import CangJieCore
 import CryptoKit
 import Foundation
 
-enum ProviderAgentRunError: Error, Equatable {
-    case connectionInvalid
-    case unsupportedProvider
-    case invalidStream
-    case requiresReconciliation
-    case terminalRequest
-    case outcomeUnknown(ProviderRequestInterruption)
-    case persistenceFailed
-}
-
 @MainActor
 final class ProviderAgentRunCoordinator {
     static let systemPrompt = """
@@ -175,6 +165,15 @@ final class ProviderAgentRunCoordinator {
             throw ProviderAgentRunError.invalidStream
         }
 
+        if Task.isCancelled {
+            let cancelled = try ProviderRequestLifecycle.cancel(
+                request,
+                now: now()
+            )
+            try database.updateProviderRequest(cancelled)
+            throw ProviderAgentRunError.cancelled
+        }
+
         request = try ProviderRequestLifecycle.markSending(
             request,
             now: now()
@@ -213,6 +212,7 @@ final class ProviderAgentRunCoordinator {
                     )
                 )
             }
+            try Task.checkCancellation()
             guard response.finishReason != nil, let usage else {
                 throw ProviderAgentRunError.invalidStream
             }
@@ -278,6 +278,7 @@ final class ProviderAgentRunCoordinator {
         var receipts: [ToolReceipt] = []
 
         while !completion.response.toolCalls.isEmpty {
+            try Task.checkCancellation()
             guard completion.request.identity.turnSequence
                     < ProviderRequestLifecycle.maximumTurnsPerAttempt else {
                 throw ProviderAgentRunError.terminalRequest

@@ -520,8 +520,13 @@ extension AppDatabase {
             throw AppDatabaseError.invalidAgentRun
         }
         let existing = try decodeAgentRun(row)
+        let scopeMatches = try providerContinuationRunScopeMatches(
+            existing,
+            request: request,
+            in: db
+        )
         guard existing.kind == "providerTurn",
-              existing.projectID == request.identity.projectID else {
+              scopeMatches else {
             throw AppDatabaseError.invalidAgentRun
         }
         let projection: (AgentRunStatus, String)

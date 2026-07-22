@@ -1,6 +1,17 @@
 import CangJieCore
 import Foundation
 
+enum ProviderAgentRunError: Error, Equatable {
+    case cancelled
+    case connectionInvalid
+    case unsupportedProvider
+    case invalidStream
+    case requiresReconciliation
+    case terminalRequest
+    case outcomeUnknown(ProviderRequestInterruption)
+    case persistenceFailed
+}
+
 struct ProviderRunProjection: Equatable {
     let requestID: UUID
     let phase: ProviderRequestPhase

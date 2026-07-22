@@ -1148,10 +1148,18 @@ struct ContentView: View {
                             .background(.background, in: RoundedRectangle(cornerRadius: 12))
                             .accessibilityIdentifier("conversation-message-\(index)")
                     }
+                    if let providerStreamText = model.displayedProviderStreamText {
+                        Text("仓颉：\(providerStreamText)")
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(12)
+                            .background(.background, in: RoundedRectangle(cornerRadius: 12))
+                            .accessibilityIdentifier("provider-streaming-message")
+                    }
                 }
                 .padding()
             }
-            if setup.isPresented(for: model.selectedConversationID) {
+            if setup.isPresented(for: model.selectedConversationID)
+                && !model.isProviderRunVisible {
                 ModelConnectionSetupCard(setup: setup) {
                     setup.cancel()
                 }
@@ -1164,6 +1172,37 @@ struct ContentView: View {
             }
             if let chapter = pendingRewriteScopeApproval {
                 pendingRewriteScopeCard(chapter)
+            }
+            if model.isProviderRunVisible {
+                HStack(spacing: 10) {
+                    ProgressView()
+                    Text(model.displayedBusinessStatus)
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    if model.canCancelProviderRun {
+                        Button {
+                            model.cancelProviderRun()
+                        } label: {
+                            Image(systemName: "xmark.circle.fill")
+                        }
+                        .accessibilityLabel("停止这次处理")
+                        .accessibilityIdentifier("provider-run-cancel")
+                    }
+                }
+                .padding(.horizontal)
+                .padding(.vertical, 8)
+            }
+            if model.canRetryProviderRun {
+                Button {
+                    model.retryProviderRun()
+                } label: {
+                    Label("重试这次处理", systemImage: "arrow.clockwise")
+                }
+                .buttonStyle(.bordered)
+                .padding(.horizontal)
+                .padding(.bottom, 8)
+                .accessibilityIdentifier("provider-run-retry")
             }
             HStack(alignment: .bottom) {
                     ZStack(alignment: .topLeading) {

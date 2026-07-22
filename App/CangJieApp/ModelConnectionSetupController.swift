@@ -8,7 +8,7 @@ enum ModelConnectionSetupConversationCopy {
     static let connectionRequired =
         "要继续这件事，请先选一个模型服务。原消息已经保留，连接好之后会回到这里继续。"
     static let connectionReady =
-        "连接已保存，原请求已保留。当前版本已完成连接和选模，真正的模型请求将在下一步接入。"
+        "连接已保存，正在回到原对话继续处理。"
 }
 
 enum ModelConnectionSetupStep: Equatable {
@@ -68,6 +68,7 @@ final class ModelConnectionSetupController: ObservableObject {
     private let allowsPendingResume: Bool
     private var attempt: ModelDiscoveryAttempt?
     private var networkResult: ModelDiscoveryNetworkResult?
+    private var onResumeDecisionReady: ((ModelRequestAdmissionDecision) -> Void)?
     private var discoveryTask: Task<ModelDiscoveryNetworkResult, Error>?
     private var generation = UUID()
     private var isClearingTransientState = false
@@ -162,6 +163,19 @@ final class ModelConnectionSetupController: ObservableObject {
         step = .chooseProvider
     }
 
+    func setResumeDecisionHandler(
+        _ handler: @escaping (ModelRequestAdmissionDecision) -> Void
+    ) {
+        onResumeDecisionReady = handler
+    }
+
+    private func publishResumeDecision(
+        _ decision: ModelRequestAdmissionDecision
+    ) {
+        resumeDecision = decision
+        onResumeDecisionReady?(decision)
+    }
+
     func openManagement() {
         begin(pendingIntent: nil)
         isExplicitManagement = true
@@ -193,7 +207,9 @@ final class ModelConnectionSetupController: ObservableObject {
 
         if let currentMetadata,
            let verified = try? credentials.verifiedConnection(for: currentMetadata.connection) {
-            resumeDecision = ModelRequestAdmission.resume(pendingIntent, with: verified)
+            publishResumeDecision(
+                ModelRequestAdmission.resume(pendingIntent, with: verified)
+            )
             currentConnection = verified.connection
             clearSensitiveDiscoveryState()
             step = .completed
@@ -430,7 +446,9 @@ final class ModelConnectionSetupController: ObservableObject {
             currentConnection = verified.connection
             currentMetadata = stored
             if let pendingIntent {
-                resumeDecision = ModelRequestAdmission.resume(pendingIntent, with: verified)
+                publishResumeDecision(
+                    ModelRequestAdmission.resume(pendingIntent, with: verified)
+                )
             }
             refreshStoredState()
             clearSensitiveDiscoveryState()
@@ -460,7 +478,9 @@ final class ModelConnectionSetupController: ObservableObject {
         currentConnection = verified.connection
         currentMetadata = stored
         if let pendingIntent {
-            resumeDecision = ModelRequestAdmission.resume(pendingIntent, with: verified)
+            publishResumeDecision(
+                ModelRequestAdmission.resume(pendingIntent, with: verified)
+            )
             step = .completed
         } else {
             resumeDecision = nil

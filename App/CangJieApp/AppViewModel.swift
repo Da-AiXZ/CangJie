@@ -71,6 +71,8 @@ final class AppViewModel: ObservableObject {
     @Published private(set) var chapter: ChapterRuntimeSnapshot?
     @Published private(set) var buildActivationMessage = "Checking executable identity..."
     @Published private(set) var buildIdentity: BuildIdentity
+    @Published private(set) var providerStreamText = ""
+    @Published private(set) var canCancelProviderRun = false
 
     let modelConnectionSetup: ModelConnectionSetupController
 
@@ -83,7 +85,13 @@ final class AppViewModel: ObservableObject {
 
     var status: String { errorMessage ?? businessStatus }
     var displayedBusinessStatus: String {
-        modelConnectionSetup.conversationStatus(for: selectedConversationID) ?? businessStatus
+        if isProviderRunVisible
+            || (modelConnectionSetup.pendingIntent != nil && latestAgentRun != nil) {
+            return businessStatus
+        }
+        return modelConnectionSetup.conversationStatus(
+            for: selectedConversationID
+        ) ?? businessStatus
     }
     var isAgentExecutionAllowed: Bool { buildIdentity.isAgentExecutionAllowed }
     var isComposerAvailable: Bool {
@@ -93,6 +101,29 @@ final class AppViewModel: ObservableObject {
             && !modelConnectionSetup.blocksComposer(for: selectedConversationID)
     }
     var hasReadableContent: Bool { readableContent != nil }
+    var isProviderRunActive: Bool { activeProviderIntentID != nil }
+    var isProviderRunVisible: Bool {
+        isProviderRunActive
+            && providerStreamConversationID == selectedConversationID
+    }
+    var displayedProviderStreamText: String? {
+        guard providerStreamConversationID == selectedConversationID,
+              !providerStreamText.isEmpty else {
+            return nil
+        }
+        return providerStreamText
+    }
+    var canRetryProviderRun: Bool {
+        guard !isProviderRunActive,
+              case let .prepareProviderRequest(intent, _) =
+                modelConnectionSetup.resumeDecision,
+              let database,
+              let request = try? database.providerRequest(intentID: intent.id),
+              ProviderRequestRecovery.nextAction(for: request) == .terminal else {
+            return false
+        }
+        return request.phase == .failed || request.phase == .cancelled
+    }
     var chapterNeedsReview: Bool {
         chapter?.stage == .reviewingV1 || chapter?.stage == .reviewingV2
     }
@@ -113,6 +144,7 @@ final class AppViewModel: ObservableObject {
     private let compiledBuildStamp: BuildIdentityStamp
     private let bundleIdentityLoader: any BundleBuildIdentityLoading
     private let executionAuthorizer: BuildActivationAgentAuthorizer
+    private let providerRunCoordinator: ProviderAgentRunCoordinator?
     private let taskID: UUID
     private var streamTask: Task<Void, Never>?
     private var streamGeneration: UUID?
@@ -124,6 +156,10 @@ final class AppViewModel: ObservableObject {
     private var draftAutosaveTask: Task<Void, Never>?
     private var pendingDraftAutosave: S1DraftAutosaveContract.Request?
     private var draftAutosaveGeneration: UInt64 = 0
+    private var providerRunTask: Task<Void, Never>?
+    private var providerRunGeneration: UUID?
+    private var activeProviderIntentID: UUID?
+    private var providerStreamConversationID: UUID?
 
     init(
         database: AppDatabase? = nil,
@@ -131,6 +167,8 @@ final class AppViewModel: ObservableObject {
         keychain: any SecretRepository = KeychainSecretRepository(),
         modelCredentialRepository: (any ModelCredentialRepository)? = nil,
         modelDiscoveryClient: any ModelDiscoveryServing = ModelDiscoveryNetworkClient(),
+        providerGenerationService: any ProviderGenerationServing =
+            ProviderGenerationNetworkClient(),
         isolationCanaryRepository: any IsolationCanaryRepository = KeychainIsolationCanaryRepository(),
         bundleInfo: [String: Any]? = BuildIdentityStamp.generated.infoDictionary,
         compiledBuildStamp: BuildIdentityStamp = .generated,
@@ -259,6 +297,13 @@ final class AppViewModel: ObservableObject {
         }
 
         self.database = databaseState.database
+        self.providerRunCoordinator = databaseState.database.map {
+            ProviderAgentRunCoordinator(
+                database: $0,
+                credentials: resolvedModelCredentialRepository,
+                generation: providerGenerationService
+            )
+        }
         self.modelConnectionSetup = ModelConnectionSetupController(
             database: databaseState.database,
             credentials: resolvedModelCredentialRepository,
@@ -312,6 +357,12 @@ final class AppViewModel: ObservableObject {
         if buildIdentity.isAgentExecutionAllowed {
             refreshProbeState(publishSuccess: false)
             refreshIsolationCanary(publishSuccess: false)
+        }
+        modelConnectionSetup.setResumeDecisionHandler { [weak self] decision in
+            self?.resumeProviderRequest(decision)
+        }
+        if let decision = modelConnectionSetup.resumeDecision {
+            resumeProviderRequest(decision)
         }
     }
 
@@ -631,7 +682,11 @@ final class AppViewModel: ObservableObject {
         }
 
         isAgentWorking = true
-        defer { isAgentWorking = false }
+        defer {
+            if !isProviderRunActive {
+                isAgentWorking = false
+            }
+        }
         do {
             let result = try database.appendPendingModelIntentTurn(
                 selectedConversationID: selectedConversationID,
@@ -640,9 +695,11 @@ final class AppViewModel: ObservableObject {
             )
             applyS1ConversationWorkspace(result.workspace)
             clearErrors(in: .composer)
-            businessStatus = modelConnectionSetup.conversationStatus(
-                for: selectedConversationID
-            ) ?? ModelConnectionSetupConversationCopy.connectionRequired
+            if !isProviderRunActive {
+                businessStatus = modelConnectionSetup.conversationStatus(
+                    for: selectedConversationID
+                ) ?? ModelConnectionSetupConversationCopy.connectionRequired
+            }
         } catch AppDatabaseError.pendingModelIntentAlreadyExists {
             modelConnectionSetup.restorePendingIntent(for: selectedConversationID)
             publishError(
@@ -652,6 +709,190 @@ final class AppViewModel: ObservableObject {
         } catch {
             publishError("消息无法保存，原文仍然保留（S2-INTENT-SAVE）", domain: .composer)
         }
+    }
+
+    private func resumeProviderRequest(
+        _ decision: ModelRequestAdmissionDecision,
+        permitsTerminalRetry: Bool = false
+    ) {
+        guard case let .prepareProviderRequest(intent, verifiedConnection) = decision,
+              intent.conversationID == selectedConversationID,
+              activeProviderIntentID == nil,
+              providerRunTask == nil,
+              lifecyclePermitsMutations,
+              let database,
+              let providerRunCoordinator else {
+            return
+        }
+        do {
+            if let request = try database.providerRequest(intentID: intent.id) {
+                switch ProviderRequestRecovery.nextAction(for: request) {
+                case .sendPersistedRequest, .continueFromDurableResponse:
+                    break
+                case .reconcileUnknownOutcome:
+                    let reconciled = try ProviderRequestReconciler(
+                        database: database
+                    ).reconcile(request)
+                    latestAgentRun = try database.agentRun(
+                        id: reconciled.identity.runID,
+                        conversationID: reconciled.identity.conversationID
+                    )
+                    businessStatus = "本地安全对账已完成，这次请求的结果仍不能确认"
+                    return
+                case .terminal:
+                    guard permitsTerminalRetry else {
+                        businessStatus = "上次请求已经结束，请明确重试后再继续"
+                        return
+                    }
+                }
+            }
+        } catch {
+            publishError("模型请求恢复失败（S2-PROVIDER-RESTORE）", domain: .composer)
+            return
+        }
+        guard requireActiveBuildForAgentMutation() else { return }
+
+        let generation = UUID()
+        providerRunGeneration = generation
+        activeProviderIntentID = intent.id
+        providerStreamConversationID = intent.conversationID
+        providerStreamText = ""
+        canCancelProviderRun = true
+        isAgentWorking = true
+        businessStatus = "正在通过当前模型连接处理这件事"
+        providerRunTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            do {
+                let completion = try await providerRunCoordinator.runToCompletion(
+                    intent: intent,
+                    verifiedConnection: verifiedConnection
+                ) { [weak self] projection in
+                    self?.applyProviderRunProjection(
+                        projection,
+                        intentID: intent.id,
+                        generation: generation
+                    )
+                }
+                self.finishProviderRun(
+                    completion,
+                    intentID: intent.id,
+                    generation: generation
+                )
+            } catch {
+                self.failProviderRun(
+                    error,
+                    intentID: intent.id,
+                    generation: generation
+                )
+            }
+        }
+    }
+
+    private func applyProviderRunProjection(
+        _ projection: ProviderRunProjection,
+        intentID: UUID,
+        generation: UUID
+    ) {
+        guard activeProviderIntentID == intentID,
+              providerRunGeneration == generation else {
+            return
+        }
+        providerStreamText = projection.text
+        canCancelProviderRun = projection.phase == .sending
+            || projection.phase == .streaming
+        businessStatus = projection.phase == .streaming
+            ? "仓颉正在回复"
+            : "正在通过当前模型连接处理这件事"
+    }
+
+    private func finishProviderRun(
+        _ completion: ProviderAgentLoopCompletion,
+        intentID: UUID,
+        generation: UUID
+    ) {
+        guard activeProviderIntentID == intentID,
+              providerRunGeneration == generation else {
+            return
+        }
+        activeProviderIntentID = nil
+        providerRunGeneration = nil
+        providerRunTask = nil
+        providerStreamConversationID = nil
+        providerStreamText = ""
+        canCancelProviderRun = false
+        isAgentWorking = false
+        lastToolReceipt = completion.receipts.last
+        projects = completion.projects
+        do {
+            if let database {
+                latestAgentRun = try database.agentRun(
+                    id: completion.request.identity.runID,
+                    conversationID: completion.request.identity.conversationID
+                )
+                applyS1ConversationWorkspace(
+                    try database.restoreS1ConversationWorkspace()
+                )
+            }
+            clearErrors(in: .composer)
+            businessStatus = "这件事已经处理完成"
+        } catch {
+            publishError("模型结果已完成，但界面恢复失败（S2-PROVIDER-PROJECT）")
+        }
+    }
+
+    private func failProviderRun(
+        _ error: Error,
+        intentID: UUID,
+        generation: UUID
+    ) {
+        guard activeProviderIntentID == intentID,
+              providerRunGeneration == generation else {
+            return
+        }
+        activeProviderIntentID = nil
+        providerRunGeneration = nil
+        providerRunTask = nil
+        providerStreamConversationID = nil
+        providerStreamText = ""
+        canCancelProviderRun = false
+        isAgentWorking = false
+        if let database,
+           let request = try? database.providerRequest(intentID: intentID) {
+            latestAgentRun = try? database.agentRun(
+                id: request.identity.runID,
+                conversationID: request.identity.conversationID
+            )
+        }
+        guard let providerError = error as? ProviderAgentRunError else {
+            businessStatus = "这次模型处理没有完成，原请求仍然保留"
+            return
+        }
+        switch providerError {
+        case .cancelled:
+            businessStatus = "这次处理已安全停止，原请求仍然保留"
+        case .requiresReconciliation, .outcomeUnknown:
+            businessStatus = "这次请求的结果还不能确认，已保留原请求等待安全对账"
+        case .connectionInvalid:
+            businessStatus = "当前模型连接已失效，原请求仍然保留"
+        case .unsupportedProvider:
+            businessStatus = "当前模型服务暂不支持真实生成，原请求仍然保留"
+        default:
+            businessStatus = "这次模型处理没有完成，原请求仍然保留"
+        }
+    }
+
+    func cancelProviderRun() {
+        guard providerRunTask != nil, canCancelProviderRun else { return }
+        businessStatus = "正在安全停止这次模型处理"
+        providerRunTask?.cancel()
+    }
+
+    func retryProviderRun() {
+        guard canRetryProviderRun,
+              let decision = modelConnectionSetup.resumeDecision else {
+            return
+        }
+        resumeProviderRequest(decision, permitsTerminalRetry: true)
     }
 
     func openModelConnectionSetup() {
@@ -980,6 +1221,9 @@ final class AppViewModel: ObservableObject {
     private func pauseGovernedWork() {
         cancelDraftAutosaveTimer()
         modelConnectionSetup.suspendDiscovery()
+        if canCancelProviderRun {
+            providerRunTask?.cancel()
+        }
         streamGeneration = nil
         streamTask?.cancel()
         streamTask = nil
@@ -1028,11 +1272,21 @@ final class AppViewModel: ObservableObject {
             planAwaitingApproval = false
             openingPlanApproval = nil
             interviewStep = 0
-            lastToolReceipt = nil
-            latestAgentRun = nil
+            let hasPendingProviderProjection =
+                modelConnectionSetup.pendingIntent != nil
+            if !hasPendingProviderProjection {
+                lastToolReceipt = nil
+                latestAgentRun = nil
+            }
             chapter = nil
             projectedBusinessMilestone = nil
-            businessStatus = "对话和草稿已恢复。当前只验证界面、导航和本地保存，尚未接入真正的模型任务"
+            if !hasPendingProviderProjection {
+                businessStatus = "对话和草稿已恢复"
+            } else if latestAgentRun == nil {
+                businessStatus = modelConnectionSetup.conversationStatus(
+                    for: selectedConversationID
+                ) ?? businessStatus
+            }
         } catch {
             publishError("Conversation restore failed (S1-RESTORE)")
         }
