@@ -42,11 +42,11 @@ extension AppDatabase {
             let assetJSON: String = assetRow["payloadJSON"]
             let assetStoredHash: String = assetRow["payloadHash"]
             guard assetStoredHash == responseHash,
-                  assetStoredHash == payloadHash(assetJSON),
+                  assetStoredHash == Self.payloadHash(assetJSON),
                   assetJSON.utf8.count == request.receivedUTF8Bytes else {
                 throw AppDatabaseError.invalidProviderResponseAsset
             }
-            let payload = try decodeProviderResponse(assetJSON)
+            let payload = try Self.decodeProviderResponse(assetJSON)
             try payload.validate(allowIncompleteToolCalls: false)
             guard payload.toolCalls.isEmpty,
                   !payload.text.isEmpty else {
@@ -58,7 +58,7 @@ extension AppDatabase {
             )
             try Self.updateProviderRequestRow(
                 committed,
-                expectedPayloadHash: payloadHash(
+                expectedPayloadHash: Self.payloadHash(
                     try Self.encodeProviderRequest(existing)
                 ),
                 in: db

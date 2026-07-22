@@ -246,7 +246,7 @@ extension AppDatabase {
         switch invocation.arguments {
         case .create:
             guard let outputReference = receipt.outputReference,
-                  let storedProject = try project(
+                  let storedProject = try Self.project(
                     id: outputReference,
                     in: db
                   ), receipt.projectID == storedProject.id else {
@@ -255,7 +255,7 @@ extension AppDatabase {
             project = storedProject
         case .status:
             if let outputReference = receipt.outputReference {
-                guard let storedProject = try project(
+                guard let storedProject = try Self.project(
                     id: outputReference,
                     in: db
                 ), receipt.projectID == storedProject.id else {
