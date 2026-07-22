@@ -3,6 +3,7 @@ import Foundation
 import XCTest
 @testable import CangJie
 
+@MainActor
 final class ProviderToolExecutionTests: XCTestCase {
     func testProjectCreateCommitsExactReceiptAndReplaysWithoutDuplication() throws {
         let fixture = try makeFixture(
