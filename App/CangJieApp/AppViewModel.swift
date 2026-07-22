@@ -32,6 +32,20 @@ private struct AgentBusinessMilestone: Equatable {
     let chapterRevision: Int?
 }
 
+enum ProviderRunStartBlocker: String, Equatable {
+    case invalidDecision
+    case conversationMismatch
+    case alreadyActive
+    case taskAlreadyPresent
+    case lifecycleBlocked
+    case databaseUnavailable
+    case coordinatorUnavailable
+    case recoveryFailed
+    case reconciliationRequired
+    case explicitRetryRequired
+    case buildAuthorizationFailed
+}
+
 @MainActor
 final class AppViewModel: ObservableObject {
     @Published var draft = "" {
@@ -74,6 +88,7 @@ final class AppViewModel: ObservableObject {
     @Published private(set) var providerStreamText = ""
     @Published private(set) var canCancelProviderRun = false
     @Published private(set) var providerTaskProjection: S2ProviderTaskProjection?
+    private(set) var providerRunStartBlocker: ProviderRunStartBlocker?
 
     let modelConnectionSetup: ModelConnectionSetupController
 
@@ -725,13 +740,33 @@ final class AppViewModel: ObservableObject {
         _ decision: ModelRequestAdmissionDecision,
         permitsTerminalRetry: Bool = false
     ) {
-        guard case let .prepareProviderRequest(intent, verifiedConnection) = decision,
-              intent.conversationID == selectedConversationID,
-              activeProviderIntentID == nil,
-              providerRunTask == nil,
-              lifecyclePermitsMutations,
-              let database,
-              let providerRunCoordinator else {
+        providerRunStartBlocker = nil
+        guard case let .prepareProviderRequest(intent, verifiedConnection) = decision else {
+            providerRunStartBlocker = .invalidDecision
+            return
+        }
+        guard intent.conversationID == selectedConversationID else {
+            providerRunStartBlocker = .conversationMismatch
+            return
+        }
+        guard activeProviderIntentID == nil else {
+            providerRunStartBlocker = .alreadyActive
+            return
+        }
+        guard providerRunTask == nil else {
+            providerRunStartBlocker = .taskAlreadyPresent
+            return
+        }
+        guard lifecyclePermitsMutations else {
+            providerRunStartBlocker = .lifecycleBlocked
+            return
+        }
+        guard let database else {
+            providerRunStartBlocker = .databaseUnavailable
+            return
+        }
+        guard let providerRunCoordinator else {
+            providerRunStartBlocker = .coordinatorUnavailable
             return
         }
         do {
@@ -749,19 +784,25 @@ final class AppViewModel: ObservableObject {
                     )
                     refreshProviderTaskProjection(publishFailure: true)
                     businessStatus = "本地安全对账已完成，这次请求的结果仍不能确认"
+                    providerRunStartBlocker = .reconciliationRequired
                     return
                 case .terminal:
                     guard permitsTerminalRetry else {
                         businessStatus = "上次请求已经结束，请明确重试后再继续"
+                        providerRunStartBlocker = .explicitRetryRequired
                         return
                     }
                 }
             }
         } catch {
+            providerRunStartBlocker = .recoveryFailed
             publishError("模型请求恢复失败（S2-PROVIDER-RESTORE）", domain: .composer)
             return
         }
-        guard requireActiveBuildForAgentMutation() else { return }
+        guard requireActiveBuildForAgentMutation() else {
+            providerRunStartBlocker = .buildAuthorizationFailed
+            return
+        }
 
         let generation = UUID()
         providerRunGeneration = generation

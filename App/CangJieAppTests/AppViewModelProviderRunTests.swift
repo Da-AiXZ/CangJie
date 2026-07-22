@@ -52,6 +52,7 @@ final class AppViewModelProviderRunTests: XCTestCase {
 
         viewModel.sendModelDependentMessage()
         let intent = try XCTUnwrap(viewModel.modelConnectionSetup.pendingIntent)
+        XCTAssertNil(viewModel.providerRunStartBlocker)
         await viewModel.waitForProviderRunToSettle()
         let conversationID = try XCTUnwrap(viewModel.selectedConversationID)
         let messages = try database.listAgentMessages(
@@ -112,6 +113,7 @@ final class AppViewModelProviderRunTests: XCTestCase {
 
         viewModel.sendModelDependentMessage()
         let intent = try XCTUnwrap(viewModel.modelConnectionSetup.pendingIntent)
+        XCTAssertNil(viewModel.providerRunStartBlocker)
         try await waitUntil {
             try database.providerRequest(intentID: intent.id)?.phase == .streaming
         }
