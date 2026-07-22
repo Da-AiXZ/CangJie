@@ -45,25 +45,13 @@ Formal prose generation is outside S2.
 |---|---|---|---|---|
 | S1 cockpit and workspace | Frozen | Complete | Passed | Accepted |
 | Provider/credential/discovery hardening | Frozen | Complete for slice | Passed | Accepted on Candidate 32 |
-| Central model-connection setup | Frozen | Complete for slice | Passed | Candidate 33 pending |
+| Central model-connection setup | Frozen | Complete for slice | Passed | Accepted on Candidate 33 |
 | Real Provider generation | Frozen boundary | Not implemented | None | None |
 | Provider-backed AgentRun | Frozen boundary | Not implemented | None | None |
 | Typed Tool and ToolReceipt continuation | Frozen boundary | Not implemented | None | None |
 | Force-quit recovery of the real S2 loop | Frozen boundary | Not implemented | None | None |
 
 ## Last accepted device baseline
-
-- Commit: `c27dd70f46658260606a06e68c900bf8a6cb8acc`
-- Version/build: `1.0 (32001)`
-- Candidate Set ID: `801b37a72491afaf1dc7619bdd0a5b2163392551b503da75b3ed3186413668e2`
-- Core CI: `29885862452`
-- iPadOS CI: `29885862456`
-- Candidate workflow: `29886779892`
-- Device result: user reported no problem after the exact validation script.
-
-This is the accepted discovery/credential/journal baseline, not S2 completion.
-
-## Candidate pending device acceptance
 
 - Commit: `cb9b4ebd536ef6dd02c6448f179c4c1f1f145841`
 - Version/build: `1.0 (33001)`
@@ -76,9 +64,9 @@ This is the accepted discovery/credential/journal baseline, not S2 completion.
 - Probe IPA: `CangJie-Keychain-Isolation-Probe.ipa`
 - Probe SHA-256: `70ce44ec5e4786a7b1829ca8d8a381d142ee22e2ebb0046e93a531fcae2ca084`
 - Artifact directory: `artifacts/CangJie-S2-run-29918215122/`
-- Acceptance: fail closed pending exact-pair TrollStore validation.
+- Device result: user reported no problem after testing this candidate on 2026-07-22.
 
-Automated evidence includes manifest/checksum agreement, metadata, arm64 Mach-O, `LC_CODE_SIGNATURE`, strict macOS signing verification and distinct Main/Probe Keychain groups. None of this substitutes for the required device isolation result.
+This is the accepted central connection-setup baseline, not S2 completion.
 
 ## Candidate 33 scope
 
@@ -108,28 +96,18 @@ Explicitly absent:
 
 ## Active blocker
 
-Candidate 33 requires one physical-device session:
-
-1. Install Main and Probe from the exact Candidate Set directory.
-2. Confirm build `33001`, visible commit `cb9b4ebd536e` and Candidate Set ID.
-3. Prepare the Main isolation canary.
-4. Require the Probe own-group control to succeed.
-5. Require the Probe query against the Main group to return `errSecMissingEntitlement`.
-6. Return to Main and verify the canary is unchanged.
-7. Verify blank composer input, deferred setup, explicit model selection and relaunch restoration.
-
-Do not uninstall, mix candidate files or perform a second overwrite to recover a first-launch process-identity warning. Force-quit and relaunch are a separate event from installation.
+No external blocker. S2 remains incomplete because the real Provider, AgentRun,
+Typed Tool, ToolReceipt and recovery loop has not yet been implemented.
 
 ## Immediate queue
 
-1. Record Candidate 33 device acceptance or the first exact failure.
-2. Add the durable Provider request lifecycle and streaming checkpoint.
-3. Create the Provider-backed `AgentRun` state projection.
-4. Add the minimum versioned Typed Tools for project creation and status query.
-5. Persist the exact `ToolReceipt` in the same governed transaction.
-6. Consume the pending intent only when continuation is durably committed.
-7. Prove unknown-outcome reconciliation and force-quit recovery.
-8. Build the next candidate only when a device-observable boundary changes.
+1. Add the durable Provider request lifecycle and streaming checkpoint.
+2. Create the Provider-backed `AgentRun` state projection.
+3. Add the minimum versioned Typed Tools for project creation and status query.
+4. Persist the exact `ToolReceipt` in the same governed transaction.
+5. Consume the pending intent only when continuation is durably committed.
+6. Prove unknown-outcome reconciliation and force-quit recovery.
+7. Build the next candidate only when a device-observable boundary changes.
 
 ## Stable decision routing
 
