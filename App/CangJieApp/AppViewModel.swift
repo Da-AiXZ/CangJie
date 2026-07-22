@@ -701,6 +701,9 @@ final class AppViewModel: ObservableObject {
                 intentID: UUID()
             )
             applyS1ConversationWorkspace(result.workspace)
+            if let decision = modelConnectionSetup.resumeDecision {
+                resumeProviderRequest(decision)
+            }
             clearErrors(in: .composer)
             if !isProviderRunActive {
                 businessStatus = modelConnectionSetup.conversationStatus(
@@ -906,8 +909,13 @@ final class AppViewModel: ObservableObject {
     }
 
     func waitForProviderRunToSettle() async {
-        let task = providerRunTask
-        await task?.value
+        while providerRunGeneration != nil || providerRunTask != nil {
+            if let task = providerRunTask {
+                await task.value
+            } else {
+                await Task.yield()
+            }
+        }
     }
 
     func openModelConnectionSetup() {
