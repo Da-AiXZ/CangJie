@@ -1255,3 +1255,7 @@ Treating all of `2000::/3` as public admits reserved protocol assignments such a
 ## P-298 SPI scanning follows build-target membership, not directory names
 
 A directory named `Tests` can still be compiled into production, while a production adapter may live outside `App/`. Derive scan roots from every non-test target in the build manifest, scan nested production files regardless of their names, reject missing or repository-escaping roots, and exclude only actual test target types. Detect both same-line and split-line `@testable`/SPI imports; an allowlist is safe only when the source inventory is complete.
+
+## P-299 Canonicalize both sides before computing repository-relative paths
+
+Temporary and workspace roots can have multiple valid spellings: Windows may expand an 8.3 short name, and macOS may resolve `/var` through `/private/var`. If discovered files are canonicalized but the root passed to `Path.relative_to` is not, cross-platform CI fails before the intended contract assertion. Resolve both the source and repository root at the same boundary, and include a lexical alias such as `alias/..` in fixtures so local success does not depend on one filesystem spelling.

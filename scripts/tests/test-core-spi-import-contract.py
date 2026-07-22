@@ -398,7 +398,7 @@ def validate_core_spi_import_contract(
             source_paths.update(source_root.rglob("*.swift"))
 
     for source_path in sorted(source_paths):
-        relative_path = source_path.relative_to(repository_root).as_posix()
+        relative_path = source_path.relative_to(repository_root.resolve()).as_posix()
         scan = scan_core_spi_imports(
             source_path.read_text(encoding="utf-8"),
             relative_path,
@@ -448,7 +448,6 @@ def validate_core_spi_import_contract(
 
     return tuple(errors)
 
-
 class CoreSPIImportFixtureTests(unittest.TestCase):
     @staticmethod
     def write_project(
@@ -479,10 +478,11 @@ class CoreSPIImportFixtureTests(unittest.TestCase):
             "\n".join(lines) + "\n",
             encoding="utf-8",
         )
-
     def test_discovers_every_production_app_target_and_excludes_tests(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
-            repository_root = Path(directory)
+            physical_root = Path(directory)
+            (physical_root / "alias").mkdir()
+            repository_root = physical_root / "alias" / ".."
             included = {
                 "App/CangJieApp/Main.swift",
                 "App/CangJieApp/SecurityTests/Bypass.swift",
@@ -533,12 +533,11 @@ class CoreSPIImportFixtureTests(unittest.TestCase):
             )
 
             actual = {
-                source_path.relative_to(repository_root).as_posix()
+                source_path.relative_to(repository_root.resolve()).as_posix()
                 for source_path in production_app_swift_sources(repository_root)
             }
 
             self.assertEqual(actual, included)
-
     def test_scans_non_app_production_roots_and_excludes_actual_test_targets(
         self,
     ) -> None:
@@ -565,7 +564,7 @@ class CoreSPIImportFixtureTests(unittest.TestCase):
             )
 
             actual = {
-                source_path.relative_to(repository_root).as_posix()
+                source_path.relative_to(repository_root.resolve()).as_posix()
                 for source_path in production_app_swift_sources(repository_root)
             }
             errors = validate_core_spi_import_contract(repository_root, {})

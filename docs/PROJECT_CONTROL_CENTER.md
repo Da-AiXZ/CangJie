@@ -1653,3 +1653,9 @@ Deterministic local evidence after the final fixes:
 - `.tmp-appvm-index.txt` remains untracked and unchanged at 28,868 bytes with SHA-256 `4682EEB10DC361950FB0FDE60A8BFF3D16A801542412AAAA5FDA981392011DE8`. `default.profraw` also remains untracked and unchanged at 89,408 bytes with SHA-256 `4D67D60C3A3E36C95EC24625AD4AE89BE663CB36EE5ECF5AD2F36BBBEEA3F74E`; neither is a commit candidate.
 
 The next gate is remote Core and iPadOS CI for the exact commit. Only after both pass may an IPA workflow be considered. Even then, this slice alone does not complete S2: the real Provider setup surface, authenticated production transport, central Agent request/tool loop and ToolReceipt recovery remain outstanding.
+
+## 2026-07-22 SPI scanner canonical-path CI repair pending remote
+
+Exact commit `1944efd7564015a2ffbfbc8264ce518eb87a1f0b` failed before Swift/Xcode execution in both Core CI `29882716106` and iPadOS CI `29882716077`. The complete logs share one first real error: fixture source paths were resolved to canonical filesystem paths, while `Path.relative_to` used the uncanonical temporary-directory spelling. GitHub-hosted Windows exposed `RUNNER~1` versus `runneradmin`; macOS exposed `/var` versus `/private/var`. Eight SPI fixture cases therefore raised `ValueError` even though the policy assertions were not reached.
+
+The scanner now relativizes against `repository_root.resolve()` everywhere. The primary production-target fixture deliberately passes a lexical `alias/..` repository path so the test exercises canonical-root handling on every platform. The script remains below the file ceiling at 797 physical lines, passes 12/12 locally, and `git diff --check` passes. No Swift, credential, migration, product or authorization behavior changed. Replacement Core/iPadOS CI is required before this repair is accepted; IPA remains blocked.
