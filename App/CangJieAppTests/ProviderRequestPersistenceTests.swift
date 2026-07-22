@@ -126,6 +126,13 @@ final class ProviderRequestPersistenceTests: XCTestCase {
             streaming
         )
         XCTAssertEqual(
+            try fixture.database.agentRun(
+                id: streaming.identity.runID,
+                conversationID: streaming.identity.conversationID
+            )?.currentStage,
+            "provider.streaming"
+        )
+        XCTAssertEqual(
             try fixture.database.providerResponsePayload(
                 assetID: streaming.responseAssetID
             ),
@@ -228,6 +235,13 @@ final class ProviderRequestPersistenceTests: XCTestCase {
         XCTAssertEqual(
             try fixture.database.providerRequest(id: completed.identity.requestID),
             completed
+        )
+        XCTAssertEqual(
+            try fixture.database.agentRun(
+                id: completed.identity.runID,
+                conversationID: completed.identity.conversationID
+            )?.currentStage,
+            "provider.responseComplete"
         )
         let committed = try ProviderRequestLifecycle.commitContinuation(
             completed,

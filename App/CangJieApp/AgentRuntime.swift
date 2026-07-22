@@ -250,6 +250,10 @@ final class AgentRuntime {
         let existingRun = try database.agentRun(idempotencyKey: approvalKey)
         let run: AgentRunSnapshot
         if let existingRun {
+            guard existingRun.status == .completed
+                    || existingRun.status.canReconcileSuccessfulApproval else {
+                throw AppDatabaseError.invalidAgentRun
+            }
             run = existingRun
         } else {
             let projectID = try database.loadAgentSession(conversationID: conversation.id)?.focusedProjectID
@@ -259,15 +263,17 @@ final class AgentRuntime {
                 currentStage: "openingPlan.approve", startedAt: now, updatedAt: now
             )
         }
-        try authorizer.authorize(.durableMutation)
-        try database.saveAgentRun(
-            AgentRunSnapshot(
-                id: run.id, projectID: run.projectID,
-                kind: run.kind, status: .running, idempotencyKey: run.idempotencyKey,
-                currentStage: "openingPlan.approve", startedAt: run.startedAt, updatedAt: now
-            ),
-            conversationID: conversation.id
-        )
+        if run.status != .completed {
+            try authorizer.authorize(.durableMutation)
+            try database.saveAgentRun(
+                AgentRunSnapshot(
+                    id: run.id, projectID: run.projectID,
+                    kind: run.kind, status: .running, idempotencyKey: run.idempotencyKey,
+                    currentStage: "openingPlan.approve", startedAt: run.startedAt, updatedAt: now
+                ),
+                conversationID: conversation.id
+            )
+        }
 
         do {
             try authorizer.authorize(.openingPlanApproval)

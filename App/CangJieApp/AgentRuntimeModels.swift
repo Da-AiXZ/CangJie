@@ -86,6 +86,7 @@ struct AgentSessionState: Equatable {
 enum AgentRunStatus: String, Codable, Equatable {
     case queued
     case running
+    case reconciling
     case waitingUser
     case paused
     case failed
@@ -94,7 +95,7 @@ enum AgentRunStatus: String, Codable, Equatable {
 
     var canReconcileSuccessfulApproval: Bool {
         switch self {
-        case .queued, .running, .waitingUser:
+        case .queued, .running, .reconciling, .waitingUser:
             return true
         case .paused, .failed, .completed, .cancelled:
             return false

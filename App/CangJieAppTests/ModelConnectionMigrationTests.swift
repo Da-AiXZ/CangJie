@@ -56,27 +56,48 @@ final class ModelConnectionMigrationTests: XCTestCase {
         }
     }
 
-    func testPendingIntentConversationMigrationCreatesUniqueConstraint() throws {
+    func testPendingIntentConversationMigrationCreatesUnconsumedUniqueConstraint() throws {
         try withTemporaryDatabasePath { path in
             let database = try AppDatabase(path: path)
-            let state = try database.queue.read { db -> (Int, Int) in
+            let state = try database.queue.read { db -> (Int, String, Int, Int) in
                 let uniqueFlag = try Int.fetchOne(
                     db,
                     sql: """
                         SELECT \"unique\"
                         FROM pragma_index_list('pendingModelIntent')
-                        WHERE name = 'pendingModelIntent_conversation_unique'
+                        WHERE name = 'pendingModelIntent_conversation_unconsumed'
                         """
                 ) ?? 0
-                let migrationCount = try Int.fetchOne(
+                let indexSQL = try String.fetchOne(
+                    db,
+                    sql: """
+                        SELECT sql
+                        FROM sqlite_master
+                        WHERE type = 'index'
+                          AND name = 'pendingModelIntent_conversation_unconsumed'
+                        """
+                ) ?? ""
+                let originalMigrationCount = try Int.fetchOne(
                     db,
                     sql: "SELECT COUNT(*) FROM grdb_migrations WHERE identifier = ?",
                     arguments: ["s2-pending-model-intent-conversation-unique-v1"]
                 ) ?? 0
-                return (uniqueFlag, migrationCount)
+                let providerMigrationCount = try Int.fetchOne(
+                    db,
+                    sql: "SELECT COUNT(*) FROM grdb_migrations WHERE identifier = ?",
+                    arguments: ["s2-provider-request-runtime-v1"]
+                ) ?? 0
+                return (
+                    uniqueFlag,
+                    indexSQL,
+                    originalMigrationCount,
+                    providerMigrationCount
+                )
             }
             XCTAssertEqual(state.0, 1)
-            XCTAssertEqual(state.1, 1)
+            XCTAssertTrue(state.1.contains("WHERE consumedAt IS NULL"))
+            XCTAssertEqual(state.2, 1)
+            XCTAssertEqual(state.3, 1)
         }
     }
 

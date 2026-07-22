@@ -4,8 +4,8 @@ import GRDB
 
 struct ProviderToolCallPayload: Codable, Equatable {
     let index: Int
-    let id: String
-    let name: String
+    let id: String?
+    let name: String?
     let argumentsJSON: String
 }
 
@@ -46,19 +46,34 @@ struct ProviderResponsePayload: Codable, Equatable {
         try container.encode(toolCalls, forKey: .toolCalls)
     }
 
-    func validate() throws {
+    func validate(allowIncompleteToolCalls: Bool = true) throws {
         guard toolCalls.count <= Self.maximumToolCalls,
               text.utf8.count <= Self.maximumUTF8Bytes,
               toolCalls.enumerated().allSatisfy({ offset, call in
                   call.index == offset
-                      && !call.id.isEmpty
-                      && call.id.utf8.count <= 512
-                      && !call.name.isEmpty
-                      && call.name.utf8.count <= 256
+                      && (call.id?.utf8.count ?? 0) <= 512
+                      && (call.name?.utf8.count ?? 0) <= 256
                       && call.argumentsJSON.utf8.count
                           <= Self.maximumToolArgumentsUTF8Bytes
               }) else {
             throw AppDatabaseError.invalidProviderResponseAsset
+        }
+        if !allowIncompleteToolCalls {
+            guard finishReason != nil,
+                  toolCalls.allSatisfy({ call in
+                      guard let id = call.id,
+                            let name = call.name,
+                            !id.isEmpty,
+                            !name.isEmpty,
+                            let data = call.argumentsJSON.data(using: .utf8),
+                            (try? JSONSerialization.jsonObject(with: data))
+                                is [String: Any] else {
+                          return false
+                      }
+                      return true
+                  }) else {
+                throw AppDatabaseError.invalidProviderResponseAsset
+            }
         }
     }
 }
@@ -215,6 +230,7 @@ extension AppDatabase {
                 ),
                 in: db
             )
+            try Self.updateProviderBackedRun(validated, in: db)
         }
     }
 
@@ -251,7 +267,7 @@ extension AppDatabase {
                 throw AppDatabaseError.invalidProviderResponseAsset
             }
             let payload = try Self.decodeProviderResponse(assetJSON)
-            try payload.validate()
+            try payload.validate(allowIncompleteToolCalls: false)
             do {
                 try ProviderRequestLifecycle.validateTransition(
                     from: existing,
@@ -267,6 +283,7 @@ extension AppDatabase {
                 ),
                 in: db
             )
+            try Self.updateProviderBackedRun(validated, in: db)
         }
     }
 
@@ -329,6 +346,7 @@ extension AppDatabase {
                 ),
                 in: db
             )
+            try Self.updateProviderBackedRun(validated, in: db)
         }
     }
 
@@ -410,6 +428,60 @@ extension AppDatabase {
         guard db.changesCount == 1 else {
             throw AppDatabaseError.idempotencyConflict
         }
+    }
+
+    static func updateProviderBackedRun(
+        _ request: ProviderRequestSnapshot,
+        in db: Database
+    ) throws {
+        guard let row = try Row.fetchOne(
+            db,
+            sql: "SELECT * FROM agentRun WHERE id = ? AND conversationID = ?",
+            arguments: [
+                request.identity.runID.uuidString,
+                request.identity.conversationID.uuidString
+            ]
+        ) else {
+            throw AppDatabaseError.invalidAgentRun
+        }
+        let existing = try decodeAgentRun(row)
+        guard existing.kind == "providerTurn",
+              existing.projectID == request.identity.projectID else {
+            throw AppDatabaseError.invalidAgentRun
+        }
+        let projection: (AgentRunStatus, String)
+        switch request.phase {
+        case .prepared:
+            projection = (.running, "provider.prepared")
+        case .sending:
+            projection = (.running, "provider.sending")
+        case .streaming:
+            projection = (.running, "provider.streaming")
+        case .responseComplete:
+            projection = (.running, "provider.responseComplete")
+        case .continuationCommitted:
+            projection = (.completed, "provider.continuationCommitted")
+        case .cancelled:
+            projection = (.cancelled, "provider.cancelled")
+        case .failed:
+            projection = (.failed, "provider.failed")
+        case .outcomeUnknown:
+            projection = (.reconciling, "provider.outcomeUnknown")
+        }
+        try upsertAgentRun(
+            AgentRunSnapshot(
+                id: existing.id,
+                projectID: existing.projectID,
+                kind: existing.kind,
+                status: projection.0,
+                idempotencyKey: existing.idempotencyKey,
+                currentStage: projection.1,
+                startedAt: existing.startedAt,
+                updatedAt: request.updatedAt
+            ),
+            conversationID: request.identity.conversationID,
+            in: db
+        )
     }
 
     private static func decodeProviderRequest(

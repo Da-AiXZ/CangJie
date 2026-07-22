@@ -12,6 +12,7 @@ public enum ProviderRequestPhase: String, Codable, Equatable, Sendable {
 }
 
 public enum ProviderRequestFailure: String, Codable, Equatable, Sendable {
+    case invalidRequest
     case authentication
     case permissionDenied
     case rateLimited
@@ -579,6 +580,7 @@ public enum ProviderRequestLifecycle {
         now: Date
     ) throws -> ProviderRequestSnapshot {
         let definitiveFailures: Set<ProviderRequestFailure> = [
+            .invalidRequest,
             .authentication,
             .permissionDenied,
             .rateLimited,
