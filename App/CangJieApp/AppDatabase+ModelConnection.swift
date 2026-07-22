@@ -162,6 +162,10 @@ extension AppDatabase {
             sql: "SELECT * FROM pendingModelIntent WHERE id = ?",
             arguments: [intent.id.uuidString]
         ) {
+            let consumedAt: Double? = existingRow["consumedAt"]
+            guard consumedAt == nil else {
+                throw AppDatabaseError.idempotencyConflict
+            }
             let existing = try Self.decodePendingModelIntent(existingRow)
             guard existing == intent else {
                 throw AppDatabaseError.idempotencyConflict
@@ -186,7 +190,7 @@ extension AppDatabase {
         }
         guard try Row.fetchOne(
             db,
-            sql: "SELECT 1 FROM pendingModelIntent WHERE conversationID = ? LIMIT 1",
+            sql: "SELECT 1 FROM pendingModelIntent WHERE conversationID = ? AND consumedAt IS NULL LIMIT 1",
             arguments: [intent.conversationID.uuidString]
         ) == nil else {
             throw AppDatabaseError.pendingModelIntentAlreadyExists
@@ -219,7 +223,7 @@ extension AppDatabase {
         try queue.read { db in
             guard let row = try Row.fetchOne(
                 db,
-                sql: "SELECT * FROM pendingModelIntent WHERE id = ?",
+                sql: "SELECT * FROM pendingModelIntent WHERE id = ? AND consumedAt IS NULL",
                 arguments: [id.uuidString]
             ) else {
                 return nil
@@ -236,6 +240,7 @@ extension AppDatabase {
                     SELECT *
                     FROM pendingModelIntent
                     WHERE conversationID = ?
+                      AND consumedAt IS NULL
                     ORDER BY createdAt DESC, rowid DESC
                     LIMIT 1
                     """,
@@ -376,7 +381,7 @@ extension AppDatabase {
         )
     }
 
-    private static func decodeStoredModelConnection(_ row: Row) throws -> StoredModelConnection {
+    static func decodeStoredModelConnection(_ row: Row) throws -> StoredModelConnection {
         let rowID: String = row["id"]
         let credentialID: String = row["credentialID"]
         let credentialVersionID: String = row["credentialVersionID"]
@@ -435,7 +440,7 @@ extension AppDatabase {
         return intent
     }
 
-    private static func currentModelConnection(in db: Database) throws -> StoredModelConnection? {
+    static func currentModelConnection(in db: Database) throws -> StoredModelConnection? {
         guard let state = try Row.fetchOne(
             db,
             sql: "SELECT currentConnectionID FROM modelConnectionState WHERE id = 'default'"

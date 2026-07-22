@@ -143,6 +143,8 @@ enum AppDatabaseError: Error, Equatable {
     case invalidModelConnectionSetupJournal
     case invalidPendingModelIntent
     case pendingModelIntentAlreadyExists
+    case invalidProviderRequest
+    case invalidProviderResponseAsset
     case invalidToolReceiptReference
     case idempotencyConflict
     case invalidApprovalRequest
@@ -1356,6 +1358,133 @@ final class AppDatabase {
             try db.execute(sql: """
                 CREATE UNIQUE INDEX pendingModelIntent_conversation_unique
                 ON pendingModelIntent (conversationID)
+                """)
+        }
+        migrator.registerMigration("s2-provider-request-runtime-v1") { db in
+            try db.alter(table: "pendingModelIntent") { table in
+                table.add(column: "consumedAt", .double)
+                table.add(column: "continuationRequestID", .text)
+            }
+            try db.execute(sql: "DROP INDEX pendingModelIntent_conversation_unique")
+            try db.execute(sql: """
+                CREATE UNIQUE INDEX pendingModelIntent_conversation_unconsumed
+                ON pendingModelIntent (conversationID)
+                WHERE consumedAt IS NULL
+                """)
+
+            try db.execute(sql: """
+                CREATE TABLE providerResponseAsset (
+                    id TEXT PRIMARY KEY NOT NULL,
+                    payloadVersion INTEGER NOT NULL CHECK (payloadVersion = 1),
+                    payloadJSON TEXT NOT NULL,
+                    payloadHash TEXT NOT NULL CHECK (
+                        length(payloadHash) = 64
+                        AND payloadHash NOT GLOB '*[^0-9a-f]*'
+                    ),
+                    createdAt DOUBLE NOT NULL,
+                    updatedAt DOUBLE NOT NULL
+                )
+                """)
+            try db.execute(sql: """
+                CREATE TABLE providerRequest (
+                    id TEXT PRIMARY KEY NOT NULL,
+                    idempotencyKey TEXT NOT NULL UNIQUE,
+                    intentID TEXT NOT NULL UNIQUE
+                        REFERENCES pendingModelIntent(id) ON DELETE RESTRICT,
+                    conversationID TEXT NOT NULL
+                        REFERENCES agentConversation(id) ON DELETE RESTRICT,
+                    projectID TEXT
+                        REFERENCES novelProject(id) ON DELETE RESTRICT,
+                    runID TEXT NOT NULL UNIQUE
+                        REFERENCES agentRun(id) ON DELETE RESTRICT,
+                    connectionID TEXT NOT NULL
+                        REFERENCES modelConnection(id) ON DELETE RESTRICT,
+                    responseAssetID TEXT NOT NULL UNIQUE
+                        REFERENCES providerResponseAsset(id) ON DELETE RESTRICT,
+                    phase TEXT NOT NULL CHECK (
+                        phase IN (
+                            'prepared', 'sending', 'streaming',
+                            'responseComplete', 'continuationCommitted',
+                            'cancelled', 'failed', 'outcomeUnknown'
+                        )
+                    ),
+                    payloadVersion INTEGER NOT NULL CHECK (payloadVersion = 1),
+                    payloadJSON TEXT NOT NULL,
+                    payloadHash TEXT NOT NULL CHECK (
+                        length(payloadHash) = 64
+                        AND payloadHash NOT GLOB '*[^0-9a-f]*'
+                    ),
+                    createdAt DOUBLE NOT NULL,
+                    updatedAt DOUBLE NOT NULL
+                )
+                """)
+            try db.execute(sql: """
+                CREATE INDEX providerRequest_conversation_updated
+                ON providerRequest (conversationID, updatedAt DESC)
+                """)
+            try db.execute(sql: """
+                CREATE TRIGGER providerRequest_identity_immutable
+                BEFORE UPDATE OF
+                    id, idempotencyKey, intentID, conversationID, projectID,
+                    runID, connectionID, responseAssetID, createdAt
+                ON providerRequest
+                BEGIN
+                    SELECT RAISE(ABORT, 'provider request identity is immutable');
+                END
+                """)
+            try db.execute(sql: """
+                CREATE TRIGGER providerRequest_phase_transition_guard
+                BEFORE UPDATE OF phase ON providerRequest
+                WHEN NOT (
+                    (OLD.phase = 'prepared' AND NEW.phase IN ('sending', 'cancelled', 'failed'))
+                    OR (OLD.phase = 'sending' AND NEW.phase IN ('streaming', 'failed', 'outcomeUnknown'))
+                    OR (OLD.phase = 'streaming' AND NEW.phase IN ('streaming', 'responseComplete', 'outcomeUnknown'))
+                    OR (OLD.phase = 'responseComplete' AND NEW.phase = 'continuationCommitted')
+                )
+                BEGIN
+                    SELECT RAISE(ABORT, 'invalid provider request transition');
+                END
+                """)
+            try db.execute(sql: """
+                CREATE TRIGGER pendingModelIntent_consumption_guard
+                BEFORE UPDATE OF consumedAt, continuationRequestID
+                ON pendingModelIntent
+                WHEN OLD.consumedAt IS NULL
+                  AND NEW.consumedAt IS NOT NULL
+                  AND NOT EXISTS (
+                    SELECT 1
+                    FROM providerRequest AS request
+                    WHERE request.id = NEW.continuationRequestID
+                      AND request.intentID = NEW.id
+                      AND request.conversationID = NEW.conversationID
+                      AND request.phase = 'continuationCommitted'
+                  )
+                BEGIN
+                    SELECT RAISE(ABORT, 'pending intent requires committed continuation');
+                END
+                """)
+            try db.execute(sql: """
+                CREATE TRIGGER pendingModelIntent_consumption_immutable
+                BEFORE UPDATE OF consumedAt, continuationRequestID
+                ON pendingModelIntent
+                WHEN OLD.consumedAt IS NOT NULL
+                  AND (
+                    NEW.consumedAt IS NULL
+                    OR NEW.consumedAt IS NOT OLD.consumedAt
+                    OR NEW.continuationRequestID IS NOT OLD.continuationRequestID
+                  )
+                BEGIN
+                    SELECT RAISE(ABORT, 'pending intent consumption is immutable');
+                END
+                """)
+            try db.execute(sql: """
+                CREATE TRIGGER agentRun_terminal_status_guard
+                BEFORE UPDATE OF status ON agentRun
+                WHEN OLD.status IN ('paused', 'failed', 'completed', 'cancelled')
+                  AND NEW.status <> OLD.status
+                BEGIN
+                    SELECT RAISE(ABORT, 'terminal agent run cannot restart');
+                END
                 """)
         }
         return migrator

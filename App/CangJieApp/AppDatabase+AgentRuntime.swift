@@ -807,7 +807,7 @@ extension AppDatabase {
         return AgentMessage(id: id, role: role, content: row["content"], createdAt: Date(timeIntervalSince1970: row["createdAt"]))
     }
 
-    private static func upsertAgentRun(_ run: AgentRunSnapshot, conversationID: UUID, in db: Database) throws {
+    static func upsertAgentRun(_ run: AgentRunSnapshot, conversationID: UUID, in db: Database) throws {
         try db.execute(
             sql: """
             INSERT INTO agentRun (
@@ -854,7 +854,7 @@ extension AppDatabase {
         }
     }
 
-    private static func decodeAgentRun(_ row: Row) throws -> AgentRunSnapshot {
+    static func decodeAgentRun(_ row: Row) throws -> AgentRunSnapshot {
         guard let id = UUID(uuidString: row["id"]), let status = AgentRunStatus(rawValue: row["status"]) else { throw AppDatabaseError.invalidAgentRun }
         let projectText: String? = row["projectID"]
         return AgentRunSnapshot(

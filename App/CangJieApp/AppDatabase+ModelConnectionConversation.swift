@@ -28,6 +28,10 @@ extension AppDatabase {
                 sql: "SELECT * FROM pendingModelIntent WHERE id = ?",
                 arguments: [intentID.uuidString]
             ) {
+                let consumedAt: Double? = existingRow["consumedAt"]
+                guard consumedAt == nil else {
+                    throw AppDatabaseError.idempotencyConflict
+                }
                 let existing = try Self.decodePendingModelIntent(existingRow)
                 let durableSelectedID = try String.fetchOne(
                     db,
@@ -90,7 +94,7 @@ extension AppDatabase {
 
             let existingPendingIntentCount = try Int.fetchOne(
                 db,
-                sql: "SELECT COUNT(*) FROM pendingModelIntent WHERE conversationID = ?",
+                sql: "SELECT COUNT(*) FROM pendingModelIntent WHERE conversationID = ? AND consumedAt IS NULL",
                 arguments: [conversation.id.uuidString]
             ) ?? 0
             guard existingPendingIntentCount == 0 else {
