@@ -802,7 +802,7 @@ extension AppDatabase {
         return AgentConversation(id: id, title: row["title"], createdAt: Date(timeIntervalSince1970: row["createdAt"]), updatedAt: Date(timeIntervalSince1970: row["updatedAt"]))
     }
 
-    private static func decodeAgentMessage(_ row: Row) -> AgentMessage? {
+    static func decodeAgentMessage(_ row: Row) -> AgentMessage? {
         guard let id = UUID(uuidString: row["id"]), let role = AgentMessageRole(rawValue: row["role"]) else { return nil }
         return AgentMessage(id: id, role: role, content: row["content"], createdAt: Date(timeIntervalSince1970: row["createdAt"]))
     }
@@ -880,8 +880,9 @@ extension AppDatabase {
             INSERT INTO toolReceipt (
                 id, toolID, toolVersion, inputSummary, inputHash, outcome, conversationID,
                 projectID, approvalRequestID, approvalBindingHash, originRunID, idempotencyKey,
-                outputReference, createdAt
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                outputReference, providerRequestID, providerCallID, providerCallIndex,
+                createdAt
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             arguments: [
                 receipt.id.uuidString,
@@ -897,6 +898,9 @@ extension AppDatabase {
                 receipt.originRunID?.uuidString,
                 receipt.idempotencyKey,
                 receipt.outputReference,
+                receipt.providerRequestID?.uuidString,
+                receipt.providerCallID,
+                receipt.providerCallIndex,
                 receipt.createdAt.timeIntervalSince1970
             ]
         )
@@ -908,6 +912,7 @@ extension AppDatabase {
         let projectText: String? = row["projectID"]
         let approvalRequestText: String? = row["approvalRequestID"]
         let originRunText: String? = row["originRunID"]
+        let providerRequestText: String? = row["providerRequestID"]
         return ToolReceipt(
             id: id,
             toolID: row["toolID"],
@@ -922,6 +927,9 @@ extension AppDatabase {
             originRunID: originRunText.flatMap { UUID(uuidString: $0) },
             idempotencyKey: row["idempotencyKey"],
             outputReference: row["outputReference"],
+            providerRequestID: providerRequestText.flatMap(UUID.init(uuidString:)),
+            providerCallID: row["providerCallID"],
+            providerCallIndex: row["providerCallIndex"],
             createdAt: Date(timeIntervalSince1970: row["createdAt"])
         )
     }

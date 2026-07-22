@@ -243,6 +243,31 @@ final class ProviderRequestPersistenceTests: XCTestCase {
             )?.currentStage,
             "provider.responseComplete"
         )
+        let committedResult = try fixture.database.commitProviderContinuation(
+            completed,
+            now: fixture.now.addingTimeInterval(4)
+        )
+        XCTAssertEqual(committedResult.request.phase, .continuationCommitted)
+        XCTAssertEqual(committedResult.message.role, .assistant)
+        XCTAssertEqual(committedResult.message.content, "完成")
+        XCTAssertNil(
+            try fixture.database.latestPendingModelIntent(
+                conversationID: fixture.intent.conversationID
+            )
+        )
+        XCTAssertEqual(
+            try fixture.database.agentRun(
+                id: completed.identity.runID,
+                conversationID: fixture.intent.conversationID
+            )?.status,
+            .completed
+        )
+        let replay = try fixture.database.commitProviderContinuation(
+            committedResult.request,
+            now: fixture.now.addingTimeInterval(5)
+        )
+        XCTAssertEqual(replay, committedResult)
+
         let committed = try ProviderRequestLifecycle.commitContinuation(
             completed,
             now: fixture.now.addingTimeInterval(4)

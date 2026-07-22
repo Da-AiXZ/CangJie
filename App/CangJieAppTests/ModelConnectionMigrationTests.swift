@@ -168,7 +168,7 @@ final class ModelConnectionMigrationTests: XCTestCase {
     func testProviderRequestLinearMigrationCreatesBoundedChainIndexes() throws {
         try withTemporaryDatabasePath { path in
             let database = try AppDatabase(path: path)
-            let state = try database.queue.read { db -> (String, [String], Int) in
+            let state = try database.queue.read { db -> (String, [String], Int, String, Int) in
                 let tableSQL = try String.fetchOne(
                     db,
                     sql: """
@@ -189,7 +189,29 @@ final class ModelConnectionMigrationTests: XCTestCase {
                     sql: "SELECT COUNT(*) FROM grdb_migrations WHERE identifier = ?",
                     arguments: ["s2-provider-request-linear-v2"]
                 ) ?? 0
-                return (tableSQL, indexes, migrationCount)
+                let previousRequestTarget = try String.fetchOne(
+                    db,
+                    sql: """
+                        SELECT "table"
+                        FROM pragma_foreign_key_list('providerRequest')
+                        WHERE "from" = 'previousRequestID'
+                        """
+                ) ?? ""
+                let legacyTableCount = try Int.fetchOne(
+                    db,
+                    sql: """
+                        SELECT COUNT(*)
+                        FROM sqlite_master
+                        WHERE type = 'table' AND name = 'providerRequest_v1'
+                        """
+                ) ?? 0
+                return (
+                    tableSQL,
+                    indexes,
+                    migrationCount,
+                    previousRequestTarget,
+                    legacyTableCount
+                )
             }
 
             XCTAssertTrue(state.0.contains("attemptNumber INTEGER NOT NULL"))
@@ -208,6 +230,8 @@ final class ModelConnectionMigrationTests: XCTestCase {
                 ]
             )
             XCTAssertEqual(state.2, 1)
+            XCTAssertEqual(state.3, "providerRequest")
+            XCTAssertEqual(state.4, 0)
         }
     }
 
@@ -244,6 +268,69 @@ final class ModelConnectionMigrationTests: XCTestCase {
             XCTAssertEqual(stored.2, 1)
             XCTAssertEqual(stored.3, 1)
             XCTAssertNil(restored.identity.previousRequestID)
+        }
+    }
+
+    func testProviderToolReceiptMigrationPreservesLegacyReceipt() throws {
+        try withTemporaryDatabasePath { path in
+            let receiptID = UUID()
+            let createdAt = Date(timeIntervalSince1970: 2_300)
+            do {
+                var configuration = Configuration()
+                configuration.foreignKeysEnabled = true
+                let queue = try DatabaseQueue(
+                    path: path,
+                    configuration: configuration
+                )
+                try AppDatabase.migrator.migrate(
+                    queue,
+                    upTo: "s2-provider-request-linear-v2"
+                )
+                try queue.write { db in
+                    try db.execute(
+                        sql: """
+                            INSERT INTO toolReceipt (
+                                id, toolID, toolVersion, inputSummary, inputHash,
+                                outcome, conversationID, projectID,
+                                approvalRequestID, approvalBindingHash,
+                                originRunID, idempotencyKey, outputReference,
+                                createdAt
+                            ) VALUES (?, ?, ?, ?, ?, ?, NULL, NULL, NULL, NULL,
+                                      NULL, ?, NULL, ?)
+                            """,
+                        arguments: [
+                            receiptID.uuidString,
+                            "legacy.tool",
+                            "1",
+                            "legacy",
+                            String(repeating: "a", count: 64),
+                            "completed",
+                            "legacy.tool.receipt",
+                            createdAt.timeIntervalSince1970
+                        ]
+                    )
+                }
+            }
+
+            let database = try AppDatabase(path: path)
+            let receipt = try XCTUnwrap(
+                database.toolReceipt(
+                    idempotencyKey: "legacy.tool.receipt"
+                )
+            )
+
+            XCTAssertEqual(receipt.id, receiptID)
+            XCTAssertNil(receipt.providerRequestID)
+            XCTAssertNil(receipt.providerCallID)
+            XCTAssertNil(receipt.providerCallIndex)
+            let migrationCount = try database.queue.read { db in
+                try Int.fetchOne(
+                    db,
+                    sql: "SELECT COUNT(*) FROM grdb_migrations WHERE identifier = ?",
+                    arguments: ["s2-provider-tool-receipt-v1"]
+                ) ?? 0
+            }
+            XCTAssertEqual(migrationCount, 1)
         }
     }
 

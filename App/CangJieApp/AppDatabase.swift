@@ -16,6 +16,9 @@ struct ToolReceipt: Identifiable, Equatable {
     let originRunID: UUID?
     let idempotencyKey: String?
     let outputReference: String?
+    let providerRequestID: UUID?
+    let providerCallID: String?
+    let providerCallIndex: Int?
     let createdAt: Date
 
     init(
@@ -32,6 +35,9 @@ struct ToolReceipt: Identifiable, Equatable {
         originRunID: UUID? = nil,
         idempotencyKey: String?,
         outputReference: String?,
+        providerRequestID: UUID? = nil,
+        providerCallID: String? = nil,
+        providerCallIndex: Int? = nil,
         createdAt: Date
     ) {
         self.id = id
@@ -47,6 +53,9 @@ struct ToolReceipt: Identifiable, Equatable {
         self.originRunID = originRunID
         self.idempotencyKey = idempotencyKey
         self.outputReference = outputReference
+        self.providerRequestID = providerRequestID
+        self.providerCallID = providerCallID
+        self.providerCallIndex = providerCallIndex
         self.createdAt = createdAt
     }
 }
@@ -145,6 +154,8 @@ enum AppDatabaseError: Error, Equatable {
     case pendingModelIntentAlreadyExists
     case invalidProviderRequest
     case invalidProviderResponseAsset
+    case invalidProviderToolInvocation
+    case projectNotFound
     case invalidToolReceiptReference
     case idempotencyConflict
     case invalidApprovalRequest
@@ -1491,8 +1502,20 @@ final class AppDatabase {
             try db.execute(
                 sql: "DROP TRIGGER pendingModelIntent_consumption_guard"
             )
+            try db.execute(
+                sql: "DROP TRIGGER providerRequest_identity_immutable"
+            )
+            try db.execute(
+                sql: "DROP TRIGGER providerRequest_phase_transition_guard"
+            )
+            try db.execute(
+                sql: "DROP INDEX providerRequest_conversation_updated"
+            )
+            try db.execute(
+                sql: "ALTER TABLE providerRequest RENAME TO providerRequest_v1"
+            )
             try db.execute(sql: """
-                CREATE TABLE providerRequest_v2 (
+                CREATE TABLE providerRequest (
                     id TEXT PRIMARY KEY NOT NULL,
                     idempotencyKey TEXT NOT NULL UNIQUE,
                     intentID TEXT NOT NULL
@@ -1510,7 +1533,7 @@ final class AppDatabase {
                         turnSequence BETWEEN 1 AND 8
                     ),
                     previousRequestID TEXT
-                        REFERENCES providerRequest_v2(id) ON DELETE RESTRICT,
+                        REFERENCES providerRequest(id) ON DELETE RESTRICT,
                     connectionID TEXT NOT NULL
                         REFERENCES modelConnection(id) ON DELETE RESTRICT,
                     responseAssetID TEXT NOT NULL UNIQUE
@@ -1544,7 +1567,7 @@ final class AppDatabase {
                 )
                 """)
             try db.execute(sql: """
-                INSERT INTO providerRequest_v2 (
+                INSERT INTO providerRequest (
                     id, idempotencyKey, intentID, conversationID, projectID,
                     runID, attemptNumber, turnSequence, previousRequestID,
                     connectionID, responseAssetID, phase, payloadVersion,
@@ -1554,12 +1577,9 @@ final class AppDatabase {
                     id, idempotencyKey, intentID, conversationID, projectID,
                     runID, 1, 1, NULL, connectionID, responseAssetID, phase,
                     payloadVersion, payloadJSON, payloadHash, createdAt, updatedAt
-                FROM providerRequest
+                FROM providerRequest_v1
                 """)
-            try db.execute(sql: "DROP TABLE providerRequest")
-            try db.execute(
-                sql: "ALTER TABLE providerRequest_v2 RENAME TO providerRequest"
-            )
+            try db.execute(sql: "DROP TABLE providerRequest_v1")
             try db.execute(sql: """
                 CREATE INDEX providerRequest_conversation_updated
                 ON providerRequest (conversationID, updatedAt DESC)
@@ -1633,6 +1653,44 @@ final class AppDatabase {
             guard foreignKeyViolationCount == 0 else {
                 throw AppDatabaseError.invalidProviderRequest
             }
+        }
+        migrator.registerMigration("s2-provider-tool-receipt-v1") { db in
+            try db.alter(table: "toolReceipt") { table in
+                table.add(column: "providerRequestID", .text)
+                    .references("providerRequest", onDelete: .restrict)
+                table.add(column: "providerCallID", .text)
+                table.add(column: "providerCallIndex", .integer)
+            }
+            try db.execute(sql: """
+                CREATE UNIQUE INDEX toolReceipt_provider_call_unique
+                ON toolReceipt (providerRequestID, providerCallIndex)
+                WHERE providerRequestID IS NOT NULL
+                  AND providerCallIndex IS NOT NULL
+                """)
+            try db.execute(sql: """
+                CREATE TRIGGER toolReceipt_provider_binding_guard
+                BEFORE INSERT ON toolReceipt
+                WHEN NEW.providerRequestID IS NOT NULL
+                  AND (
+                    NEW.providerCallID IS NULL
+                    OR length(NEW.providerCallID) = 0
+                    OR NEW.providerCallIndex IS NULL
+                    OR NEW.providerCallIndex < 0
+                    OR NEW.providerCallIndex > 7
+                    OR NEW.originRunID IS NULL
+                    OR NEW.conversationID IS NULL
+                    OR NOT EXISTS (
+                        SELECT 1 FROM providerRequest
+                        WHERE id = NEW.providerRequestID
+                          AND runID = NEW.originRunID
+                          AND conversationID = NEW.conversationID
+                          AND phase = 'responseComplete'
+                    )
+                  )
+                BEGIN
+                    SELECT RAISE(ABORT, 'provider tool receipt binding mismatch');
+                END
+                """)
         }
         return migrator
     }

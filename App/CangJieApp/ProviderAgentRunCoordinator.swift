@@ -94,6 +94,7 @@ final class ProviderAgentRunCoordinator {
                 )
                 request = try database.persistPreparedProviderRequest(
                     request,
+                    intent: intent,
                     verifiedConnection: verifiedConnection
                 )
             }
@@ -105,6 +106,7 @@ final class ProviderAgentRunCoordinator {
             )
             request = try database.persistPreparedProviderRequest(
                 request,
+                intent: intent,
                 verifiedConnection: verifiedConnection
             )
         }

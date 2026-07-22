@@ -264,6 +264,64 @@ final class ProviderAgentRunCoordinatorTests: XCTestCase {
         XCTAssertEqual(retryService.callCount, 1)
     }
 
+    func testRetryRejectsAChangedUserRequestWithTheSameIntentID() async throws {
+        let fixture = try makeFixture(saveCredential: false)
+        let firstCoordinator = ProviderAgentRunCoordinator(
+            database: fixture.database,
+            credentials: fixture.credentials,
+            generation: RecordingProviderGenerationService(events: []),
+            now: { fixture.now }
+        )
+        do {
+            _ = try await firstCoordinator.run(
+                intent: fixture.intent,
+                verifiedConnection: fixture.verifiedConnection
+            )
+            XCTFail("Expected connection invalid")
+        } catch {
+            XCTAssertEqual(
+                error as? ProviderAgentRunError,
+                .connectionInvalid
+            )
+        }
+        let failed = try XCTUnwrap(
+            fixture.database.providerRequest(intentID: fixture.intent.id)
+        )
+        try fixture.credentials.save(
+            "fixture-secret",
+            versionProof: failed.identity.credentialVersionProof,
+            setupAuthorizationHash: failed.identity.setupAuthorizationHash,
+            for: fixture.verifiedConnection.connection
+        )
+        let changedIntent = try PendingModelIntent(
+            id: fixture.intent.id,
+            conversationID: fixture.intent.conversationID,
+            projectID: fixture.intent.projectID,
+            branchID: fixture.intent.branchID,
+            userRequest: "篡改后的请求",
+            createdAt: fixture.intent.createdAt
+        )
+        let retryCoordinator = ProviderAgentRunCoordinator(
+            database: fixture.database,
+            credentials: fixture.credentials,
+            generation: RecordingProviderGenerationService(events: []),
+            now: { fixture.now }
+        )
+
+        do {
+            _ = try await retryCoordinator.run(
+                intent: changedIntent,
+                verifiedConnection: fixture.verifiedConnection
+            )
+            XCTFail("Expected changed intent to fail closed")
+        } catch {
+            XCTAssertEqual(
+                error as? AppDatabaseError,
+                .invalidProviderRequest
+            )
+        }
+    }
+
     private func makeFixture(
         saveCredential: Bool
     ) throws -> (

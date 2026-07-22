@@ -86,6 +86,30 @@ extension AppDatabase {
         _ request: ProviderRequestSnapshot,
         verifiedConnection: VerifiedModelConnection
     ) throws -> ProviderRequestSnapshot {
+        try persistPreparedProviderRequest(
+            request,
+            expectedIntent: nil,
+            verifiedConnection: verifiedConnection
+        )
+    }
+
+    func persistPreparedProviderRequest(
+        _ request: ProviderRequestSnapshot,
+        intent: PendingModelIntent,
+        verifiedConnection: VerifiedModelConnection
+    ) throws -> ProviderRequestSnapshot {
+        try persistPreparedProviderRequest(
+            request,
+            expectedIntent: intent,
+            verifiedConnection: verifiedConnection
+        )
+    }
+
+    private func persistPreparedProviderRequest(
+        _ request: ProviderRequestSnapshot,
+        expectedIntent: PendingModelIntent?,
+        verifiedConnection: VerifiedModelConnection
+    ) throws -> ProviderRequestSnapshot {
         let validated = try Self.validatedProviderRequest(request)
         guard validated.phase == .prepared,
               Self.requestIdentity(
@@ -104,6 +128,11 @@ extension AppDatabase {
                 throw AppDatabaseError.invalidProviderRequest
             }
             let intent = try Self.decodePendingModelIntent(intentRow)
+            if let expectedIntent {
+                guard intent == expectedIntent else {
+                    throw AppDatabaseError.invalidProviderRequest
+                }
+            }
             guard intent.conversationID == validated.identity.conversationID,
                   intent.projectID == validated.identity.projectID,
                   intent.branchID == validated.identity.branchID else {
@@ -445,7 +474,7 @@ extension AppDatabase {
         )
     }
 
-    private static func updateProviderRequestRow(
+    static func updateProviderRequestRow(
         _ request: ProviderRequestSnapshot,
         expectedPayloadHash: String,
         in db: Database
@@ -626,7 +655,7 @@ extension AppDatabase {
         return json
     }
 
-    private static func decodeProviderRequest(
+    static func decodeProviderRequest(
         _ row: Row
     ) throws -> ProviderRequestSnapshot {
         let version: Int = row["payloadVersion"]
@@ -678,7 +707,7 @@ extension AppDatabase {
         return request
     }
 
-    private static func encodeProviderRequest(
+    static func encodeProviderRequest(
         _ request: ProviderRequestSnapshot
     ) throws -> String {
         let encoder = JSONEncoder()
@@ -726,7 +755,7 @@ extension AppDatabase {
             && identity.setupAuthorizationHash == evidence.setupAuthorizationHash
     }
 
-    private static func sameProviderRequestIdentity(
+    static func sameProviderRequestIdentity(
         _ lhs: ProviderRequestSnapshot,
         _ rhs: ProviderRequestSnapshot
     ) -> Bool {
@@ -740,7 +769,7 @@ extension AppDatabase {
             && lhs.createdAt == rhs.createdAt
     }
 
-    private static func decodeProviderResponse(
+    static func decodeProviderResponse(
         _ json: String
     ) throws -> ProviderResponsePayload {
         guard json.utf8.count <= ProviderResponsePayload.maximumUTF8Bytes,
