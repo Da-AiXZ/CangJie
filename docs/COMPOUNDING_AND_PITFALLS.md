@@ -1259,3 +1259,7 @@ A directory named `Tests` can still be compiled into production, while a product
 ## P-299 Canonicalize both sides before computing repository-relative paths
 
 Temporary and workspace roots can have multiple valid spellings: Windows may expand an 8.3 short name, and macOS may resolve `/var` through `/private/var`. If discovered files are canonicalized but the root passed to `Path.relative_to` is not, cross-platform CI fails before the intended contract assertion. Resolve both the source and repository root at the same boundary, and include a lexical alias such as `alias/..` in fixtures so local success does not depend on one filesystem spelling.
+
+## P-300 C socket constants do not have one Swift import shape on every platform
+
+Do not infer an Apple C-module import type from a Linux build. In iPadOS CI `29883112652`, the Darwin-only resolver failed before tests because Xcode imported `SOCK_STREAM` as `Int32`, making `SOCK_STREAM.rawValue` invalid. Keep platform adapter code behind its real import boundary and use the type exposed by that target; here `addrinfo.ai_socktype` receives `SOCK_STREAM` directly. A Windows parse or Core build cannot prove Apple SDK type semantics, so the exact iPadOS semantic compile remains authoritative. Fix only the representation mismatch; do not weaken address classification, SSRF rejection or credential gates to make the build green.
