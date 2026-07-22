@@ -73,6 +73,7 @@ final class AppViewModel: ObservableObject {
     @Published private(set) var buildIdentity: BuildIdentity
     @Published private(set) var providerStreamText = ""
     @Published private(set) var canCancelProviderRun = false
+    @Published private(set) var providerTaskProjection: S2ProviderTaskProjection?
 
     let modelConnectionSetup: ModelConnectionSetupController
 
@@ -85,6 +86,10 @@ final class AppViewModel: ObservableObject {
 
     var status: String { errorMessage ?? businessStatus }
     var displayedBusinessStatus: String {
+        if let providerTaskProjection,
+           providerTaskProjection.conversationID == selectedConversationID {
+            return providerTaskProjection.conversationStatus
+        }
         if isProviderRunVisible
             || (modelConnectionSetup.pendingIntent != nil && latestAgentRun != nil) {
             return businessStatus
@@ -325,6 +330,8 @@ final class AppViewModel: ObservableObject {
         if let databaseError = databaseState.error {
             errorMessagesByDomain[.persistent] = databaseError
         }
+        reconcileInterruptedProviderRequestAtLaunch()
+        refreshProviderTaskProjection(publishFailure: true)
 
         if buildIdentity.isAgentExecutionAllowed {
             let token = compiledBuildStamp.activationToken
@@ -737,6 +744,7 @@ final class AppViewModel: ObservableObject {
                         id: reconciled.identity.runID,
                         conversationID: reconciled.identity.conversationID
                     )
+                    refreshProviderTaskProjection(publishFailure: true)
                     businessStatus = "本地安全对账已完成，这次请求的结果仍不能确认"
                     return
                 case .terminal:
@@ -803,6 +811,7 @@ final class AppViewModel: ObservableObject {
         businessStatus = projection.phase == .streaming
             ? "仓颉正在回复"
             : "正在通过当前模型连接处理这件事"
+        refreshProviderTaskProjection(publishFailure: false)
     }
 
     private func finishProviderRun(
@@ -863,6 +872,7 @@ final class AppViewModel: ObservableObject {
                 conversationID: request.identity.conversationID
             )
         }
+        refreshProviderTaskProjection(publishFailure: false)
         guard let providerError = error as? ProviderAgentRunError else {
             businessStatus = "这次模型处理没有完成，原请求仍然保留"
             return
@@ -893,6 +903,11 @@ final class AppViewModel: ObservableObject {
             return
         }
         resumeProviderRequest(decision, permitsTerminalRetry: true)
+    }
+
+    func waitForProviderRunToSettle() async {
+        let task = providerRunTask
+        await task?.value
     }
 
     func openModelConnectionSetup() {
@@ -942,6 +957,7 @@ final class AppViewModel: ObservableObject {
         setDraftWithoutAutosave(workspace.draft)
         refreshS1ReadableContent()
         modelConnectionSetup.restorePendingIntent(for: selectedConversationID)
+        refreshProviderTaskProjection(publishFailure: true)
         if let connectionStatus = modelConnectionSetup.conversationStatus(
             for: selectedConversationID
         ) {
@@ -955,6 +971,64 @@ final class AppViewModel: ObservableObject {
         from factsByProjectID: [UUID: S1NovelProgressFacts]
     ) -> [UUID: String] {
         factsByProjectID.mapValues(S1NovelProgressProjection.description(for:))
+    }
+
+    private func refreshProviderTaskProjection(publishFailure: Bool) {
+        guard let database, let selectedConversationID else {
+            providerTaskProjection = nil
+            if runtime == nil {
+                latestAgentRun = nil
+                lastToolReceipt = nil
+            }
+            return
+        }
+        do {
+            let projection = try database.s2ProviderTaskProjection(
+                conversationID: selectedConversationID
+            )
+            providerTaskProjection = projection
+            if let projection {
+                latestAgentRun = projection.run
+                lastToolReceipt = projection.receipt
+            } else if runtime == nil {
+                latestAgentRun = nil
+                lastToolReceipt = nil
+            }
+        } catch {
+            providerTaskProjection = nil
+            if runtime == nil {
+                latestAgentRun = nil
+                lastToolReceipt = nil
+            }
+            if publishFailure {
+                publishError("真实任务状态恢复失败（S2-TASK-PROJECTION）")
+            }
+        }
+    }
+
+    private func reconcileInterruptedProviderRequestAtLaunch() {
+        guard let database, let selectedConversationID else {
+            return
+        }
+        do {
+            guard let intent = try database.latestPendingModelIntent(
+                conversationID: selectedConversationID
+            ), let request = try database.providerRequest(intentID: intent.id),
+                  ProviderRequestRecovery.nextAction(for: request)
+                    == .reconcileUnknownOutcome else {
+                return
+            }
+            let reconciled = try ProviderRequestReconciler(
+                database: database
+            ).reconcile(request)
+            latestAgentRun = try database.agentRun(
+                id: reconciled.identity.runID,
+                conversationID: reconciled.identity.conversationID
+            )
+            businessStatus = "本地安全对账已完成，这次请求的结果仍不能确认"
+        } catch {
+            publishError("模型请求恢复失败（S2-PROVIDER-RESTORE）", domain: .composer)
+        }
     }
 
     private func refreshS1NovelProgress() {
@@ -1272,15 +1346,16 @@ final class AppViewModel: ObservableObject {
             planAwaitingApproval = false
             openingPlanApproval = nil
             interviewStep = 0
-            let hasPendingProviderProjection =
-                modelConnectionSetup.pendingIntent != nil
-            if !hasPendingProviderProjection {
+            refreshProviderTaskProjection(publishFailure: true)
+            let hasProviderProjection = providerTaskProjection != nil
+            let hasPendingProviderProjection = modelConnectionSetup.pendingIntent != nil
+            if !hasProviderProjection && !hasPendingProviderProjection {
                 lastToolReceipt = nil
                 latestAgentRun = nil
             }
             chapter = nil
             projectedBusinessMilestone = nil
-            if !hasPendingProviderProjection {
+            if !hasProviderProjection && !hasPendingProviderProjection {
                 businessStatus = "对话和草稿已恢复"
             } else if latestAgentRun == nil {
                 businessStatus = modelConnectionSetup.conversationStatus(

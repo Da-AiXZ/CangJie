@@ -33,7 +33,7 @@ final class CangJieSmokeUITests: XCTestCase {
         XCTAssertTrue(resultsEmptyState.waitForExistence(timeout: 5))
         XCTAssertEqual(
             resultsEmptyState.label,
-            "这里会放仓颉本次工作的可查看结果。当前还没有真正的模型结果；这个版本只验证界面、导航和本地保存。"
+            "当前对话还没有可查看的真实工具结果。普通回复仍留在对话里。"
         )
         XCTAssertFalse(app.staticTexts["last-tool-receipt"].exists)
         XCTAssertFalse(app.staticTexts["Conversation artifacts"].exists)
@@ -519,7 +519,7 @@ final class CangJieSmokeUITests: XCTestCase {
         XCTAssertTrue(tasksEmptyState.exists)
         XCTAssertEqual(
             tasksEmptyState.label,
-            "当前没有正在进行的 AI 任务。这个版本只验证界面、导航和本地保存，尚未接入真正的模型任务。"
+            "当前没有需要处理的 AI 任务。你在对话里交给仓颉的真实工作会显示在这里。"
         )
         XCTAssertFalse(app.staticTexts["你：\(fixtureMessage)"].exists)
         app.buttons["ai-tasks-back-button"].tap()

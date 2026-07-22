@@ -76,15 +76,7 @@ final class AppViewModelProviderRetryTests: XCTestCase {
         )
 
         viewModel.retryProviderRun()
-
-        for _ in 0..<1_000 {
-            if try database.latestPendingModelIntent(
-                conversationID: conversation.id
-            ) == nil {
-                break
-            }
-            try await Task.sleep(nanoseconds: 10_000_000)
-        }
+        await viewModel.waitForProviderRunToSettle()
         let retried = try XCTUnwrap(
             database.providerRequest(intentID: intent.id)
         )

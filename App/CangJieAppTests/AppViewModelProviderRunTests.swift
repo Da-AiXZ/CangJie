@@ -52,12 +52,7 @@ final class AppViewModelProviderRunTests: XCTestCase {
 
         viewModel.sendModelDependentMessage()
         let intent = try XCTUnwrap(viewModel.modelConnectionSetup.pendingIntent)
-
-        try await waitUntil {
-            try database.latestPendingModelIntent(
-                conversationID: intent.conversationID
-            ) == nil
-        }
+        await viewModel.waitForProviderRunToSettle()
         let conversationID = try XCTUnwrap(viewModel.selectedConversationID)
         let messages = try database.listAgentMessages(
             conversationID: conversationID
@@ -118,7 +113,7 @@ final class AppViewModelProviderRunTests: XCTestCase {
         viewModel.sendModelDependentMessage()
         let intent = try XCTUnwrap(viewModel.modelConnectionSetup.pendingIntent)
         try await waitUntil {
-            viewModel.displayedProviderStreamText == "尚未完成"
+            try database.providerRequest(intentID: intent.id)?.phase == .streaming
         }
         XCTAssertEqual(viewModel.displayedProviderStreamText, "尚未完成")
 
@@ -134,10 +129,7 @@ final class AppViewModelProviderRunTests: XCTestCase {
         XCTAssertTrue(viewModel.isProviderRunVisible)
 
         viewModel.cancelProviderRun()
-
-        try await waitUntil {
-            try database.providerRequest(intentID: intent.id)?.phase == .outcomeUnknown
-        }
+        await viewModel.waitForProviderRunToSettle()
         let request = try XCTUnwrap(
             database.providerRequest(intentID: intent.id)
         )
@@ -340,12 +332,7 @@ final class AppViewModelProviderRunTests: XCTestCase {
             taskID: UUID(),
             draftAutosaveDelayNanoseconds: UInt64.max
         )
-
-        try await waitUntil {
-            try database.latestPendingModelIntent(
-                conversationID: conversation.id
-            ) == nil
-        }
+        await viewModel.waitForProviderRunToSettle()
         XCTAssertEqual(generation.callCount, 0)
         XCTAssertEqual(
             try database.providerRequest(intentID: intent.id)?.phase,

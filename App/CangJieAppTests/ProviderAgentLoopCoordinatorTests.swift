@@ -10,6 +10,7 @@ final class ProviderAgentLoopCoordinatorTests: XCTestCase {
         let credentials = RecordingCredentialRepository()
         let now = Date(timeIntervalSince1970: 6_000)
         let conversation = try database.ensureDefaultConversation(now: now)
+        _ = try database.selectS1Conversation(conversation.id, now: now)
         let intent = try PendingModelIntent(
             id: UUID(),
             conversationID: conversation.id,
@@ -124,6 +125,49 @@ final class ProviderAgentLoopCoordinatorTests: XCTestCase {
             )?.status,
             .completed
         )
+
+        let projection = try XCTUnwrap(
+            database.s2ProviderTaskProjection(
+                conversationID: conversation.id
+            )
+        )
+        XCTAssertEqual(projection.run.id, completion.request.identity.runID)
+        XCTAssertEqual(projection.request.phase, .continuationCommitted)
+        XCTAssertEqual(
+            projection.usage,
+            ProviderUsage(
+                inputTokens: 36,
+                outputTokens: 18,
+                totalTokens: 54
+            )
+        )
+        XCTAssertEqual(projection.receipt, completion.receipts.first)
+        XCTAssertEqual(projection.projectTitle, "星河")
+        XCTAssertEqual(projection.conversationStatus, "这件事已经处理完成")
+        XCTAssertEqual(projection.doingText, "已建立小说《星河》")
+        XCTAssertEqual(projection.nextText, "可以回到当前对话继续安排下一步")
+        XCTAssertEqual(projection.needsUserText, "目前不需要你操作")
+        XCTAssertEqual(
+            projection.usageText,
+            "实际用量：输入 36 · 输出 18 · 合计 54 tokens"
+        )
+        XCTAssertEqual(projection.resultTitle, "小说已经建立")
+        XCTAssertEqual(
+            projection.resultSummary,
+            "已经建立《星河》，并保存了这次真实执行回执。"
+        )
+        XCTAssertEqual(projection.receiptToolName, "创建小说")
+
+        let restored = AppViewModel(
+            database: database,
+            modelCredentialRepository: credentials,
+            taskID: UUID(),
+            draftAutosaveDelayNanoseconds: UInt64.max
+        )
+        XCTAssertEqual(restored.providerTaskProjection, projection)
+        XCTAssertEqual(restored.latestAgentRun, projection.run)
+        XCTAssertEqual(restored.lastToolReceipt, projection.receipt)
+        XCTAssertEqual(restored.displayedBusinessStatus, "这件事已经处理完成")
     }
 
     private func temporaryDatabasePath() -> String {

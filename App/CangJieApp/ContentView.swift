@@ -238,16 +238,62 @@ private struct NovelProjectBrowserReaderPage: View {
 }
 
 private struct S1TasksPage: View {
+    @ObservedObject var model: AppViewModel
     let onBack: () -> Void
 
     var body: some View {
         NavigationStack {
             List {
-                Section("当前状态") {
-                    Text("当前没有正在进行的 AI 任务。这个版本只验证界面、导航和本地保存，尚未接入真正的模型任务。")
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
-                        .accessibilityIdentifier("ai-tasks-empty-state")
+                if let projection = model.providerTaskProjection {
+                    Section("正在做") {
+                        Text(projection.doingText)
+                            .accessibilityIdentifier("ai-task-doing")
+                    }
+                    Section("接下来") {
+                        Text(projection.nextText)
+                            .accessibilityIdentifier("ai-task-next")
+                    }
+                    Section("需要你") {
+                        Text(projection.needsUserText)
+                            .accessibilityIdentifier("ai-task-needs-user")
+                    }
+                    Section("真实记录") {
+                        if let usageText = projection.usageText {
+                            Text(usageText)
+                                .accessibilityIdentifier("ai-task-usage")
+                        }
+                        Text(
+                            "上次安全保存："
+                                + projection.lastSafeSaveAt.formatted(
+                                    date: .abbreviated,
+                                    time: .shortened
+                                )
+                        )
+                        .accessibilityIdentifier("ai-task-safe-save")
+                    }
+                    if model.canCancelProviderRun || model.canRetryProviderRun {
+                        Section("可用操作") {
+                            if model.canCancelProviderRun {
+                                Button("停止这次处理") {
+                                    model.cancelProviderRun()
+                                }
+                                .accessibilityIdentifier("ai-task-cancel-button")
+                            }
+                            if model.canRetryProviderRun {
+                                Button("明确重试") {
+                                    model.retryProviderRun()
+                                }
+                                .accessibilityIdentifier("ai-task-retry-button")
+                            }
+                        }
+                    }
+                } else {
+                    Section("当前状态") {
+                        Text("当前没有需要处理的 AI 任务。你在对话里交给仓颉的真实工作会显示在这里。")
+                            .font(.callout)
+                            .foregroundStyle(.secondary)
+                            .accessibilityIdentifier("ai-tasks-empty-state")
+                    }
                 }
             }
             .navigationTitle("AI 任务")
@@ -909,7 +955,7 @@ struct ContentView: View {
                 }
             }
         case .tasks:
-            S1TasksPage {
+            S1TasksPage(model: model) {
                 selectedActivity = .conversation
             }
         case .settings:
@@ -1471,10 +1517,55 @@ struct ContentView: View {
                 Text("这次结果")
                     .font(.headline)
                     .accessibilityIdentifier("results-heading")
-                Text("这里会放仓颉本次工作的可查看结果。当前还没有真正的模型结果；这个版本只验证界面、导航和本地保存。")
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-                    .accessibilityIdentifier("results-empty-state")
+                if let projection = model.providerTaskProjection,
+                   let title = projection.resultTitle,
+                   let summary = projection.resultSummary,
+                   let receipt = projection.receipt {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text(title)
+                            .font(.headline)
+                            .accessibilityIdentifier("provider-result-title")
+                        Text(summary)
+                            .font(.body)
+                            .accessibilityIdentifier("provider-result-summary")
+                        Text("已经完成")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.green)
+                            .accessibilityIdentifier("provider-result-status")
+                        DisclosureGroup("查看回执详情") {
+                            VStack(alignment: .leading, spacing: 6) {
+                                if let toolName = projection.receiptToolName {
+                                    Text("工具：\(toolName)")
+                                }
+                                if let toolVersion = receipt.toolVersion {
+                                    Text("版本：\(toolVersion)")
+                                }
+                                Text(
+                                    "完成时间："
+                                        + receipt.createdAt.formatted(
+                                            date: .abbreviated,
+                                            time: .shortened
+                                        )
+                                )
+                                if let usageText = projection.usageText {
+                                    Text(usageText)
+                                }
+                            }
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        }
+                        .accessibilityIdentifier("provider-result-receipt-details")
+                    }
+                    .padding()
+                    .background(.background, in: RoundedRectangle(cornerRadius: 12))
+                    .accessibilityElement(children: .contain)
+                    .accessibilityIdentifier("provider-result-card")
+                } else {
+                    Text("当前对话还没有可查看的真实工具结果。普通回复仍留在对话里。")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                        .accessibilityIdentifier("results-empty-state")
+                }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding()
