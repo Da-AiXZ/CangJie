@@ -1,4 +1,4 @@
-import CangJieCore
+@_spi(ModelCredentialVerification) import CangJieCore
 import Foundation
 import GRDB
 import XCTest
