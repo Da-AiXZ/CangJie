@@ -399,7 +399,7 @@ Multiple keys arrive as independent named ModelConnections. The Harness accepts 
 
 H0–H5 必须按顺序推进，且不能单独包装成没有用户价值的空壳 IPA。它们与用户可见 S0–S6 的冻结映射是：
 
-- 精确 Run-31 自动化和真机证据已于 2026-07-21 验收 S1，当前真实阶段是 **S2 真正可操作软件的 Agent**；S0 只代表技术可行性基线完成。candidate-hardening 历史 M1 与 Builds 26–28 仅为工程原型/硬化证据，Build 28 未验收。
+- S0–S6 的当前验收状态和真实里程碑只由 `PROJECT_CONTROL_CENTER.md` 维护；本文只定义 Harness 架构与阶段关系。S0 只代表技术可行性基线完成，candidate-hardening 历史 M1 与 Builds 26–28 仅为工程原型/硬化证据。
 - **S2** 首次接入真实 Provider，完成 no-key → Provider/Key/Endpoint → model discovery → user-selected model → central Agent Typed Tool project/status → ToolReceipt → force-quit recovery 的无正文最小闭环，并通过适用 H0–H3。
 - **S3** 以常规规模资料完成动态意图、一次一个高价值问题、参考抽象学习、偏好证据、作品方向和开篇准备，推进 H4 主干，但不宣称百万字完整能力或 H4 完成。
 - **S4** 完成真实正文、选区交流、模糊拒绝诊断、影响预览、版本差异、前三章逐章校准和单独连续创作授权，完成 H4 并进入 H5。

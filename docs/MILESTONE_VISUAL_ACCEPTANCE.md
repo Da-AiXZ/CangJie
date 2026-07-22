@@ -80,7 +80,7 @@
 
 ### 1.6 冻结阶段与证据门
 
-- `CJ-PX-007 / FROZEN / 2026-07-19`：S0–S6 是用户可见产品阶段，H0–H5 是必须顺序推进的 Harness 工程关卡；当前真实阶段是 **S1 Agent 驾驶舱定调与重构**。
+- `CJ-PX-007 / FROZEN / 2026-07-19`：S0–S6 是用户可见产品阶段，H0–H5 是必须顺序推进的 Harness 工程关卡；已验收阶段和当前真实阶段只由 `PROJECT_CONTROL_CENTER.md` 维护。
 - S0 只代表技术可行性基线完成。candidate-hardening 历史 M1 与 Builds 26–28 只是工程原型/硬化证据；Build 28 不得写成已验收。
 - S2 通过适用 H0–H3，证明真实 Provider、命名连接、用户手选模型、Typed Tools/Receipt/强退恢复的无正文最小闭环；S3 以常规规模资料推进 H4；S4 完成 H4 并进入 H5；S5 完成 H5 并正式验收百万字叙事索引及大型参考小说分阶段分析；S6 完成全格式/百万字资料、质量、干净正文导出、无凭证备份恢复、无障碍、性能、迁移、安全审计和正式候选。
 - 绿色 CI、静态界面、文档或代码完成都不能单独通过阶段。H0–H5 不能跳级，也不能单独包装成空壳 IPA。
@@ -326,7 +326,7 @@ Prerequisite: complete the first connection from the CangJie conversation by sel
 15. Attempt a second prose Writer for the same novel. It must queue or be rejected; no overlapping formal prose or story-state commit is allowed.
 16. Fail the current Provider connection. Verify only reconnect-current or user-selected saved-connection actions appear; no Provider, model, or key changes automatically.
 
-This acceptance freezes the S2 minimum lifecycle-and-recovery slice required by its real Agent loop. It does not claim H4 is complete, that the current S1 build implements it, or that a simulator run proves iPadOS background behavior.
+This acceptance freezes the S2 minimum lifecycle-and-recovery slice required by its real Agent loop. It does not claim H4 is complete, that the current implementation satisfies the full S2 loop, or that a simulator run proves iPadOS background behavior.
 
 ### 4.5 阶段退出标准
 
@@ -984,8 +984,8 @@ This acceptance freezes the S2 minimum lifecycle-and-recovery slice required by 
 ## 9. 阶段顺序和停止规则
 
 ```text
-S0 技术可行性基线（已完成，仅代表技术证据）
-→ S1 Agent 驾驶舱定调与重构（当前真实阶段）
+S0 技术可行性基线（只代表技术证据）
+→ S1 Agent 驾驶舱定调与重构
 → 用户真机确认外观和导航
 → S2 真实 Provider + Typed Tools 最小闭环（适用 H0–H3，无正式正文）
 → S3 动态意图与常规规模资料（推进 H4）
@@ -994,11 +994,13 @@ S0 技术可行性基线（已完成，仅代表技术证据）
 → S6 全格式/百万字资料、质量、迁移、安全与正式候选
 ```
 
+当前所在阶段和各阶段验收状态只查看 `PROJECT_CONTROL_CENTER.md`。
+
 - 中间代码和文档汇报后继续工作；
 - 只有大阶段产生需要方向确认或真机验收的 IPA 时暂停；
 - 若产品外观在 S1 未确认，不得继续用错误驾驶舱大量堆叠后续功能；
 - 后续阶段不得删减底层生产级治理来换取表面简单；
-- 每阶段结束都更新 `PROJECT_CONTROL_CENTER.md` 和 `COMPOUNDING_AND_PITFALLS.md`。
+- 仅当里程碑、验收状态、阻塞或下一 Gate 改变时更新 `PROJECT_CONTROL_CENTER.md`；只有出现新的跨任务失效模式时才更新 `COMPOUNDING_AND_PITFALLS.md`，逐次 CI 证据进入 `docs/history/`。
 ## Supplementary H1-H3 acceptance contracts from 1.md
 
 These are acceptance details for already frozen behavior. They do not authorize automatic routing or automatic failover.

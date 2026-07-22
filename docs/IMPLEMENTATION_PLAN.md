@@ -400,7 +400,7 @@ The ordinary task surface uses only `正在做`, `接下来`, and `需要你`, w
 - Status: `FROZEN`
 - Confirmed: 2026-07-19
 
-CangJie uses **S0–S6 user-visible product stages** and **H0–H5 sequential Agent Harness gates**. Exact Run-31 automation and physical-device evidence accepted S1 on 2026-07-21, so the current real milestone is **S2 真正可操作软件的 Agent**. S0 means only that the technical-feasibility baseline was completed. Historical candidate-hardening M1 labels and Builds 26–28 remain engineering-prototype and hardening evidence; they are not the current complete-product milestone, and Build 28 is not accepted. Green CI, a static interface, documentation, or completed code alone cannot pass a product stage.
+CangJie uses **S0–S6 user-visible product stages** and **H0–H5 sequential Agent Harness gates**. The exact accepted stage and current milestone are maintained only in `PROJECT_CONTROL_CENTER.md`. S0 means only that the technical-feasibility baseline was completed. Historical candidate-hardening M1 labels and Builds 26–28 remain engineering-prototype and hardening evidence; they are not complete-product milestones. Green CI, a static interface, documentation, or completed code alone cannot pass a product stage.
 
 The frozen stage boundary is:
 

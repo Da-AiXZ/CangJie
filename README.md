@@ -15,15 +15,16 @@ The LLM interprets intent and proposes plans. Only versioned typed tools may cre
 
 ## Current status
 
-M0 engineering feasibility is validated on the user's iPad: TrollStore installation, launch, basic persisted input, restart, and no immediate crash. The repository is entering **M1: First-Chapter Agent Vertical Slice**. No M1 behavior is claimed complete until its tests and device acceptance pass.
+The exact current milestone, implemented boundary, accepted candidate, blockers and immediate queue are maintained only in the [Project control center](docs/PROJECT_CONTROL_CENTER.md). They are intentionally not duplicated in this README.
 
 ## Authoritative documents
 
-1. [Implementation plan](docs/IMPLEMENTATION_PLAN.md) - the only active plan.
-2. [Project control center](docs/PROJECT_CONTROL_CENTER.md) - current operational truth.
-3. [Compounding and pitfalls log](docs/COMPOUNDING_AND_PITFALLS.md) - mistakes and prevention gates.
+1. [Project instructions](AGENTS.md) - execution discipline and context-loading rules.
+2. [Project control center](docs/PROJECT_CONTROL_CENTER.md) - the single current milestone, evidence, blockers and queue source.
+3. [Implementation plan](docs/IMPLEMENTATION_PLAN.md) - stable product contracts and S0-S6 definitions.
 4. [Architecture decisions](docs/adr/) - durable scoped decisions.
-5. [M0 validation](docs/M0_VALIDATION.md) - feasibility evidence.
+5. [Curated pitfalls](docs/COMPOUNDING_AND_PITFALLS.md) - reusable safeguards, searched when relevant.
+6. [History](docs/history/) - non-authoritative CI, candidate and debugging evidence.
 
 `docs/ROADMAP.md` is retired and must not be recreated or cited as an active plan.
 
