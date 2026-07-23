@@ -1392,7 +1392,16 @@ final class AppViewModel: ObservableObject {
             return
         }
         do {
-            if task.status == .paused {
+            if task.waitingReason == .networkConfirmation,
+               networkAvailabilityState != .available {
+                setProviderBusinessStatus(
+                    "当前没有网络，这条请求仍未发送",
+                    conversationID: task.conversationID
+                )
+                return
+            }
+            if task.status == .paused
+                || task.waitingReason == .networkConfirmation {
                 let resumed = try database.transitionAgentTask(
                     id: task.id,
                     expectedRevision: task.revision,

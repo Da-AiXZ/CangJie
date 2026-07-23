@@ -33,3 +33,7 @@ This file is historical evidence only. Current blocker and queue remain in `../P
 ## First replacement validation
 
 Replacement commit `a0ba2d28345f45b918e6026ba99667b7a5477290` passed Core CI `30012079846`. iPadOS CI `30012079896` compiled successfully, passed 20 App XCUITest cases and the complete Probe suite, but failed one of 399 App XCTest cases: `testResumingTaskCancelsItsPendingWaitingNotification`. The test combined its notification-cancellation assertion with entry into the asynchronous Provider fake in one short polling condition, so the failure did not identify which contract timed out. The follow-up keeps the notification test scoped to a strictly newer cancellation revision; the independent offline-resume test remains the Provider-send evidence.
+
+## Second replacement validation
+
+Follow-up commit `5c71ace036fb91e4afe9a32aaaac722f7c402a29` passed Core CI `30014276319`. iPadOS CI `30014276216` again compiled successfully and passed the complete XCUITest and Probe suites, but the same notification test still timed out while waiting for a cancellation above the waiting task revision. The full log therefore isolated a production ordering defect: explicit resume persisted and cancelled a new revision for paused tasks, while `waitingUser/networkConfirmation` deferred both operations to later dispatch. The replacement moves that exact network-confirmation transition and cancellation to the explicit user-action boundary, while unavailable network remains fail-closed and `connectionInvalid` continues through verified-connection dispatch.
