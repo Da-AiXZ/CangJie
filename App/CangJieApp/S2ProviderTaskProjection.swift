@@ -267,14 +267,28 @@ extension AppDatabase {
 
             let projectTitle: String?
             let artifactTitle: String?
-            if receipt?.toolID == "conversation.save_discussion" {
+            if receipt?.toolID == "project.list" {
+                guard receipt?.outputReference == nil else {
+                    throw AppDatabaseError.invalidToolReceiptReference
+                }
+                projectTitle = nil
+                artifactTitle = nil
+            } else if receipt?.toolID == "conversation.save_discussion" {
                 guard let outputReference = receipt?.outputReference,
                       let artifact = try Self.artifact(
                           id: outputReference,
                           in: db
                       ),
                       artifact.kind == "discussion",
+                      artifact.contentHash == ApprovalFingerprint.artifactHash(
+                          conversationID: conversationID,
+                          projectID: receipt?.projectID,
+                          kind: "discussion",
+                          title: artifact.title,
+                          body: artifact.body
+                      ),
                       artifact.conversationID == conversationID,
+                      artifact.projectID == receipt?.projectID,
                       artifact.status == "saved" else {
                     throw AppDatabaseError.invalidToolReceiptReference
                 }
