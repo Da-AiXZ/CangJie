@@ -757,7 +757,9 @@ final class CangJieSmokeUITests: XCTestCase {
         )
 
         XCUIDevice.shared.press(.home)
-        XCTAssertTrue(app.wait(for: .suspended, timeout: 5))
+        XCTAssertTrue(
+            app.wait(for: .runningBackgroundSuspended, timeout: 5)
+        )
         relaunchWithoutFixturePreservingDatabaseScope(app)
         XCTAssertTrue(
             app.descendants(matching: .any)["workspace-landscape-columns"]
