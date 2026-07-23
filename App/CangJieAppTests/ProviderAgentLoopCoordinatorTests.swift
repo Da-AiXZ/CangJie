@@ -170,6 +170,135 @@ final class ProviderAgentLoopCoordinatorTests: XCTestCase {
         XCTAssertEqual(restored.displayedBusinessStatus, "这件事已经处理完成")
     }
 
+    func testCancellationAfterDurableResponseDoesNotConsumeIntent() async throws {
+        let database = try AppDatabase(path: temporaryDatabasePath())
+        let credentials = RecordingCredentialRepository()
+        let now = Date(timeIntervalSince1970: 6_100)
+        let conversation = try database.ensureDefaultConversation(now: now)
+        _ = try database.selectS1Conversation(conversation.id, now: now)
+        let intent = try PendingModelIntent(
+            id: UUID(),
+            conversationID: conversation.id,
+            projectID: nil,
+            branchID: nil,
+            userRequest: "完成响应后立即取消",
+            createdAt: now
+        )
+        _ = try database.storePendingModelIntent(intent)
+        let connection = try ModelConnectionTestFixture.makeConnection(
+            provider: .deepSeek,
+            baseURL: URL(string: "https://api.deepseek.com")!,
+            credentialID: UUID(),
+            selectedModel: "deepseek-chat",
+            secret: "fixture-secret"
+        )
+        _ = try database.storeModelConnection(
+            connection,
+            makeCurrent: true,
+            now: now
+        )
+        let versionProof = hash("c")
+        let payloadHash = hash("d")
+        credentials.credentialPayloadHash = payloadHash
+        try credentials.save(
+            "fixture-secret",
+            versionProof: versionProof,
+            setupAuthorizationHash: nil,
+            for: connection
+        )
+        let verified = try VerifiedModelConnection(
+            connection: connection,
+            credentialVerification: ModelCredentialVerification(
+                reference: connection.credential,
+                credentialVersionProof: versionProof,
+                credentialPayloadHash: payloadHash
+            )
+        )
+        let generation = SequencedProviderGenerationService(
+            batches: [
+                [
+                    .textDelta("响应已持久化，但尚未提交继续点。"),
+                    .finished(reason: "stop"),
+                    .usage(
+                        ProviderUsage(
+                            inputTokens: 9,
+                            outputTokens: 8,
+                            totalTokens: 17
+                        )
+                    )
+                ]
+            ]
+        )
+        let coordinator = ProviderAgentRunCoordinator(
+            database: database,
+            credentials: credentials,
+            generation: generation,
+            now: { now }
+        )
+        var cancelledAtDurableResponse = false
+
+        do {
+            _ = try await coordinator.runToCompletion(
+                intent: intent,
+                verifiedConnection: verified
+            ) { projection in
+                guard projection.phase == .responseComplete else { return }
+                cancelledAtDurableResponse = true
+                withUnsafeCurrentTask { task in
+                    task?.cancel()
+                }
+            }
+            XCTFail("Expected cancellation before continuation commit")
+        } catch {
+            XCTAssertEqual(
+                error as? ProviderAgentRunError,
+                .cancelled
+            )
+        }
+
+        XCTAssertTrue(cancelledAtDurableResponse)
+        XCTAssertEqual(
+            try database.providerRequest(intentID: intent.id)?.phase,
+            .responseComplete
+        )
+        XCTAssertNotNil(
+            try database.latestPendingModelIntent(
+                conversationID: conversation.id
+            )
+        )
+        XCTAssertFalse(
+            try database.listAgentMessages(
+                conversationID: conversation.id
+            ).contains { $0.role == .assistant }
+        )
+
+        let resumed = try await Task { @MainActor in
+            try await coordinator.runToCompletion(
+                intent: intent,
+                verifiedConnection: verified
+            )
+        }.value
+        XCTAssertEqual(resumed.request.phase, .continuationCommitted)
+        XCTAssertEqual(generation.prompts.count, 1)
+        XCTAssertNil(
+            try database.latestPendingModelIntent(
+                conversationID: conversation.id
+            )
+        )
+        XCTAssertEqual(
+            try database.listAgentMessages(
+                conversationID: conversation.id
+            ).filter { $0.role == .assistant }.count,
+            1
+        )
+        XCTAssertEqual(
+            try database.listAgentMessages(
+                conversationID: conversation.id
+            ).last?.content,
+            "响应已持久化，但尚未提交继续点。"
+        )
+    }
+
     private func temporaryDatabasePath() -> String {
         FileManager.default.temporaryDirectory
             .appendingPathComponent("provider-loop-\(UUID().uuidString).sqlite")

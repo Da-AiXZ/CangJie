@@ -314,6 +314,9 @@ final class ProviderAgentRunCoordinator {
             )
         }
 
+        guard !Task.isCancelled else {
+            throw ProviderAgentRunError.cancelled
+        }
         let committed = try database.commitProviderContinuation(
             completion.request,
             now: now()

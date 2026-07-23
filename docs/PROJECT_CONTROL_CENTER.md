@@ -46,10 +46,10 @@ Formal prose generation is outside S2.
 | S1 cockpit and workspace | Frozen | Complete | Passed | Accepted |
 | Provider/credential/discovery hardening | Frozen | Complete for slice | Passed | Accepted on Candidate 32 |
 | Central model-connection setup | Frozen | Complete for slice | Passed | Accepted on Candidate 33 |
-| Real Provider generation | Frozen boundary | OpenAI-compatible streaming transport implemented for DeepSeek, OpenAI and OpenRouter | Passed on `313165a` | None |
-| Provider-backed AgentRun | Frozen boundary | Durable request, stream, usage and unknown-outcome projection implemented | Passed on `313165a` | None |
-| Typed Tool and ToolReceipt continuation | Frozen boundary | Strict project create/status execution, exact receipt and Provider continuation are complete in the coordinator slice; central Conversation wiring remains | Core and iPadOS passed on `d355331` | None |
-| Force-quit recovery of the real S2 loop | Frozen boundary | Not implemented | None | None |
+| Real Provider generation | Frozen boundary | OpenAI-compatible streaming transport is wired into the central Conversation for DeepSeek, OpenAI and OpenRouter | Core and iPadOS passed on `b9523ea` | None |
+| Provider-backed AgentRun | Frozen boundary | Durable request, stream, usage, cancellation and unknown-outcome projection are wired into the central Conversation | Core and iPadOS passed on `b9523ea` | None |
+| Typed Tool and ToolReceipt continuation | Frozen boundary | Strict project create/status execution, exact receipt, Provider continuation, pending-intent consumption and shared task/result projection are wired into the central Conversation | Core and iPadOS passed on `b9523ea` | None |
+| Force-quit recovery of the real S2 loop | Frozen boundary | Sent requests reconcile locally without resend and durable complete responses continue without transport; the complete five-state and device-observable loop remains incomplete | Partial automation passed on `b9523ea` | None |
 
 ## Last accepted device baseline
 
@@ -96,19 +96,20 @@ Explicitly absent:
 
 ## Active blocker
 
-No external blocker. The Provider, AgentRun and governed project Tool/ToolReceipt
-coordinator slices have passed exact-SHA automation. S2 remains incomplete because
-the coordinator is not yet wired into the central Conversation and cancellation,
-unknown-outcome reconciliation, lifecycle recovery and force-quit recovery have not
-yet passed as one user-visible loop.
+No external blocker. The central Conversation now runs the real Provider, governed
+project Tool/ToolReceipt continuation and durable pending-intent consumption on an
+exact-SHA automation baseline. S2 remains incomplete because final-commit
+cancellation, the complete task-control/queue contract, five-state lifecycle and
+offline recovery, and force-quit recovery have not yet passed as one user-visible
+device loop.
 
 ## Immediate queue
 
-1. Wire `ProviderAgentRunCoordinator` into the central Conversation using the durable pending intent and verified current connection.
-2. Project real streaming into the Conversation, execute strict Tool calls, return exact Tool results and consume the pending intent only with the durable final continuation.
-3. Complete cancellation, lifecycle persistence and five-state recovery without duplicate Provider requests, tools, receipts, usage or intent consumption.
-4. Prove unknown-outcome reconciliation and force-quit recovery through focused tests and exact-SHA Apple CI.
-5. Build the next candidate only when the complete S2 loop becomes device-observable.
+1. Close the final-commit cancellation window without consuming the pending intent or duplicating Provider work.
+2. Complete the remaining S2 project query/switch/discussion Typed Tools and exact receipts.
+3. Complete pause/resume, stop-and-keep, discard, single-primary-task and queue semantics from one durable state source.
+4. Complete five-state lifecycle/offline recovery and force-quit reconciliation without duplicate requests, tools, receipts, usage or intent consumption.
+5. Verify the shared Conversation/result/task projections, then build the next candidate only when the complete S2 loop becomes device-observable.
 
 ## Stable decision routing
 
