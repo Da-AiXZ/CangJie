@@ -46,11 +46,11 @@ Formal prose generation is outside S2.
 | S1 cockpit and workspace | Frozen | Complete | Passed | Accepted |
 | Provider/credential/discovery hardening | Frozen | Complete for slice | Passed | Accepted on Candidate 32 |
 | Central model-connection setup | Frozen | Complete for slice | Passed | Accepted on Candidate 33 |
-| Real Provider generation | Frozen boundary | Replacement repair keeps a live Provider stream through transient notification-permission inactivity | Candidate 34 passed automation; replacement pending | Candidate 34 rejected |
-| Provider-backed AgentRun | Frozen boundary | Replacement repair separates transient inactivity from true background unknown-outcome handling | Candidate 34 passed automation; replacement pending | Candidate 34 rejected |
-| Typed Tool and ToolReceipt continuation | Frozen boundary | Real project creation and receipt succeeded only after avoiding the lifecycle defect; no accepted completion candidate yet | Candidate 34 passed automation; replacement pending | Candidate 34 rejected |
-| Task control, queue and shared projection | Frozen boundary | Replacement repair removes setup-card inference from queued, paused and reconciling tasks and preserves editable drafts | Candidate 34 passed automation; replacement pending | Candidate 34 rejected |
-| Lifecycle, offline recovery and notifications | Frozen boundary | Replacement repair adds durable offline admission, explicit queued confirmation, truthful notification consent and replaceable task notifications | Candidate 34 passed automation; replacement pending | Candidate 34 rejected |
+| Real Provider generation | Frozen boundary | Replacement repair keeps a live Provider stream through transient notification-permission inactivity | Candidate 35 passed automation | Device pending |
+| Provider-backed AgentRun | Frozen boundary | Replacement repair separates transient inactivity from true background unknown-outcome handling | Candidate 35 passed automation | Device pending |
+| Typed Tool and ToolReceipt continuation | Frozen boundary | Real project creation and receipt succeeded only after avoiding the lifecycle defect; no accepted completion candidate yet | Candidate 35 passed automation | Device pending |
+| Task control, queue and shared projection | Frozen boundary | Replacement repair removes setup-card inference from queued, paused and reconciling tasks and preserves editable drafts | Candidate 35 passed automation | Device pending |
+| Lifecycle, offline recovery and notifications | Frozen boundary | Replacement repair adds durable offline admission, explicit queued confirmation, truthful notification consent and replaceable task notifications | Candidate 35 passed automation | Device pending |
 
 ## Last accepted device baseline
 
@@ -92,23 +92,39 @@ separate Main/Probe entitlement groups. Windows cannot repeat `codesign`; the
 workflow result remains the authority for signed-entitlement verification, but
 artifact integrity does not override the failed device behavior gate.
 
+## Pending replacement Candidate 35
+
+- Commit: `ca309143608525432fd2d28a7db48e6ee98b64a5`
+- Version/build: `1.0 (35001)`
+- Candidate Set ID: `1eac1b4ff7372805e4a75ae28248635d84a7004de850da6f687b78a91b1ff64e`
+- Core CI: `30025029331` passed
+- iPadOS CI: `30025028405` passed
+- Apple tests: 399 App XCTest, 20 App XCUITest, 13 Probe XCTest and 1 Probe XCUITest passed
+- Candidate workflow: `30026256106` passed
+- Main IPA: `CangJie-M0.ipa`
+- Main SHA-256: `e32cf0e124d64c3bcd9842a080aed4b13e6ef73b2933c84550193123db2a6559`
+- Probe IPA: `CangJie-Keychain-Isolation-Probe.ipa`
+- Probe SHA-256: `1c73681407a701135d89dc87881aa903e1e3f3aad3405a10db798153fe5d1e74`
+- Artifact directory: `artifacts/CangJie-S2-run-30026256106/`
+- Device result: pending differential installation and physical-device acceptance.
+
+The workflow independently verified ldid signatures and distinct Main/Probe
+entitlement groups. Local SHA-256 values match the manifest exactly. Candidate
+35 remains unaccepted until the physical-device script passes.
+
 ## Active blocker
 
-Candidate 34 is rejected. A replacement repair is implemented locally for the
-transient-inactive stream cancellation, startup reconciliation collision, stale
-connection-card inference, offline queued confirmation, cross-Conversation status,
-draft autosave, network-confirmation Provider binding and revision-ordered
-notification-consent/delivery defects. The active blocker is replacement exact-SHA
-Core/iPadOS validation followed by a new paired IPA and device acceptance. S2 remains
-unaccepted.
+Candidate 35 passed exact-SHA Core/iPadOS automation and paired artifact
+verification. The active blocker is physical-device validation of the repaired
+notification-permission, offline-confirmation, pause/resume, notification-delivery
+and force-quit recovery paths. S2 remains unaccepted.
 
 ## Immediate queue
 
-1. Complete local deterministic validation and review of the replacement repair.
-2. Commit and push only the repair, tests and current evidence; preserve unrelated worktree files.
-3. Require exact-SHA Core and iPadOS CI, including migration, App XCTest and XCUITest evidence.
-4. Build and verify a new paired Main/Probe IPA only after both CI workflows pass.
-5. Stop for device installation only when that replacement candidate is ready; accept S2 only after the full differential device script passes.
+1. Install both Candidate 35 IPA files by their exact hashes.
+2. Re-run Main/Probe isolation and unchanged-canary checks.
+3. Run the differential Provider, notification permission, offline confirmation, pause/resume, background notification and force-quit recovery script.
+4. Accept S2 only if every physical-device check passes; otherwise record the first causal defect class and reject Candidate 35.
 
 ## Stable decision routing
 
