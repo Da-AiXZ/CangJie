@@ -6,6 +6,8 @@ struct ProviderToolExecutionResult: Equatable {
     let invocation: ProjectToolInvocation
     let receipt: ToolReceipt
     let project: NovelProject?
+    let projects: [NovelProject]
+    let artifact: AgentArtifact?
     let status: String
 }
 
@@ -35,7 +37,14 @@ extension AppDatabase {
                 )
             }
 
-            let result: (NovelProject?, String, String?)
+            let result: (
+                project: NovelProject?,
+                projects: [NovelProject],
+                artifact: AgentArtifact?,
+                status: String,
+                outputReference: String?,
+                receiptProjectID: UUID?
+            )
             switch exactInvocation.arguments {
             case let .create(title, premise):
                 guard exactInvocation.projectID == nil else {
@@ -62,7 +71,24 @@ extension AppDatabase {
                         now.timeIntervalSince1970
                     ]
                 )
-                result = (project, "created", project.id.uuidString)
+                result = (
+                    project,
+                    [project],
+                    nil,
+                    "created",
+                    project.id.uuidString,
+                    project.id
+                )
+            case .list:
+                let projects = try Self.projects(in: db)
+                result = (
+                    nil,
+                    projects,
+                    nil,
+                    "listed",
+                    nil,
+                    exactInvocation.projectID
+                )
             case .status:
                 if let projectID = exactInvocation.projectID {
                     guard let project = try Self.project(
@@ -71,14 +97,66 @@ extension AppDatabase {
                     ) else {
                         throw AppDatabaseError.projectNotFound
                     }
-                    result = (project, "available", project.id.uuidString)
+                    result = (
+                        project,
+                        [project],
+                        nil,
+                        "available",
+                        project.id.uuidString,
+                        project.id
+                    )
                 } else {
-                    result = (nil, "noCurrentProject", nil)
+                    result = (
+                        nil,
+                        [],
+                        nil,
+                        "noCurrentProject",
+                        nil,
+                        nil
+                    )
                 }
+            case let .switchProject(projectID):
+                guard let project = try Self.project(
+                    id: projectID.uuidString,
+                    in: db
+                ) else {
+                    throw AppDatabaseError.projectNotFound
+                }
+                try Self.focusProject(
+                    projectID,
+                    conversationID: exactInvocation.conversationID,
+                    now: now,
+                    in: db
+                )
+                result = (
+                    project,
+                    [project],
+                    nil,
+                    "switched",
+                    project.id.uuidString,
+                    project.id
+                )
+            case let .saveDiscussion(title, body):
+                let artifact = try Self.insertProviderDiscussionArtifact(
+                    title: title,
+                    body: body,
+                    conversationID: exactInvocation.conversationID,
+                    projectID: exactInvocation.projectID,
+                    now: now,
+                    in: db
+                )
+                result = (
+                    nil,
+                    [],
+                    artifact,
+                    "saved",
+                    artifact.id.uuidString,
+                    exactInvocation.projectID
+                )
             }
 
             if case .create = exactInvocation.arguments,
-               let project = result.0 {
+               let project = result.project {
                 try Self.focusProject(
                     project.id,
                     conversationID: exactInvocation.conversationID,
@@ -95,10 +173,10 @@ extension AppDatabase {
                 inputHash: exactInvocation.inputHash,
                 outcome: "completed",
                 conversationID: exactInvocation.conversationID,
-                projectID: result.0?.id ?? exactInvocation.projectID,
+                projectID: result.receiptProjectID,
                 originRunID: exactInvocation.runID,
                 idempotencyKey: exactInvocation.idempotencyKey,
-                outputReference: result.2,
+                outputReference: result.outputReference,
                 providerRequestID: exactInvocation.providerRequestID,
                 providerCallID: exactInvocation.providerCallID,
                 providerCallIndex: exactInvocation.providerCallIndex,
@@ -114,8 +192,10 @@ extension AppDatabase {
             return ProviderToolExecutionResult(
                 invocation: exactInvocation,
                 receipt: receipt,
-                project: result.0,
-                status: result.1
+                project: result.project,
+                projects: result.projects,
+                artifact: result.artifact,
+                status: result.status
             )
         }
     }
@@ -244,6 +324,8 @@ extension AppDatabase {
         in db: Database
     ) throws -> ProviderToolExecutionResult {
         let project: NovelProject?
+        let projects: [NovelProject]
+        let artifact: AgentArtifact?
         switch invocation.arguments {
         case .create:
             guard let outputReference = receipt.outputReference,
@@ -254,6 +336,16 @@ extension AppDatabase {
                 throw AppDatabaseError.invalidToolReceiptReference
             }
             project = storedProject
+            projects = [storedProject]
+            artifact = nil
+        case .list:
+            guard receipt.projectID == invocation.projectID,
+                  receipt.outputReference == nil else {
+                throw AppDatabaseError.invalidToolReceiptReference
+            }
+            project = nil
+            projects = try Self.projects(in: db)
+            artifact = nil
         case .status:
             if let outputReference = receipt.outputReference {
                 guard let storedProject = try Self.project(
@@ -269,18 +361,65 @@ extension AppDatabase {
                 }
                 project = nil
             }
+            projects = project.map { [$0] } ?? []
+            artifact = nil
+        case let .switchProject(projectID):
+            guard let outputReference = receipt.outputReference,
+                  outputReference == projectID.uuidString,
+                  receipt.projectID == projectID,
+                  let storedProject = try Self.project(
+                    id: projectID.uuidString,
+                    in: db
+                  ) else {
+                throw AppDatabaseError.invalidToolReceiptReference
+            }
+            project = storedProject
+            projects = [storedProject]
+            artifact = nil
+        case let .saveDiscussion(title, body):
+            guard let outputReference = receipt.outputReference,
+                  let storedArtifact = try Self.artifact(
+                    id: outputReference,
+                    in: db
+                  ),
+                  storedArtifact.kind == "discussion",
+                  storedArtifact.title == title,
+                  storedArtifact.body == body,
+                  storedArtifact.contentHash == ApprovalFingerprint.artifactHash(
+                    conversationID: invocation.conversationID,
+                    projectID: invocation.projectID,
+                    kind: "discussion",
+                    title: title,
+                    body: body
+                  ),
+                  storedArtifact.status == "saved",
+                  storedArtifact.conversationID == invocation.conversationID,
+                  storedArtifact.projectID == invocation.projectID else {
+                throw AppDatabaseError.invalidToolReceiptReference
+            }
+            project = nil
+            projects = []
+            artifact = storedArtifact
         }
         let status: String
         switch invocation.arguments {
         case .create:
             status = "created"
+        case .list:
+            status = "listed"
         case .status:
             status = project == nil ? "noCurrentProject" : "available"
+        case .switchProject:
+            status = "switched"
+        case .saveDiscussion:
+            status = "saved"
         }
         return ProviderToolExecutionResult(
             invocation: invocation,
             receipt: receipt,
             project: project,
+            projects: projects,
+            artifact: artifact,
             status: status
         )
     }
@@ -310,8 +449,13 @@ extension AppDatabase {
             guard run.projectID == nil, projectID != nil else {
                 throw AppDatabaseError.invalidAgentRun
             }
-        case .status:
+        case .list, .status, .saveDiscussion:
             guard run.projectID == projectID else {
+                throw AppDatabaseError.invalidAgentRun
+            }
+        case let .switchProject(targetID):
+            guard run.projectID == invocation.projectID,
+                  projectID == targetID else {
                 throw AppDatabaseError.invalidAgentRun
             }
         }
@@ -385,5 +529,103 @@ extension AppDatabase {
                 ]
             )
         }
+    }
+
+    private static func projects(in db: Database) throws -> [NovelProject] {
+        try Row.fetchAll(
+            db,
+            sql: "SELECT * FROM novelProject ORDER BY updatedAt DESC, rowid DESC"
+        ).compactMap { row in
+            guard let id = UUID(uuidString: row["id"]) else { return nil }
+            return NovelProject(
+                id: id,
+                title: row["title"],
+                premise: row["premise"],
+                version: row["version"] ?? 1,
+                createdAt: Date(timeIntervalSince1970: row["createdAt"]),
+                updatedAt: Date(timeIntervalSince1970: row["updatedAt"])
+            )
+        }
+    }
+
+    private static func insertProviderDiscussionArtifact(
+        title: String,
+        body: String,
+        conversationID: UUID,
+        projectID: UUID?,
+        now: Date,
+        in db: Database
+    ) throws -> AgentArtifact {
+        let contentHash = ApprovalFingerprint.artifactHash(
+            conversationID: conversationID,
+            projectID: projectID,
+            kind: "discussion",
+            title: title,
+            body: body
+        )
+        let previousRow: Row?
+        if let projectID {
+            previousRow = try Row.fetchOne(
+                db,
+                sql: """
+                    SELECT * FROM agentArtifact
+                    WHERE kind = ? AND conversationID = ? AND projectID = ?
+                    ORDER BY updatedAt DESC, rowid DESC LIMIT 1
+                    """,
+                arguments: [
+                    "discussion",
+                    conversationID.uuidString,
+                    projectID.uuidString
+                ]
+            )
+        } else {
+            previousRow = try Row.fetchOne(
+                db,
+                sql: """
+                    SELECT * FROM agentArtifact
+                    WHERE kind = ? AND conversationID = ? AND projectID IS NULL
+                    ORDER BY updatedAt DESC, rowid DESC LIMIT 1
+                    """,
+                arguments: ["discussion", conversationID.uuidString]
+            )
+        }
+        let previous = previousRow.flatMap(Self.decodeAgentArtifact)
+        let artifact = AgentArtifact(
+            id: UUID(),
+            logicalID: previous?.logicalID,
+            revision: (previous?.revision ?? 0) + 1,
+            contentHash: contentHash,
+            parentArtifactID: previous?.id,
+            kind: "discussion",
+            title: title,
+            body: body,
+            status: "saved",
+            conversationID: conversationID,
+            projectID: projectID,
+            updatedAt: now
+        )
+        try db.execute(
+            sql: """
+                INSERT INTO agentArtifact (
+                    id, logicalID, revision, contentHash, parentArtifactID, kind,
+                    title, body, status, conversationID, projectID, updatedAt
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+            arguments: [
+                artifact.id.uuidString,
+                artifact.logicalID.uuidString,
+                artifact.revision,
+                artifact.contentHash,
+                artifact.parentArtifactID?.uuidString,
+                artifact.kind,
+                artifact.title,
+                artifact.body,
+                artifact.status,
+                artifact.conversationID?.uuidString,
+                artifact.projectID?.uuidString,
+                artifact.updatedAt.timeIntervalSince1970
+            ]
+        )
+        return artifact
     }
 }

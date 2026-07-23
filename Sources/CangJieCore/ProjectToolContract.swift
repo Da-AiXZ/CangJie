@@ -8,7 +8,10 @@ public enum ProjectToolContractError: Error, Equatable, Sendable {
 
 public enum ProjectToolArguments: Equatable, Sendable {
     case create(title: String, premise: String)
+    case list
     case status
+    case switchProject(projectID: UUID)
+    case saveDiscussion(title: String, body: String)
 }
 
 public struct ProjectToolInvocation: Equatable, Sendable {
@@ -16,6 +19,7 @@ public struct ProjectToolInvocation: Equatable, Sendable {
     public static let maximumProviderCallIndex = 7
     public static let maximumTitleUTF8Bytes = 256
     public static let maximumPremiseUTF8Bytes = 8 * 1_024
+    public static let maximumDiscussionBodyUTF8Bytes = 64 * 1_024
 
     public let providerCallID: String
     public let providerCallIndex: Int
@@ -55,10 +59,23 @@ public struct ProjectToolInvocation: Equatable, Sendable {
             definition = .create
             let decoded = try decodeCreateArguments(argumentsJSON)
             arguments = .create(title: decoded.title, premise: decoded.premise)
+        case "project_list":
+            definition = .list
+            try decodeEmptyArguments(argumentsJSON)
+            arguments = .list
         case "project_status":
             definition = .status
-            try decodeStatusArguments(argumentsJSON)
+            try decodeEmptyArguments(argumentsJSON)
             arguments = .status
+        case "project_switch":
+            definition = .switchProject
+            arguments = .switchProject(
+                projectID: try decodeProjectIDArguments(argumentsJSON)
+            )
+        case "project_save_discussion":
+            definition = .saveDiscussion
+            let decoded = try decodeDiscussionArguments(argumentsJSON)
+            arguments = .saveDiscussion(title: decoded.title, body: decoded.body)
         default:
             throw ProjectToolContractError.unsupportedTool
         }
@@ -88,14 +105,23 @@ public struct ProjectToolInvocation: Equatable, Sendable {
 
     private enum Definition {
         case create
+        case list
         case status
+        case switchProject
+        case saveDiscussion
 
         var toolID: String {
             switch self {
             case .create:
                 return "project.create"
+            case .list:
+                return "project.list"
             case .status:
                 return "project.status"
+            case .switchProject:
+                return "project.switch"
+            case .saveDiscussion:
+                return "conversation.save_discussion"
             }
         }
 
@@ -158,7 +184,7 @@ public struct ProjectToolInvocation: Equatable, Sendable {
         return decoded
     }
 
-    private static func decodeStatusArguments(_ json: String) throws {
+    private static func decodeEmptyArguments(_ json: String) throws {
         guard json.utf8.count <= 128,
               let data = json.data(using: .utf8),
               let object = try? JSONSerialization.jsonObject(with: data),
@@ -166,6 +192,73 @@ public struct ProjectToolInvocation: Equatable, Sendable {
               dictionary.isEmpty else {
             throw ProjectToolContractError.invalidArguments
         }
+    }
+
+    private struct ProjectIDArguments: Decodable {
+        let projectID: UUID
+
+        init(from decoder: Decoder) throws {
+            let raw = try decoder.container(keyedBy: DynamicCodingKey.self)
+            guard Set(raw.allKeys.map(\.stringValue)) == ["projectID"],
+                  let key = DynamicCodingKey(stringValue: "projectID"),
+                  let projectID = UUID(
+                    uuidString: try raw.decode(String.self, forKey: key)
+                  ) else {
+                throw ProjectToolContractError.invalidArguments
+            }
+            self.projectID = projectID
+        }
+    }
+
+    private struct DiscussionArguments: Decodable {
+        let title: String
+        let body: String
+
+        init(from decoder: Decoder) throws {
+            let raw = try decoder.container(keyedBy: DynamicCodingKey.self)
+            guard Set(raw.allKeys.map(\.stringValue)) == ["body", "title"],
+                  let titleKey = DynamicCodingKey(stringValue: "title"),
+                  let bodyKey = DynamicCodingKey(stringValue: "body") else {
+                throw ProjectToolContractError.invalidArguments
+            }
+            title = try raw.decode(String.self, forKey: titleKey)
+            body = try raw.decode(String.self, forKey: bodyKey)
+        }
+    }
+
+    private static func decodeProjectIDArguments(_ json: String) throws -> UUID {
+        guard json.utf8.count <= 256,
+              let data = json.data(using: .utf8),
+              let decoded = try? JSONDecoder().decode(
+                ProjectIDArguments.self,
+                from: data
+              ) else {
+            throw ProjectToolContractError.invalidArguments
+        }
+        return decoded.projectID
+    }
+
+    private static func decodeDiscussionArguments(
+        _ json: String
+    ) throws -> DiscussionArguments {
+        guard json.utf8.count <= maximumTitleUTF8Bytes
+                + maximumDiscussionBodyUTF8Bytes + 128,
+              let data = json.data(using: .utf8),
+              let decoded = try? JSONDecoder().decode(
+                DiscussionArguments.self,
+                from: data
+              ),
+              validText(
+                decoded.title,
+                maximumUTF8Bytes: maximumTitleUTF8Bytes
+              ),
+              validText(
+                decoded.body,
+                maximumUTF8Bytes: maximumDiscussionBodyUTF8Bytes
+              ) else {
+            throw ProjectToolContractError.invalidArguments
+        }
+        return decoded
     }
 
     private static func validText(
@@ -206,8 +299,15 @@ public struct ProjectToolInvocation: Equatable, Sendable {
         case let .create(title, premise):
             encoder.append(name: "title", value: title)
             encoder.append(name: "premise", value: premise)
+        case .list:
+            encoder.append(name: "arguments", value: "empty")
         case .status:
             encoder.append(name: "arguments", value: "empty")
+        case let .switchProject(projectID):
+            encoder.append(name: "projectID", value: projectID.canonicalString)
+        case let .saveDiscussion(title, body):
+            encoder.append(name: "title", value: title)
+            encoder.append(name: "body", value: body)
         }
         return CangJieSHA256.digest(encoder.bytes).hexadecimalString
     }

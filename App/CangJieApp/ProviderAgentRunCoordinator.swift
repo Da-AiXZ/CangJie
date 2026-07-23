@@ -387,9 +387,12 @@ final class ProviderAgentRunCoordinator {
                 intent.userRequest
             ]),
             toolCatalogManifestHash: digest([
-                "provider-tool-catalog-v1",
+                "provider-tool-catalog-v2",
                 "project.create@1",
-                "project.status@1"
+                "project.list@1",
+                "project.status@1",
+                "project.switch@1",
+                "conversation.save_discussion@1"
             ]),
             disclosureScopeHash: digest([
                 "provider-disclosure-v1",
@@ -430,8 +433,10 @@ final class ProviderAgentRunCoordinator {
               request.responseAssetID == expected.responseAssetID,
               request.promptManifestHash == expected.promptManifestHash,
               request.contextManifestHash == expected.contextManifestHash,
-              request.toolCatalogManifestHash
-                == expected.toolCatalogManifestHash,
+              Self.acceptedToolCatalogManifestHash(
+                request.toolCatalogManifestHash,
+                expected: expected.toolCatalogManifestHash
+              ),
               request.disclosureScopeHash == expected.disclosureScopeHash,
               request.requestPolicyHash == expected.requestPolicyHash,
               request.createdAt == expected.createdAt else {
@@ -563,6 +568,23 @@ final class ProviderAgentRunCoordinator {
                 "id": project.id.uuidString.lowercased(),
                 "title": project.title,
                 "premise": project.premise
+            ]
+        }
+        if !execution.projects.isEmpty {
+            object["projects"] = execution.projects.map { project in
+                [
+                    "id": project.id.uuidString.lowercased(),
+                    "title": project.title,
+                    "premise": project.premise
+                ]
+            }
+        }
+        if let artifact = execution.artifact {
+            object["artifact"] = [
+                "id": artifact.id.uuidString.lowercased(),
+                "kind": artifact.kind,
+                "title": artifact.title,
+                "status": artifact.status
             ]
         }
         guard JSONSerialization.isValidJSONObject(object),
@@ -750,6 +772,18 @@ final class ProviderAgentRunCoordinator {
 
     private static func supports(_ provider: ModelProvider) -> Bool {
         provider == .deepSeek || provider == .openAI || provider == .openRouter
+    }
+
+    private static func acceptedToolCatalogManifestHash(
+        _ actual: String,
+        expected: String
+    ) -> Bool {
+        actual == expected
+            || actual == digest([
+                "provider-tool-catalog-v1",
+                "project.create@1",
+                "project.status@1"
+            ])
     }
 
     private static func matches(

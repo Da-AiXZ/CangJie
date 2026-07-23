@@ -101,6 +101,99 @@ final class ProviderToolExecutionTests: XCTestCase {
         XCTAssertNil(result.receipt.outputReference)
     }
 
+    func testProjectListReturnsRealProjectsAndReplaysExactly() throws {
+        let fixture = try makeFixture(
+            functionName: "project_list",
+            argumentsJSON: "{}"
+        )
+        _ = try fixture.database.createProject(
+            title: "甲",
+            premise: "第一本",
+            now: fixture.now
+        )
+        _ = try fixture.database.createProject(
+            title: "乙",
+            premise: "第二本",
+            now: fixture.now.addingTimeInterval(1)
+        )
+
+        let first = try fixture.database.executeProviderTool(fixture.invocation)
+        let replay = try fixture.database.executeProviderTool(fixture.invocation)
+
+        XCTAssertEqual(first, replay)
+        XCTAssertEqual(first.status, "listed")
+        XCTAssertEqual(first.projects.map(\.title), ["乙", "甲"])
+        XCTAssertNil(first.receipt.outputReference)
+        XCTAssertEqual(try fixture.database.latestToolReceipt()?.id, first.receipt.id)
+    }
+
+    func testProjectSwitchChangesConversationFocusAndReplaysExactly() throws {
+        let targetID = UUID(
+            uuidString: "85000000-0000-0000-0000-000000000005"
+        )!
+        let fixture = try makeFixture(
+            functionName: "project_switch",
+            argumentsJSON: "{\"projectID\":\""
+                + targetID.uuidString
+                + "\"}"
+        )
+        let project = NovelProject(
+            id: targetID,
+            title: "目标",
+            premise: "切换到这里",
+            createdAt: fixture.now,
+            updatedAt: fixture.now
+        )
+        try fixture.database.queue.write { db in
+            try db.execute(
+                sql: """
+                    INSERT INTO novelProject (id, title, premise, createdAt, updatedAt)
+                    VALUES (?, ?, ?, ?, ?)
+                    """,
+                arguments: [
+                    project.id.uuidString,
+                    project.title,
+                    project.premise,
+                    fixture.now.timeIntervalSince1970,
+                    fixture.now.timeIntervalSince1970
+                ]
+            )
+        }
+        let first = try fixture.database.executeProviderTool(fixture.invocation)
+        let replay = try fixture.database.executeProviderTool(fixture.invocation)
+
+        XCTAssertEqual(first, replay)
+        XCTAssertEqual(first.status, "switched")
+        XCTAssertEqual(first.project?.id, project.id)
+        XCTAssertEqual(
+            try fixture.database.focusedProjectID(
+                conversationID: fixture.intent.conversationID
+            ),
+            project.id
+        )
+    }
+
+    func testSaveDiscussionCreatesScopedArtifactAndExactReplay() throws {
+        let fixture = try makeFixture(
+            functionName: "project_save_discussion",
+            argumentsJSON: #"{"title":"起点","body":"保留这次讨论"}"#
+        )
+
+        let first = try fixture.database.executeProviderTool(fixture.invocation)
+        let replay = try fixture.database.executeProviderTool(fixture.invocation)
+
+        XCTAssertEqual(first, replay)
+        XCTAssertEqual(first.status, "saved")
+        XCTAssertEqual(first.artifact?.kind, "discussion")
+        XCTAssertEqual(first.artifact?.title, "起点")
+        XCTAssertEqual(first.artifact?.body, "保留这次讨论")
+        XCTAssertEqual(
+            first.artifact?.conversationID,
+            fixture.intent.conversationID
+        )
+        XCTAssertEqual(first.receipt.outputReference, first.artifact?.id.uuidString)
+    }
+
     private func makeFixture(
         functionName: String,
         argumentsJSON: String

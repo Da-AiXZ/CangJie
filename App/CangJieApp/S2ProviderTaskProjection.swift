@@ -11,6 +11,7 @@ struct S2ProviderTaskProjection: Equatable {
     let usage: ProviderUsage?
     let receipt: ToolReceipt?
     let projectTitle: String?
+    let artifactTitle: String?
     let lastSafeSaveAt: Date
 
     var conversationStatus: String {
@@ -90,8 +91,14 @@ struct S2ProviderTaskProjection: Equatable {
         switch receipt.toolID {
         case "project.create":
             return "小说已经建立"
+        case "project.list":
+            return "小说清单已经更新"
         case "project.status":
             return "小说状态已经核对"
+        case "project.switch":
+            return "已经切换当前小说"
+        case "conversation.save_discussion":
+            return "这次讨论已经保存"
         default:
             return "真实工具结果"
         }
@@ -106,6 +113,12 @@ struct S2ProviderTaskProjection: Equatable {
         case "project.status":
             return projectTitle.map { "已经核对《\($0)》的当前状态。" }
                 ?? "当前对话还没有绑定小说，状态查询已经完成。"
+        case "project.switch":
+            return projectTitle.map { "已经切换到《\($0)》，后续讨论会绑定这里。" }
+                ?? "已经切换当前小说，并保存了这次真实执行回执。"
+        case "conversation.save_discussion":
+            return artifactTitle.map { "已经保存讨论《\($0)》，并保留了真实执行回执。" }
+                ?? "已经保存这次讨论，并保留了真实执行回执。"
         default:
             return "这次工具执行已经完成，并保存了可核验回执。"
         }
@@ -118,6 +131,12 @@ struct S2ProviderTaskProjection: Equatable {
             return "创建小说"
         case "project.status":
             return "查看小说状态"
+        case "project.list":
+            return "查看小说清单"
+        case "project.switch":
+            return "切换当前小说"
+        case "conversation.save_discussion":
+            return "保存讨论"
         default:
             return "受治理工具"
         }
@@ -132,6 +151,14 @@ struct S2ProviderTaskProjection: Equatable {
         case "project.status":
             return projectTitle.map { "已核对小说《\($0)》的当前状态" }
                 ?? "已核对当前小说状态"
+        case "project.list":
+            return "已查看小说清单"
+        case "project.switch":
+            return projectTitle.map { "已切换到小说《\($0)》" }
+                ?? "已切换当前小说"
+        case "conversation.save_discussion":
+            return artifactTitle.map { "已保存讨论《\($0)》" }
+                ?? "已保存这次讨论"
         default:
             return "这件事已经处理完成"
         }
@@ -239,7 +266,21 @@ extension AppDatabase {
             }
 
             let projectTitle: String?
-            if let projectID = receipt?.projectID {
+            let artifactTitle: String?
+            if receipt?.toolID == "conversation.save_discussion" {
+                guard let outputReference = receipt?.outputReference,
+                      let artifact = try Self.artifact(
+                          id: outputReference,
+                          in: db
+                      ),
+                      artifact.kind == "discussion",
+                      artifact.conversationID == conversationID,
+                      artifact.status == "saved" else {
+                    throw AppDatabaseError.invalidToolReceiptReference
+                }
+                projectTitle = nil
+                artifactTitle = artifact.title
+            } else if let projectID = receipt?.projectID {
                 guard receipt?.outputReference == projectID.uuidString,
                       let project = try Self.project(
                           id: projectID.uuidString,
@@ -248,11 +289,13 @@ extension AppDatabase {
                     throw AppDatabaseError.invalidToolReceiptReference
                 }
                 projectTitle = project.title
+                artifactTitle = nil
             } else {
                 guard receipt?.outputReference == nil else {
                     throw AppDatabaseError.invalidToolReceiptReference
                 }
                 projectTitle = nil
+                artifactTitle = nil
             }
 
             return S2ProviderTaskProjection(
@@ -262,6 +305,7 @@ extension AppDatabase {
                 usage: usage,
                 receipt: receipt,
                 projectTitle: projectTitle,
+                artifactTitle: artifactTitle,
                 lastSafeSaveAt: max(
                     max(request.updatedAt, run.updatedAt),
                     receipt?.createdAt ?? request.updatedAt

@@ -92,6 +92,66 @@ final class ProjectToolContractTests: XCTestCase {
         }
     }
 
+    func testListSwitchAndSaveDiscussionInvocationsAreStrict() throws {
+        let projectID = UUID(
+            uuidString: "84000000-0000-0000-0000-000000000004"
+        )!
+        let list = try makeInvocation(
+            providerName: "project_list",
+            argumentsJSON: "{}"
+        )
+        XCTAssertEqual(list.arguments, .list)
+        XCTAssertEqual(list.toolID, "project.list")
+
+        let switched = try makeInvocation(
+            providerName: "project_switch",
+            argumentsJSON: "{\"projectID\":\""
+                + projectID.uuidString
+                + "\"}"
+        )
+        XCTAssertEqual(
+            switched.arguments,
+            .switchProject(projectID: projectID)
+        )
+        XCTAssertEqual(switched.toolID, "project.switch")
+
+        let saved = try makeInvocation(
+            providerName: "project_save_discussion",
+            argumentsJSON: #"{"title":"起点","body":"保留这次讨论的方向"}"#
+        )
+        XCTAssertEqual(
+            saved.arguments,
+            .saveDiscussion(title: "起点", body: "保留这次讨论的方向")
+        )
+        XCTAssertEqual(saved.toolID, "conversation.save_discussion")
+        XCTAssertNotEqual(list.inputHash, saved.inputHash)
+    }
+
+    func testListSwitchAndSaveDiscussionRejectMalformedArguments() {
+        let invalid: [(String, String)] = [
+            ("project_list", #"{"unexpected":true}"#),
+            ("project_switch", #"{"projectID":"forged"}"#),
+            ("project_switch", "{}"),
+            ("project_save_discussion", #"{"title":"起点"}"#),
+            ("project_save_discussion", #"{"title":" ","body":"正文"}"#),
+            ("project_save_discussion", #"{"title":"起点","body":""}"#),
+            ("project_save_discussion", #"{"title":"起点","body":"讨论","extra":true}"#)
+        ]
+        for (providerName, argumentsJSON) in invalid {
+            XCTAssertThrowsError(
+                try makeInvocation(
+                    providerName: providerName,
+                    argumentsJSON: argumentsJSON
+                )
+            ) { error in
+                XCTAssertEqual(
+                    error as? ProjectToolContractError,
+                    .invalidArguments
+                )
+            }
+        }
+    }
+
     func testUnknownToolAndInvalidProviderCallIdentityFailClosed() {
         XCTAssertThrowsError(
             try makeInvocation(

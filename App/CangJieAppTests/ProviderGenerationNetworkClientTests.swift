@@ -101,7 +101,7 @@ final class ProviderGenerationNetworkClientTests: XCTestCase {
         )
         XCTAssertEqual(json["model"] as? String, "deepseek-chat")
         XCTAssertEqual(json["stream"] as? Bool, true)
-        XCTAssertEqual((json["tools"] as? [[String: Any]])?.count, 2)
+        XCTAssertEqual((json["tools"] as? [[String: Any]])?.count, 5)
         XCTAssertFalse(
             try XCTUnwrap(String(data: body, encoding: .utf8))
                 .contains("fixture-secret")

@@ -733,12 +733,55 @@ struct ProviderGenerationNetworkClient: Sendable {
         [
             "type": "function",
             "function": [
+                "name": "project_list",
+                "description": "List real novel projects without changing the current project.",
+                "parameters": [
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": [:]
+                ]
+            ]
+        ],
+        [
+            "type": "function",
+            "function": [
                 "name": "project_status",
                 "description": "Read the current project status without changing it.",
                 "parameters": [
                     "type": "object",
                     "additionalProperties": false,
                     "properties": [:]
+                ]
+            ]
+        ],
+        [
+            "type": "function",
+            "function": [
+                "name": "project_switch",
+                "description": "Switch the current conversation to one existing novel project.",
+                "parameters": [
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": ["projectID"],
+                    "properties": [
+                        "projectID": ["type": "string"]
+                    ]
+                ]
+            ]
+        ],
+        [
+            "type": "function",
+            "function": [
+                "name": "project_save_discussion",
+                "description": "Save the current discussion as a real project artifact.",
+                "parameters": [
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": ["title", "body"],
+                    "properties": [
+                        "title": ["type": "string"],
+                        "body": ["type": "string"]
+                    ]
                 ]
             ]
         ]]
