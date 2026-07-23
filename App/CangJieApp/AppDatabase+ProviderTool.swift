@@ -16,7 +16,8 @@ extension AppDatabase {
         _ invocation: ProjectToolInvocation,
         now: Date = Date()
     ) throws -> ProviderToolExecutionResult {
-        try queue.write { db in
+        let canonicalNow = try Self.canonicalProviderToolTimestamp(now)
+        return try queue.write { db in
             let request = try Self.validatedProviderRequest(
                 for: invocation,
                 in: db
@@ -54,8 +55,8 @@ extension AppDatabase {
                     id: UUID(),
                     title: title,
                     premise: premise,
-                    createdAt: now,
-                    updatedAt: now
+                    createdAt: canonicalNow,
+                    updatedAt: canonicalNow
                 )
                 try db.execute(
                     sql: """
@@ -67,8 +68,8 @@ extension AppDatabase {
                         project.id.uuidString,
                         project.title,
                         project.premise,
-                        now.timeIntervalSince1970,
-                        now.timeIntervalSince1970
+                        canonicalNow.timeIntervalSince1970,
+                        canonicalNow.timeIntervalSince1970
                     ]
                 )
                 result = (
@@ -125,7 +126,7 @@ extension AppDatabase {
                 try Self.focusProject(
                     projectID,
                     conversationID: exactInvocation.conversationID,
-                    now: now,
+                    now: canonicalNow,
                     in: db
                 )
                 result = (
@@ -142,7 +143,7 @@ extension AppDatabase {
                     body: body,
                     conversationID: exactInvocation.conversationID,
                     projectID: exactInvocation.projectID,
-                    now: now,
+                    now: canonicalNow,
                     in: db
                 )
                 result = (
@@ -160,7 +161,7 @@ extension AppDatabase {
                 try Self.focusProject(
                     project.id,
                     conversationID: exactInvocation.conversationID,
-                    now: now,
+                    now: canonicalNow,
                     in: db
                 )
             }
@@ -180,12 +181,12 @@ extension AppDatabase {
                 providerRequestID: exactInvocation.providerRequestID,
                 providerCallID: exactInvocation.providerCallID,
                 providerCallIndex: exactInvocation.providerCallIndex,
-                createdAt: now
+                createdAt: canonicalNow
             )
             try Self.updateRunAfterProviderTool(
                 exactInvocation,
-                projectID: result.0?.id ?? exactInvocation.projectID,
-                now: now,
+                projectID: result.project?.id ?? exactInvocation.projectID,
+                now: canonicalNow,
                 in: db
             )
             try Self.insertToolReceipt(receipt, in: db)
@@ -627,5 +628,20 @@ extension AppDatabase {
             ]
         )
         return artifact
+    }
+
+    private static func canonicalProviderToolTimestamp(
+        _ timestamp: Date
+    ) throws -> Date {
+        let microseconds = timestamp.timeIntervalSince1970 * 1_000_000
+        guard microseconds.isFinite,
+              microseconds >= Double(Int64.min),
+              microseconds < Double(Int64.max) else {
+            throw AppDatabaseError.invalidProviderToolInvocation
+        }
+        let epochMicroseconds = Int64(microseconds.rounded(.down))
+        return Date(
+            timeIntervalSince1970: Double(epochMicroseconds) / 1_000_000
+        )
     }
 }
