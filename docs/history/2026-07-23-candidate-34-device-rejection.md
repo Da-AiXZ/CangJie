@@ -29,3 +29,7 @@ The notification permission sheet produces transient scene inactivity. Candidate
 The replacement repair also closes adjacent proven risks: notification consent now follows the system result, Provider status is Conversation-scoped, offline queue admission and prepared-run projection remain atomic through explicit confirmation, pending task notifications are revision-ordered and cancellable, and Provider completion no longer cancels a pending draft autosave.
 
 This file is historical evidence only. Current blocker and queue remain in `../PROJECT_CONTROL_CENTER.md`.
+
+## First replacement validation
+
+Replacement commit `a0ba2d28345f45b918e6026ba99667b7a5477290` passed Core CI `30012079846`. iPadOS CI `30012079896` compiled successfully, passed 20 App XCUITest cases and the complete Probe suite, but failed one of 399 App XCTest cases: `testResumingTaskCancelsItsPendingWaitingNotification`. The test combined its notification-cancellation assertion with entry into the asynchronous Provider fake in one short polling condition, so the failure did not identify which contract timed out. The follow-up keeps the notification test scoped to a strictly newer cancellation revision; the independent offline-resume test remains the Provider-send evidence.

@@ -205,8 +205,9 @@ final class AgentTaskNotificationTests: XCTestCase {
         network.update(.available)
         fixture.viewModel.resumeProviderTask()
         try await waitUntil {
-            fixture.generation.callCount == 1
-                && notifications.cancelledTaskIDs.contains(task.id)
+            notifications.cancelledTasks.contains {
+                $0.taskID == task.id && $0.throughRevision > task.revision
+            }
         }
 
         fixture.viewModel.handleScenePhase(.background)
