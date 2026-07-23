@@ -918,13 +918,6 @@ final class AppViewModel: ObservableObject {
               providerRunGeneration == generation else {
             return
         }
-        let exitedTaskID: UUID?
-        if let database,
-           let task = try? database.agentTask(intentID: intentID) {
-            exitedTaskID = task.id
-        } else {
-            exitedTaskID = nil
-        }
         providerStreamText = projection.text
         canCancelProviderRun = projection.phase == .sending
             || projection.phase == .streaming
@@ -942,6 +935,13 @@ final class AppViewModel: ObservableObject {
         guard activeProviderIntentID == intentID,
               providerRunGeneration == generation else {
             return
+        }
+        let exitedTaskID: UUID?
+        if let database,
+           let task = try? database.agentTask(intentID: intentID) {
+            exitedTaskID = task.id
+        } else {
+            exitedTaskID = nil
         }
         providerRunFailureDescription = nil
         activeProviderIntentID = nil
