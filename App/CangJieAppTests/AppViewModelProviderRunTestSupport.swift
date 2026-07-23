@@ -54,6 +54,7 @@ final class FIFOAppViewModelProviderGenerationService:
     private var firstContinuation:
         AsyncThrowingStream<ProviderGenerationEvent, Error>.Continuation?
     private(set) var callCount = 0
+    private(set) var intentIDs: [UUID] = []
 
     func stream(
         request: ProviderRequestSnapshot,
@@ -63,6 +64,7 @@ final class FIFOAppViewModelProviderGenerationService:
         userPrompt: String
     ) -> AsyncThrowingStream<ProviderGenerationEvent, Error> {
         callCount += 1
+        intentIDs.append(request.identity.intentID)
         if callCount == 1 {
             return AsyncThrowingStream { continuation in
                 firstContinuation = continuation
@@ -125,5 +127,9 @@ final class TestNetworkAvailabilityObserver:
     func update(_ state: NetworkAvailabilityState) {
         self.state = state
         handler?(state)
+    }
+
+    func updateWithoutNotifying(_ state: NetworkAvailabilityState) {
+        self.state = state
     }
 }

@@ -565,7 +565,7 @@ final class ModelConnectionSetupFlowTests: XCTestCase, ModelConnectionSetupServi
             XCTAssertNil(viewModel.selectedConversationID)
             XCTAssertEqual(
                 viewModel.displayedBusinessStatus,
-                "当前只验证界面、导航和本地保存，尚未接入真正的模型任务"
+                "可以先聊想法，需要模型时再连接"
             )
             viewModel.draft = "B 会话的请求"
             viewModel.sendModelDependentMessage()

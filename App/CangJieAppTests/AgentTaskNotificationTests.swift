@@ -151,6 +151,66 @@ final class AgentTaskNotificationTests: XCTestCase {
         )
     }
 
+    func testBackgroundPersistsReconciliationBeforeSchedulingAttentionNotification() async throws {
+        let notifications = RecordingAgentTaskNotificationScheduler()
+        notifications.authorizationResult = true
+        let backgroundExecution = RecordingBackgroundExecutionProtector()
+        let consent = MemoryAgentTaskNotificationConsentStore(
+            decision: .allowed
+        )
+        let fixture = try makeFixture(
+            notifications: notifications,
+            consent: consent,
+            generationEvents: [.textDelta("后台前已经收到部分回复。")],
+            hangsAfterEvents: true,
+            backgroundExecution: backgroundExecution
+        )
+        fixture.viewModel.draft = "进入后台后提醒我回来查看"
+        fixture.viewModel.sendModelDependentMessage()
+        let intent = try XCTUnwrap(
+            fixture.viewModel.modelConnectionSetup.pendingIntent
+        )
+        var stateAtSchedule:
+            (request: ProviderRequestPhase?, task: AgentTaskStatus?)?
+        notifications.onSchedule = { _ in
+            stateAtSchedule = (
+                try? fixture.database.providerRequest(
+                    intentID: intent.id
+                )?.phase,
+                try? fixture.database.agentTask(
+                    intentID: intent.id
+                )?.status
+            )
+        }
+        try await waitUntil {
+            (try? fixture.database.providerRequest(intentID: intent.id)?.phase)
+                == .streaming
+        }
+
+        fixture.viewModel.handleScenePhase(.background)
+        try await waitUntil {
+            backgroundExecution.completedOperationCount == 1
+                && notifications.requests.contains {
+                    $0.kind == .waitingUser && $0.taskID
+                        == (try? fixture.database.agentTask(intentID: intent.id)?.id)
+                }
+        }
+        await fixture.viewModel.waitForProviderRunToSettle()
+
+        XCTAssertEqual(
+            try fixture.database.providerRequest(intentID: intent.id)?.phase,
+            .outcomeUnknown
+        )
+        XCTAssertEqual(
+            try fixture.database.agentTask(intentID: intent.id)?.status,
+            .reconciling
+        )
+        XCTAssertEqual(stateAtSchedule?.request, .outcomeUnknown)
+        XCTAssertEqual(stateAtSchedule?.task, .reconciling)
+        XCTAssertEqual(backgroundExecution.protectedOperationCount, 1)
+        XCTAssertEqual(backgroundExecution.completedOperationCount, 1)
+    }
+
     func testDeniedSystemPermissionDoesNotPersistAllowedConsent() async throws {
         let notifications = RecordingAgentTaskNotificationScheduler()
         notifications.authorizationResult = false
@@ -553,7 +613,9 @@ final class AgentTaskNotificationTests: XCTestCase {
             )
         ],
         hangsAfterEvents: Bool = false,
-        network: TestNetworkAvailabilityObserver? = nil
+        network: TestNetworkAvailabilityObserver? = nil,
+        backgroundExecution:
+            (any AgentTaskBackgroundExecutionProtecting)? = nil
     ) throws -> (
         database: AppDatabase,
         viewModel: AppViewModel,
@@ -588,6 +650,7 @@ final class AgentTaskNotificationTests: XCTestCase {
             networkAvailabilityObserver: network,
             agentTaskNotifications: notifications,
             notificationConsentStore: consent,
+            backgroundExecutionProtector: backgroundExecution,
             taskID: UUID(),
             draftAutosaveDelayNanoseconds: UInt64.max
         )
@@ -629,6 +692,25 @@ final class AgentTaskNotificationTests: XCTestCase {
 }
 
 @MainActor
+private final class RecordingBackgroundExecutionProtector:
+    AgentTaskBackgroundExecutionProtecting
+{
+    private(set) var protectedOperationCount = 0
+    private(set) var completedOperationCount = 0
+
+    func protect(
+        name: String,
+        operation: @escaping @MainActor @Sendable () async -> Void
+    ) {
+        protectedOperationCount += 1
+        Task { @MainActor [weak self] in
+            await operation()
+            self?.completedOperationCount += 1
+        }
+    }
+}
+
+@MainActor
 private final class RecordingAgentTaskNotificationScheduler:
     AgentTaskNotificationScheduling
 {
@@ -638,6 +720,7 @@ private final class RecordingAgentTaskNotificationScheduler:
     private(set) var requests: [AgentTaskNotificationRequest] = []
     private(set) var cancelledTaskIDs: [UUID] = []
     private(set) var cancelledTasks: [(taskID: UUID, throughRevision: Int)] = []
+    var onSchedule: ((AgentTaskNotificationRequest) -> Void)?
     private var authorizationContinuation: CheckedContinuation<Bool, Never>?
 
     func requestAuthorization() async throws -> Bool {
@@ -657,6 +740,7 @@ private final class RecordingAgentTaskNotificationScheduler:
 
     func schedule(_ request: AgentTaskNotificationRequest) async throws {
         guard authorizationResult else { return }
+        onSchedule?(request)
         requests.append(request)
     }
 

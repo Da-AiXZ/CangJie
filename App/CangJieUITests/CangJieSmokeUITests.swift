@@ -658,6 +658,134 @@ final class CangJieSmokeUITests: XCTestCase {
         XCTAssertFalse(app.descendants(matching: .any)["last-tool-receipt"].exists)
     }
 
+    func testS2OfflineQueueAndStreamingPauseRemainControllableAcrossConversations() {
+        let app = makeIsolatedApp(fixture: "s2-task-lifecycle")
+        launchWithDeterministicTimestampSetting(app)
+
+        let composer = app.textViews["agent-composer"]
+        let sendButton = app.buttons["agent-send-button"]
+        let newConversationButton = app.buttons["new-conversation-button"]
+        XCTAssertTrue(composer.waitForExistence(timeout: 10))
+        XCTAssertTrue(sendButton.exists)
+        XCTAssertTrue(newConversationButton.exists)
+        XCTAssertTrue(app.buttons["ui-test-network-available"].isEnabled)
+
+        composer.tap()
+        composer.typeText("ui-offline-primary")
+        sendButton.tap()
+        XCTAssertTrue(
+            app.staticTexts["你：ui-offline-primary"]
+                .waitForExistence(timeout: 5)
+        )
+
+        newConversationButton.tap()
+        let status = app.staticTexts["agent-business-status"]
+        XCTAssertTrue(status.waitForExistence(timeout: 5))
+        XCTAssertNotEqual(
+            status.label,
+            "当前只验证界面、导航和本地保存，尚未接入真正的模型任务"
+        )
+        composer.tap()
+        composer.typeText("ui-offline-queued")
+        sendButton.tap()
+
+        app.buttons["activity-bar-tasks"].tap()
+        XCTAssertTrue(
+            app.descendants(matching: .any)["ai-tasks-page"]
+                .waitForExistence(timeout: 5)
+        )
+        assertEventually(
+            app.staticTexts["ai-task-doing"],
+            hasLabel: "这条请求已经保存，尚未发送"
+        )
+        XCTAssertEqual(
+            app.staticTexts["ai-task-needs-user"].label,
+            "需要你确认是否发送"
+        )
+        XCTAssertFalse(app.buttons["ai-task-resume-button"].exists)
+
+        app.buttons["ai-tasks-back-button"].tap()
+        app.buttons["ui-test-network-available"].tap()
+        app.buttons["activity-bar-tasks"].tap()
+
+        let confirm = app.buttons["ai-task-resume-button"]
+        XCTAssertTrue(confirm.waitForExistence(timeout: 5))
+        XCTAssertEqual(confirm.label, "确认发送")
+        confirm.tap()
+        assertEventually(
+            app.staticTexts["ai-task-doing"],
+            hasLabel: "仓颉正在处理并返回结果"
+        )
+
+        let pause = app.buttons["ai-task-pause-button"]
+        XCTAssertTrue(pause.waitForExistence(timeout: 5))
+        pause.tap()
+        assertEventually(
+            app.staticTexts["ai-task-doing"],
+            hasLabel: "正在确认刚才的请求是否已经停止"
+        )
+        XCTAssertFalse(app.buttons["ai-task-resume-button"].exists)
+        XCTAssertFalse(app.buttons["ai-task-discard-button"].exists)
+        let keep = app.buttons["ai-task-keep-button"]
+        XCTAssertTrue(keep.waitForExistence(timeout: 5))
+        keep.tap()
+
+        assertEventually(
+            app.staticTexts["ai-task-doing"],
+            hasLabel: "这条请求已经保存，尚未发送"
+        )
+        XCTAssertTrue(confirm.waitForExistence(timeout: 5))
+        confirm.tap()
+        assertEventually(
+            app.staticTexts["ai-task-doing"],
+            hasLabel: "这件事已经处理完成"
+        )
+    }
+
+    func testS2BackgroundUnknownCanEndKeepingEvidenceWithoutResend() {
+        let app = makeIsolatedApp(fixture: "s2-task-lifecycle")
+        launchWithDeterministicTimestampSetting(app)
+        app.buttons["ui-test-network-available"].tap()
+
+        let composer = app.textViews["agent-composer"]
+        composer.tap()
+        composer.typeText("ui-streaming-pause-background")
+        app.buttons["agent-send-button"].tap()
+        XCTAssertTrue(
+            app.staticTexts["仓颉：可暂停任务正在流式返回"]
+                .waitForExistence(timeout: 5)
+        )
+
+        XCUIDevice.shared.press(.home)
+        XCTAssertTrue(app.wait(for: .suspended, timeout: 5))
+        relaunchWithoutFixturePreservingDatabaseScope(app)
+        XCTAssertTrue(
+            app.descendants(matching: .any)["workspace-landscape-columns"]
+                .waitForExistence(timeout: 10)
+        )
+        app.buttons["activity-bar-tasks"].tap()
+
+        let recovery = app.staticTexts["ai-task-recovery-state"]
+        XCTAssertTrue(recovery.waitForExistence(timeout: 5))
+        XCTAssertEqual(
+            recovery.label,
+            "结果未知：正在按原请求身份安全对账"
+        )
+        let keep = app.buttons["ai-task-keep-button"]
+        XCTAssertTrue(keep.waitForExistence(timeout: 5))
+        XCTAssertFalse(app.buttons["ai-task-resume-button"].exists)
+        keep.tap()
+
+        assertEventually(
+            app.staticTexts["ai-task-doing"],
+            hasLabel: "这件事已经结束，已收到内容已保留；原模型最终结果仍未知"
+        )
+        app.buttons["ai-tasks-back-button"].tap()
+        composer.tap()
+        composer.typeText("结束未知任务后可以继续输入")
+        XCTAssertTrue(app.buttons["agent-send-button"].isEnabled)
+    }
+
     func testScaleFixtureKeepsMidShelfBookVisibleAfterDetailPushAndBack() {
         let app = makeIsolatedApp(fixture: "persisted-scale-and-restore")
         launchWithDeterministicTimestampSetting(app)

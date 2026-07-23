@@ -88,6 +88,7 @@ final class AppViewModel: ObservableObject {
     @Published private(set) var providerStreamText = ""
     @Published private(set) var canCancelProviderRun = false
     @Published private(set) var providerTaskProjection: S2ProviderTaskProjection?
+    @Published private(set) var taskSurfaceProviderTaskProjection: S2ProviderTaskProjection?
     @Published private(set) var networkAvailabilityState: NetworkAvailabilityState
     @Published var isAgentNotificationConsentPresented = false
     private(set) var providerRunStartBlocker: ProviderRunStartBlocker?
@@ -104,6 +105,11 @@ final class AppViewModel: ObservableObject {
     private var errorMessagesByDomain: [ErrorDomain: String] = [:]
 
     var status: String { errorMessage ?? businessStatus }
+    private var idleConversationStatus: String {
+        modelConnectionSetup.currentConnection == nil
+            ? "可以先聊想法，需要模型时再连接"
+            : "可以直接告诉仓颉你想做什么"
+    }
     var displayedBusinessStatus: String {
         if let providerTaskProjection,
            providerTaskProjection.conversationID == selectedConversationID {
@@ -142,31 +148,13 @@ final class AppViewModel: ObservableObject {
         return providerStreamText
     }
     var canRetryProviderRun: Bool {
-        guard !isProviderRunActive,
-              providerTaskProjection?.task.status == .failed,
-              case let .prepareProviderRequest(intent, _) =
-                modelConnectionSetup.resumeDecision,
-              let database,
-              let request = try? database.providerRequest(intentID: intent.id),
-              ProviderRequestRecovery.nextAction(for: request) == .terminal else {
-            return false
-        }
-        return request.phase == .failed || request.phase == .cancelled
+        canRetryProviderRun(providerTaskProjection)
     }
     var canPauseProviderTask: Bool {
-        providerTaskProjection?.task.status == .running
-            && providerRunTask != nil
+        canPauseProviderTask(providerTaskProjection)
     }
     var canResumeProviderTask: Bool {
-        guard let task = providerTaskProjection?.task else {
-            return false
-        }
-        guard task.status == .paused || task.status == .waitingUser,
-              providerRunTask == nil else {
-            return false
-        }
-        return task.waitingReason != .networkConfirmation
-            || networkAvailabilityState == .available
+        canResumeProviderTask(providerTaskProjection)
     }
     var providerTaskResumeTitle: String {
         providerTaskProjection?.task.waitingReason == .networkConfirmation
@@ -174,14 +162,31 @@ final class AppViewModel: ObservableObject {
             : "恢复这件事"
     }
     var canStopAndKeepProviderTask: Bool {
-        guard let status = providerTaskProjection?.task.status else {
-            return false
-        }
-        return status == .running || status == .paused
+        canStopAndKeepProviderTask(providerTaskProjection)
     }
     var canDiscardProviderTask: Bool {
-        providerTaskProjection?.task.status == .paused
-            && providerTaskProjection?.receipt == nil
+        canDiscardProviderTask(providerTaskProjection)
+    }
+    var canPauseTaskSurfaceProviderTask: Bool {
+        canPauseProviderTask(taskSurfaceProviderTaskProjection)
+    }
+    var canResumeTaskSurfaceProviderTask: Bool {
+        canResumeProviderTask(taskSurfaceProviderTaskProjection)
+    }
+    var taskSurfaceProviderTaskResumeTitle: String {
+        taskSurfaceProviderTaskProjection?.task.waitingReason
+            == .networkConfirmation
+            ? "确认发送"
+            : "恢复这件事"
+    }
+    var canStopAndKeepTaskSurfaceProviderTask: Bool {
+        canStopAndKeepProviderTask(taskSurfaceProviderTaskProjection)
+    }
+    var canDiscardTaskSurfaceProviderTask: Bool {
+        canDiscardProviderTask(taskSurfaceProviderTaskProjection)
+    }
+    var canRetryTaskSurfaceProviderRun: Bool {
+        canRetryProviderRun(taskSurfaceProviderTaskProjection)
     }
     var chapterNeedsReview: Bool {
         chapter?.stage == .reviewingV1 || chapter?.stage == .reviewingV2
@@ -208,6 +213,8 @@ final class AppViewModel: ObservableObject {
     private let networkAvailabilityObserver: any NetworkAvailabilityObserving
     private let agentTaskNotifications: any AgentTaskNotificationScheduling
     private let notificationConsentStore: any AgentTaskNotificationConsentStoring
+    private let backgroundExecutionProtector:
+        any AgentTaskBackgroundExecutionProtecting
     private let taskID: UUID
     private var streamTask: Task<Void, Never>?
     private var streamGeneration: UUID?
@@ -226,6 +233,65 @@ final class AppViewModel: ObservableObject {
     private var isAgentNotificationAuthorizationPending = false
     private var agentNotificationConsentIntentID: UUID?
 
+    private func canPauseProviderTask(
+        _ projection: S2ProviderTaskProjection?
+    ) -> Bool {
+        guard let task = projection?.task else { return false }
+        return task.status == .running
+            && activeProviderIntentID == task.intentID
+            && providerRunTask != nil
+    }
+
+    private func canResumeProviderTask(
+        _ projection: S2ProviderTaskProjection?
+    ) -> Bool {
+        guard let task = projection?.task,
+              task.status == .paused || task.status == .waitingUser,
+              providerRunTask == nil else {
+            return false
+        }
+        return task.waitingReason != .networkConfirmation
+            || networkAvailabilityObserver.state == .available
+    }
+
+    private func canStopAndKeepProviderTask(
+        _ projection: S2ProviderTaskProjection?
+    ) -> Bool {
+        guard let status = projection?.task.status else { return false }
+        return status == .running
+            || status == .paused
+            || status == .reconciling
+    }
+
+    private func canDiscardProviderTask(
+        _ projection: S2ProviderTaskProjection?
+    ) -> Bool {
+        projection?.task.status == .paused && projection?.receipt == nil
+    }
+
+    private func canRetryProviderRun(
+        _ projection: S2ProviderTaskProjection?
+    ) -> Bool {
+        canRetryProviderRun(projection?.task)
+    }
+
+    private func canRetryProviderRun(
+        _ task: AgentTaskSnapshot?
+    ) -> Bool {
+        guard !isProviderRunActive,
+              providerRunTask == nil,
+              let task,
+              task.status == .failed,
+              let database,
+              let request = try? database.providerRequest(
+                intentID: task.intentID
+              ),
+              ProviderRequestRecovery.nextAction(for: request) == .terminal else {
+            return false
+        }
+        return request.phase == .failed || request.phase == .cancelled
+    }
+
     init(
         database: AppDatabase? = nil,
         databaseFactory: () throws -> AppDatabase = { try AppDatabase.makeDefault() },
@@ -237,6 +303,8 @@ final class AppViewModel: ObservableObject {
         networkAvailabilityObserver: (any NetworkAvailabilityObserving)? = nil,
         agentTaskNotifications: (any AgentTaskNotificationScheduling)? = nil,
         notificationConsentStore: (any AgentTaskNotificationConsentStoring)? = nil,
+        backgroundExecutionProtector:
+            (any AgentTaskBackgroundExecutionProtecting)? = nil,
         isolationCanaryRepository: any IsolationCanaryRepository = KeychainIsolationCanaryRepository(),
         bundleInfo: [String: Any]? = BuildIdentityStamp.generated.infoDictionary,
         compiledBuildStamp: BuildIdentityStamp = .generated,
@@ -258,6 +326,8 @@ final class AppViewModel: ObservableObject {
             ?? UserNotificationAgentTaskScheduler()
         self.notificationConsentStore = notificationConsentStore
             ?? UserDefaultsAgentTaskNotificationConsentStore()
+        self.backgroundExecutionProtector = backgroundExecutionProtector
+            ?? UIApplicationAgentTaskBackgroundExecutionProtector()
         self.buildActivationStore = buildActivationStore
         self.compiledBuildStamp = compiledBuildStamp
         self.draftAutosaveDelayNanoseconds = draftAutosaveDelayNanoseconds
@@ -417,7 +487,7 @@ final class AppViewModel: ObservableObject {
         }
 
         if databaseState.database != nil {
-            businessStatus = "当前只验证界面、导航和本地保存，尚未接入真正的模型任务"
+            businessStatus = idleConversationStatus
         } else {
             businessStatus = buildIdentity.isAgentExecutionAllowed
                 ? "暂时无法打开对话"
@@ -783,10 +853,14 @@ final class AppViewModel: ObservableObject {
             }
         }
         do {
+            let observedNetworkState = networkAvailabilityObserver.state
+            if networkAvailabilityState != observedNetworkState {
+                networkAvailabilityState = observedNetworkState
+            }
             let admissionCondition: PendingModelIntentAdmissionCondition
             if modelConnectionSetup.currentConnection == nil {
                 admissionCondition = .modelConnectionRequired
-            } else if networkAvailabilityState != .available {
+            } else if observedNetworkState != .available {
                 admissionCondition = .networkConfirmationRequired
             } else {
                 admissionCondition = .ready
@@ -876,7 +950,7 @@ final class AppViewModel: ObservableObject {
                     return
                 }
                 guard task.waitingReason != .networkConfirmation
-                        || networkAvailabilityState == .available else {
+                        || networkAvailabilityObserver.state == .available else {
                     refreshProviderTaskProjection(publishFailure: true)
                     setProviderBusinessStatus(
                         "当前没有网络，这条请求仍未发送",
@@ -893,8 +967,8 @@ final class AppViewModel: ObservableObject {
                 cancelPendingAgentTaskNotification(for: task)
             }
             if task.status == .running,
-               networkAvailabilityState != .available {
-                if networkAvailabilityState == .checking,
+               networkAvailabilityObserver.state != .available {
+                if networkAvailabilityObserver.state == .checking,
                    waitsForNetworkCheck {
                     refreshProviderTaskProjection(publishFailure: true)
                     setProviderBusinessStatus(
@@ -1229,7 +1303,7 @@ final class AppViewModel: ObservableObject {
                 return
             }
             if task.status == .running,
-               networkAvailabilityState == .checking {
+               networkAvailabilityObserver.state == .checking {
                 refreshProviderTaskProjection(publishFailure: true)
                 setProviderBusinessStatus(
                     "正在确认网络状态，这条请求尚未发送",
@@ -1347,14 +1421,39 @@ final class AppViewModel: ObservableObject {
         notificationConsentStore.setDecision(.declined)
     }
 
+    #if DEBUG
+    var hasUITestNetworkControl: Bool {
+        networkAvailabilityObserver
+            is CangJieUITestNetworkAvailabilityObserver
+    }
+
+    func setUITestNetworkAvailability(
+        _ state: NetworkAvailabilityState
+    ) {
+        (networkAvailabilityObserver
+            as? CangJieUITestNetworkAvailabilityObserver)?
+            .update(state)
+    }
+    #endif
+
     func cancelProviderRun() {
         pauseProviderTask()
     }
 
     func pauseProviderTask() {
+        guard let task = providerTaskProjection?.task else { return }
+        pauseProviderTask(task)
+    }
+
+    func pauseTaskSurfaceProviderTask() {
+        guard let task = taskSurfaceProviderTaskProjection?.task else { return }
+        pauseProviderTask(task)
+    }
+
+    private func pauseProviderTask(_ task: AgentTaskSnapshot) {
         guard let database,
-              let task = providerTaskProjection?.task,
-              task.status == .running else {
+              task.status == .running,
+              activeProviderIntentID == task.intentID else {
             return
         }
         do {
@@ -1364,7 +1463,10 @@ final class AppViewModel: ObservableObject {
                 commandID: UUID(),
                 to: .pauseRequested
             )
-            businessStatus = "正在到安全位置暂停"
+            setProviderBusinessStatus(
+                "正在到安全位置暂停",
+                conversationID: task.conversationID
+            )
             refreshProviderTaskProjection(publishFailure: true)
             if providerRunTask != nil {
                 providerRunTask?.cancel()
@@ -1383,14 +1485,23 @@ final class AppViewModel: ObservableObject {
     }
 
     func resumeProviderTask() {
+        guard let task = providerTaskProjection?.task else { return }
+        resumeProviderTask(task)
+    }
+
+    func resumeTaskSurfaceProviderTask() {
+        guard let task = taskSurfaceProviderTaskProjection?.task else { return }
+        resumeProviderTask(task)
+    }
+
+    private func resumeProviderTask(_ task: AgentTaskSnapshot) {
         guard let database,
-              let task = providerTaskProjection?.task,
               task.status == .paused || task.status == .waitingUser else {
             return
         }
         do {
             if task.waitingReason == .networkConfirmation,
-               networkAvailabilityState != .available {
+               networkAvailabilityObserver.state != .available {
                 setProviderBusinessStatus(
                     "当前没有网络，这条请求仍未发送",
                     conversationID: task.conversationID
@@ -1417,9 +1528,20 @@ final class AppViewModel: ObservableObject {
     }
 
     func stopAndKeepProviderTask() {
+        guard let task = providerTaskProjection?.task else { return }
+        stopAndKeepProviderTask(task)
+    }
+
+    func stopAndKeepTaskSurfaceProviderTask() {
+        guard let task = taskSurfaceProviderTaskProjection?.task else { return }
+        stopAndKeepProviderTask(task)
+    }
+
+    private func stopAndKeepProviderTask(_ task: AgentTaskSnapshot) {
         guard let database,
-              let task = providerTaskProjection?.task,
-              task.status == .running || task.status == .paused else {
+              task.status == .running
+                || task.status == .paused
+                || task.status == .reconciling else {
             return
         }
         do {
@@ -1430,7 +1552,10 @@ final class AppViewModel: ObservableObject {
                 to: .stopRequested
             ).task
             cancelPendingAgentTaskNotification(for: stopping)
-            businessStatus = "正在结束并保留已有内容"
+            setProviderBusinessStatus(
+                "正在结束并保留已有内容",
+                conversationID: task.conversationID
+            )
             refreshProviderTaskProjection(publishFailure: true)
             if providerRunTask != nil {
                 providerRunTask?.cancel()
@@ -1438,9 +1563,11 @@ final class AppViewModel: ObservableObject {
                 _ = try database.settleAgentTaskControlAfterProviderExit(
                     intentID: task.intentID
                 )
-                modelConnectionSetup.restorePendingIntent(
-                    for: task.conversationID
-                )
+                if task.conversationID == selectedConversationID {
+                    modelConnectionSetup.restorePendingIntent(
+                        for: task.conversationID
+                    )
+                }
                 refreshProviderTaskProjection(publishFailure: true)
                 scheduleAgentTaskNotificationForCurrentState(
                     intentID: task.intentID
@@ -1453,8 +1580,17 @@ final class AppViewModel: ObservableObject {
     }
 
     func discardProviderTask() {
+        guard let task = providerTaskProjection?.task else { return }
+        discardProviderTask(task)
+    }
+
+    func discardTaskSurfaceProviderTask() {
+        guard let task = taskSurfaceProviderTaskProjection?.task else { return }
+        discardProviderTask(task)
+    }
+
+    private func discardProviderTask(_ task: AgentTaskSnapshot) {
         guard let database,
-              let task = providerTaskProjection?.task,
               task.status == .paused else {
             return
         }
@@ -1467,8 +1603,15 @@ final class AppViewModel: ObservableObject {
                 outcome: .discarded
             ).task
             cancelPendingAgentTaskNotification(for: discarded)
-            modelConnectionSetup.restorePendingIntent(for: task.conversationID)
-            businessStatus = "未采用的内容已经放弃"
+            if task.conversationID == selectedConversationID {
+                modelConnectionSetup.restorePendingIntent(
+                    for: task.conversationID
+                )
+            }
+            setProviderBusinessStatus(
+                "未采用的内容已经放弃",
+                conversationID: task.conversationID
+            )
             refreshProviderTaskProjection(publishFailure: true)
             dispatchActiveProviderTaskIfPossible()
         } catch AgentTaskControlError.adoptedOutputCannotBeDiscarded {
@@ -1479,11 +1622,17 @@ final class AppViewModel: ObservableObject {
     }
 
     func retryProviderRun() {
-        guard canRetryProviderRun,
-              let database,
-              let task = providerTaskProjection?.task else {
-            return
-        }
+        guard let task = providerTaskProjection?.task else { return }
+        retryProviderRun(task)
+    }
+
+    func retryTaskSurfaceProviderRun() {
+        guard let task = taskSurfaceProviderTaskProjection?.task else { return }
+        retryProviderRun(task)
+    }
+
+    private func retryProviderRun(_ task: AgentTaskSnapshot) {
+        guard canRetryProviderRun(task), let database else { return }
         do {
             let retried = try database.retryFailedAgentTask(
                 id: task.id,
@@ -1493,15 +1642,13 @@ final class AppViewModel: ObservableObject {
             cancelPendingAgentTaskNotification(for: retried)
             refreshProviderTaskProjection(publishFailure: true)
             guard retried.status == .running else {
-                businessStatus = "这件事已经排队，等待前一件主要任务结束"
+                setProviderBusinessStatus(
+                    "这件事已经排队，等待前一件主要任务结束",
+                    conversationID: task.conversationID
+                )
                 return
             }
-            modelConnectionSetup.restorePendingIntent(for: task.conversationID)
-            guard let decision = modelConnectionSetup.resumeDecision else {
-                businessStatus = "任务已经重新排队，等待可用的模型连接"
-                return
-            }
-            resumeProviderRequest(decision, permitsTerminalRetry: true)
+            dispatchActiveProviderTaskIfPossible()
         } catch {
             publishError("这件事暂时无法重试（S2-TASK-RETRY）")
         }
@@ -1579,7 +1726,7 @@ final class AppViewModel: ObservableObject {
         ) {
             businessStatus = connectionStatus
         } else if runtime == nil {
-            businessStatus = "当前只验证界面、导航和本地保存，尚未接入真正的模型任务"
+            businessStatus = idleConversationStatus
         }
     }
 
@@ -1590,8 +1737,9 @@ final class AppViewModel: ObservableObject {
     }
 
     private func refreshProviderTaskProjection(publishFailure: Bool) {
-        guard let database, let selectedConversationID else {
+        guard let database else {
             providerTaskProjection = nil
+            taskSurfaceProviderTaskProjection = nil
             if runtime == nil {
                 latestAgentRun = nil
                 lastToolReceipt = nil
@@ -1599,10 +1747,23 @@ final class AppViewModel: ObservableObject {
             return
         }
         do {
-            let projection = try database.s2ProviderTaskProjection(
-                conversationID: selectedConversationID
-            )
+            let projection = try selectedConversationID.flatMap {
+                try database.s2ProviderTaskProjection(conversationID: $0)
+            }
+            let taskSurfaceProjection: S2ProviderTaskProjection?
+            if let taskSurfaceTask = try database.activeAgentTask()
+                ?? database.latestAgentTask() {
+                guard let resolved = try database.s2ProviderTaskProjection(
+                    conversationID: taskSurfaceTask.conversationID
+                ), resolved.task.id == taskSurfaceTask.id else {
+                    throw AppDatabaseError.invalidAgentTask
+                }
+                taskSurfaceProjection = resolved
+            } else {
+                taskSurfaceProjection = nil
+            }
             providerTaskProjection = projection
+            taskSurfaceProviderTaskProjection = taskSurfaceProjection
             if let projection {
                 latestAgentRun = projection.run
                 lastToolReceipt = projection.receipt
@@ -1612,6 +1773,7 @@ final class AppViewModel: ObservableObject {
             }
         } catch {
             providerTaskProjection = nil
+            taskSurfaceProviderTaskProjection = nil
             if runtime == nil {
                 latestAgentRun = nil
                 lastToolReceipt = nil
@@ -1677,6 +1839,17 @@ final class AppViewModel: ObservableObject {
     private func scheduleAgentTaskNotificationForCurrentState(
         intentID: UUID
     ) {
+        guard lifecyclePermitsMutations else { return }
+        Task { @MainActor [weak self] in
+            await self?.submitAgentTaskNotificationForCurrentState(
+                intentID: intentID
+            )
+        }
+    }
+
+    private func submitAgentTaskNotificationForCurrentState(
+        intentID: UUID
+    ) async {
         guard let database,
               let task = try? database.agentTask(intentID: intentID) else {
             return
@@ -1698,7 +1871,7 @@ final class AppViewModel: ObservableObject {
             cancelPendingAgentTaskNotification(for: task)
             return
         }
-        scheduleAgentTaskNotification(kind, intentID: intentID)
+        await submitAgentTaskNotification(kind, intentID: intentID)
     }
 
     private func cancelPendingAgentTaskNotification(
@@ -1714,16 +1887,22 @@ final class AppViewModel: ObservableObject {
         _ kind: AgentTaskNotificationKind,
         intentID: UUID
     ) {
+        Task { @MainActor [weak self] in
+            await self?.submitAgentTaskNotification(kind, intentID: intentID)
+        }
+    }
+
+    private func submitAgentTaskNotification(
+        _ kind: AgentTaskNotificationKind,
+        intentID: UUID
+    ) async {
         guard notificationConsentStore.decision == .allowed,
               let database,
               let task = try? database.agentTask(intentID: intentID) else {
             return
         }
         let request = AgentTaskNotificationRequest(task: task, kind: kind)
-        let notifications = agentTaskNotifications
-        Task { @MainActor in
-            try? await notifications.schedule(request)
-        }
+        try? await agentTaskNotifications.schedule(request)
     }
 
     private func refreshS1NovelProgress() {
@@ -1993,6 +2172,7 @@ final class AppViewModel: ObservableObject {
     }
 
     private func suspendGovernedWork(reason: String) {
+        prepareProviderTaskForBackgroundRecovery()
         pauseGovernedWork()
         cancelDraftAutosaveTimer()
         guard lifecyclePermitsMutations else {
@@ -2007,12 +2187,40 @@ final class AppViewModel: ObservableObject {
         createCheckpoint(reason: reason)
     }
 
+    private func prepareProviderTaskForBackgroundRecovery() {
+        guard let database,
+              let activeProviderIntentID else {
+            return
+        }
+        let inFlightTask = providerRunTask
+        do {
+            _ = try database
+                .prepareProviderRequestForLifecycleSuspension(
+                    intentID: activeProviderIntentID
+                )
+            refreshProviderTaskProjection(publishFailure: true)
+            backgroundExecutionProtector.protect(
+                name: "CangJie.AgentTaskNotification"
+            ) { [weak self] in
+                if let inFlightTask {
+                    await inFlightTask.value
+                }
+                await self?.submitAgentTaskNotificationForCurrentState(
+                    intentID: activeProviderIntentID
+                )
+            }
+        } catch {
+            publishError(
+                "后台恢复状态保存失败（S2-TASK-BACKGROUND）",
+                domain: .composer
+            )
+        }
+    }
+
     private func pauseGovernedWork() {
         cancelDraftAutosaveTimer()
         modelConnectionSetup.suspendDiscovery()
-        if canCancelProviderRun {
-            providerRunTask?.cancel()
-        }
+        providerRunTask?.cancel()
         streamGeneration = nil
         streamTask?.cancel()
         streamTask = nil

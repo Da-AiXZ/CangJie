@@ -1,7 +1,7 @@
 # CangJie Project Control Center
 
 - Authority: compact operational dashboard
-- Updated: 2026-07-23
+- Updated: 2026-07-24
 - Repository: `F:\project\CangJie`
 - Remote: `https://github.com/Da-AiXZ/CangJie`, branch `main`
 - Authority boundary: single source for current implementation, verification, blockers and queue
@@ -46,11 +46,11 @@ Formal prose generation is outside S2.
 | S1 cockpit and workspace | Frozen | Complete | Passed | Accepted |
 | Provider/credential/discovery hardening | Frozen | Complete for slice | Passed | Accepted on Candidate 32 |
 | Central model-connection setup | Frozen | Complete for slice | Passed | Accepted on Candidate 33 |
-| Real Provider generation | Frozen boundary | Replacement repair keeps a live Provider stream through transient notification-permission inactivity | Candidate 35 passed automation | Device pending |
-| Provider-backed AgentRun | Frozen boundary | Replacement repair separates transient inactivity from true background unknown-outcome handling | Candidate 35 passed automation | Device pending |
-| Typed Tool and ToolReceipt continuation | Frozen boundary | Real project creation and receipt succeeded only after avoiding the lifecycle defect; no accepted completion candidate yet | Candidate 35 passed automation | Device pending |
-| Task control, queue and shared projection | Frozen boundary | Replacement repair removes setup-card inference from queued, paused and reconciling tasks and preserves editable drafts | Candidate 35 passed automation | Device pending |
-| Lifecycle, offline recovery and notifications | Frozen boundary | Replacement repair adds durable offline admission, explicit queued confirmation, truthful notification consent and replaceable task notifications | Candidate 35 passed automation | Device pending |
+| Real Provider generation | Frozen boundary | Streaming and real Tool execution passed on device; replacement keeps sent cancellation unknown and non-retryable | Local contracts passed; Apple replacement pending | Candidate 35 rejected |
+| Provider-backed AgentRun | Frozen boundary | Current-Conversation and global-primary task scopes are separated locally | Local contracts passed; Apple replacement pending | Candidate 35 rejected |
+| Typed Tool and ToolReceipt continuation | Frozen boundary | Real project creation and exact receipt passed on Candidate 35 before later recovery failure | Existing automation plus device evidence | Completion candidate pending |
+| Task control, queue and shared projection | Frozen boundary | Replacement adds global primary projection, cross-Conversation controls and explicit unknown-task closure without retrying the original request | Local contracts passed; Apple replacement pending | Candidate 35 rejected |
+| Lifecycle, offline recovery and notifications | Frozen boundary | Replacement adds fresh network snapshots, phase-aware background persistence, truthful streaming-cancellation unknown state and a finite UIKit background lease for notification submission | Local contracts passed; Apple replacement pending | Candidate 35 rejected |
 
 ## Last accepted device baseline
 
@@ -92,7 +92,7 @@ separate Main/Probe entitlement groups. Windows cannot repeat `codesign`; the
 workflow result remains the authority for signed-entitlement verification, but
 artifact integrity does not override the failed device behavior gate.
 
-## Pending replacement Candidate 35
+## Rejected S2 Candidate 35
 
 - Commit: `ca309143608525432fd2d28a7db48e6ee98b64a5`
 - Version/build: `1.0 (35001)`
@@ -106,25 +106,33 @@ artifact integrity does not override the failed device behavior gate.
 - Probe IPA: `CangJie-Keychain-Isolation-Probe.ipa`
 - Probe SHA-256: `1c73681407a701135d89dc87881aa903e1e3f3aad3405a10db798153fe5d1e74`
 - Artifact directory: `artifacts/CangJie-S2-run-30026256106/`
-- Device result: pending differential installation and physical-device acceptance.
+- Device result: rejected on 2026-07-24. Isolation, exact build identity,
+  notification-sheet streaming and real project ToolReceipt passed. Offline
+  submission did not appear on the global AI Tasks surface, reconnect exposed no
+  explicit send confirmation, the originating Conversation remained blocked,
+  a second Conversation showed obsolete S1 copy and only queued, and an explicit
+  pause exposed no resume action.
 
 The workflow independently verified ldid signatures and distinct Main/Probe
-entitlement groups. Local SHA-256 values match the manifest exactly. Candidate
-35 remains unaccepted until the physical-device script passes.
+entitlement groups. Local SHA-256 values match the manifest exactly, but artifact
+integrity and passing automation do not override the failed device behavior gate.
+Candidate 35 cannot complete S2.
 
 ## Active blocker
 
-Candidate 35 passed exact-SHA Core/iPadOS automation and paired artifact
-verification. The active blocker is physical-device validation of the repaired
-notification-permission, offline-confirmation, pause/resume, notification-delivery
-and force-quit recovery paths. S2 remains unaccepted.
+Candidate 35 proved that the prior App/XCUITest matrix omitted the complete
+offline, cross-Conversation primary-task, streaming-pause and background-recovery
+sequences. The local replacement passes Swift parse, repository contracts, strict
+Core tests and the 90% coverage gate. Apple semantic compile and the replacement
+App/XCUITest paths have not yet run. S2 remains unaccepted.
 
 ## Immediate queue
 
-1. Install both Candidate 35 IPA files by their exact hashes.
-2. Re-run Main/Probe isolation and unchanged-canary checks.
-3. Run the differential Provider, notification permission, offline confirmation, pause/resume, background notification and force-quit recovery script.
-4. Accept S2 only if every physical-device check passes; otherwise record the first causal defect class and reject Candidate 35.
+1. Commit and push the locally verified replacement repair.
+2. Run one complete exact-SHA Core/iPadOS CI cycle.
+3. Read the complete Apple result, repair every occurrence in any proven causal class, and rerun only if required.
+4. Build a new paired Main/Probe candidate only after the complete replacement automation passes.
+5. Re-run the differential physical-device script; accept S2 only if every step passes.
 
 ## Stable decision routing
 

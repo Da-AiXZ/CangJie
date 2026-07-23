@@ -1,7 +1,8 @@
 import Foundation
+import UIKit
 import UserNotifications
 
-enum AgentTaskNotificationKind: String, CaseIterable, Equatable {
+enum AgentTaskNotificationKind: String, CaseIterable, Equatable, Sendable {
     case completed
     case waitingUser
     case paused
@@ -10,13 +11,71 @@ enum AgentTaskNotificationKind: String, CaseIterable, Equatable {
     case majorStoryGate
 }
 
-enum AgentTaskNotificationConsentDecision: String, Equatable {
+enum AgentTaskNotificationConsentDecision: String, Equatable, Sendable {
     case undecided
     case allowed
     case declined
 }
 
-struct AgentTaskNotificationRequest: Equatable {
+@MainActor
+protocol AgentTaskBackgroundExecutionProtecting: AnyObject {
+    func protect(
+        name: String,
+        operation: @escaping @MainActor @Sendable () async -> Void
+    )
+}
+
+@MainActor
+final class UIApplicationAgentTaskBackgroundExecutionProtector:
+    AgentTaskBackgroundExecutionProtecting
+{
+    func protect(
+        name: String,
+        operation: @escaping @MainActor @Sendable () async -> Void
+    ) {
+        let lease = UIApplicationBackgroundTaskLease()
+        let identifier = UIApplication.shared.beginBackgroundTask(
+            withName: name
+        ) { [weak lease] in
+            Task { @MainActor in
+                lease?.end()
+            }
+        }
+        lease.activate(identifier)
+        Task { @MainActor in
+            await operation()
+            lease.end()
+        }
+    }
+}
+
+@MainActor
+private final class UIApplicationBackgroundTaskLease {
+    private var identifier = UIBackgroundTaskIdentifier.invalid
+    private var didEnd = false
+
+    func activate(_ identifier: UIBackgroundTaskIdentifier) {
+        guard !didEnd else {
+            if identifier != .invalid {
+                UIApplication.shared.endBackgroundTask(identifier)
+            }
+            return
+        }
+        self.identifier = identifier
+    }
+
+    func end() {
+        guard !didEnd else { return }
+        didEnd = true
+        let activeIdentifier = identifier
+        identifier = .invalid
+        if activeIdentifier != .invalid {
+            UIApplication.shared.endBackgroundTask(activeIdentifier)
+        }
+    }
+}
+
+struct AgentTaskNotificationRequest: Equatable, Sendable {
     let id: String
     let notificationID: String
     let taskID: UUID

@@ -212,11 +212,6 @@ final class ProviderAgentRunCoordinator {
         }
 
         if Task.isCancelled {
-            let cancelled = try ProviderRequestLifecycle.cancel(
-                request,
-                now: now()
-            )
-            try database.updateProviderRequest(cancelled)
             throw ProviderAgentRunError.cancelled
         }
 
@@ -727,7 +722,16 @@ final class ProviderAgentRunCoordinator {
             reason: reason,
             now: now()
         )
-        try database.updateProviderRequest(unknown)
+        do {
+            try database.updateProviderRequest(unknown)
+        } catch {
+            guard let stored = try? database.providerRequest(
+                intentID: request.identity.intentID
+            ), stored.identity.requestID == request.identity.requestID,
+                  stored.phase == .outcomeUnknown else {
+                throw error
+            }
+        }
     }
 
     private static func apply(

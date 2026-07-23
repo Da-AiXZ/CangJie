@@ -11,6 +11,7 @@ enum CangJieUITestFixtureBootstrap {
     private static let persistedReadableTwoBooksFixture = "persisted-readable-two-books"
     private static let persistedScaleAndRestoreFixture = "persisted-scale-and-restore"
     private static let modelConnectionSetupFixture = "model-connection-setup"
+    private static let s2TaskLifecycleFixture = "s2-task-lifecycle"
 
     private enum FixtureBootstrapError: Error {
         case seedFailed
@@ -34,6 +35,16 @@ enum CangJieUITestFixtureBootstrap {
         }
         do {
             let database = try AppDatabase.makeDefault(environment: environment)
+            let secrets = KeychainSecretRepository()
+            let modelCredentials = KeychainModelCredentialRepository(
+                secrets: secrets
+            )
+            var providerGeneration: any ProviderGenerationServing =
+                ProviderGenerationNetworkClient()
+            var networkAvailability: any NetworkAvailabilityObserving =
+                AssumedAvailableNetworkAvailabilityObserver()
+            var notificationConsent:
+                (any AgentTaskNotificationConsentStoring)?
             switch fixture {
             case persistedNovelShelfFixture:
                 try seedPersistedNovelShelf(in: database)
@@ -43,10 +54,21 @@ enum CangJieUITestFixtureBootstrap {
                 try seedPersistedScaleAndRestore(in: database)
             case modelConnectionSetupFixture:
                 break
+            case s2TaskLifecycleFixture:
+                try seedS2TaskLifecycle(
+                    in: database,
+                    credentials: modelCredentials
+                )
+                providerGeneration = CangJieUITestProviderGenerationService()
+                networkAvailability =
+                    CangJieUITestNetworkAvailabilityObserver(
+                        state: .unavailable
+                    )
+                notificationConsent =
+                    CangJieUITestNotificationConsentStore()
             default:
                 throw FixtureBootstrapError.seedFailed
             }
-            let secrets = KeychainSecretRepository()
             let discoveryClient: any ModelDiscoveryServing
             if fixture == modelConnectionSetupFixture {
                 discoveryClient = ModelDiscoveryNetworkClient(
@@ -58,8 +80,11 @@ enum CangJieUITestFixtureBootstrap {
             return AppViewModel(
                 database: database,
                 keychain: secrets,
-                modelCredentialRepository: KeychainModelCredentialRepository(secrets: secrets),
+                modelCredentialRepository: modelCredentials,
                 modelDiscoveryClient: discoveryClient,
+                providerGenerationService: providerGeneration,
+                networkAvailabilityObserver: networkAvailability,
+                notificationConsentStore: notificationConsent,
                 bundleIdentityLoader: identityLoader
             )
         } catch {
@@ -68,6 +93,27 @@ enum CangJieUITestFixtureBootstrap {
                 bundleIdentityLoader: identityLoader
             )
         }
+    }
+
+    private static func seedS2TaskLifecycle(
+        in database: AppDatabase,
+        credentials: any ModelCredentialRepository
+    ) throws {
+        try requireFreshFixtureScope(in: database)
+        let secret = String(repeating: "x", count: 32)
+        let candidate = try ModelDiscoveryAttempt.makeUITestSetupCandidate(
+            name: "S2 UI fixture",
+            modelID: "gpt-s2-fixture",
+            secret: secret
+        )
+        _ = try ModelConnectionSetupService(
+            database: database,
+            credentials: credentials
+        ).persist(
+            candidate,
+            expectedCredentialBinding: candidate.credentialBinding,
+            makeCurrent: true
+        )
     }
 
     private static func seedPersistedNovelShelf(in database: AppDatabase) throws {
@@ -843,6 +889,102 @@ private actor ModelConnectionSetupUITestTransport: ModelDiscoveryHTTPTransport {
             statusCode: 200,
             body: body
         )
+    }
+}
+
+@MainActor
+final class CangJieUITestNetworkAvailabilityObserver:
+    NetworkAvailabilityObserving
+{
+    private(set) var state: NetworkAvailabilityState
+    private var handler: ((NetworkAvailabilityState) -> Void)?
+
+    init(state: NetworkAvailabilityState) {
+        self.state = state
+    }
+
+    func start(
+        _ handler: @escaping (NetworkAvailabilityState) -> Void
+    ) {
+        self.handler = handler
+    }
+
+    func stop() {
+        handler = nil
+    }
+
+    func update(_ state: NetworkAvailabilityState) {
+        self.state = state
+        handler?(state)
+    }
+}
+
+@MainActor
+private final class CangJieUITestNotificationConsentStore:
+    AgentTaskNotificationConsentStoring
+{
+    private(set) var decision = AgentTaskNotificationConsentDecision.declined
+
+    func setDecision(_ decision: AgentTaskNotificationConsentDecision) {
+        self.decision = decision
+    }
+}
+
+private final class CangJieUITestProviderGenerationService:
+    ProviderGenerationServing
+{
+    func stream(
+        request: ProviderRequestSnapshot,
+        verifiedConnection: VerifiedModelConnection,
+        secret: String,
+        systemPrompt: String,
+        userPrompt: String
+    ) -> AsyncThrowingStream<ProviderGenerationEvent, Error> {
+        if (userPrompt.contains("ui-streaming-pause")
+                || userPrompt.contains("ui-offline-primary")),
+           request.identity.attemptNumber == 1 {
+            return AsyncThrowingStream { continuation in
+                continuation.yield(.textDelta("可暂停任务正在流式返回"))
+                let task = Task {
+                    do {
+                        while !Task.isCancelled {
+                            try await Task.sleep(nanoseconds: 10_000_000)
+                        }
+                        continuation.finish(throwing: CancellationError())
+                    } catch {
+                        continuation.finish(throwing: CancellationError())
+                    }
+                }
+                continuation.onTermination = { _ in
+                    task.cancel()
+                }
+            }
+        }
+        return AsyncThrowingStream { continuation in
+            let task = Task {
+                continuation.yield(.textDelta("S2 UI 任务已处理"))
+                do {
+                    try await Task.sleep(nanoseconds: 200_000_000)
+                } catch {
+                    continuation.finish(throwing: CancellationError())
+                    return
+                }
+                continuation.yield(.finished(reason: "stop"))
+                continuation.yield(
+                    .usage(
+                        ProviderUsage(
+                            inputTokens: 4,
+                            outputTokens: 4,
+                            totalTokens: 8
+                        )
+                    )
+                )
+                continuation.finish()
+            }
+            continuation.onTermination = { _ in
+                task.cancel()
+            }
+        }
     }
 }
 #endif

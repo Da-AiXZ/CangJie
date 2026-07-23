@@ -245,7 +245,7 @@ private struct S1TasksPage: View {
     var body: some View {
         NavigationStack {
             List {
-                if let projection = model.providerTaskProjection {
+                if let projection = model.taskSurfaceProviderTaskProjection {
                     Section("正在做") {
                         Text(projection.doingText)
                             .accessibilityIdentifier("ai-task-doing")
@@ -278,39 +278,39 @@ private struct S1TasksPage: View {
                         )
                         .accessibilityIdentifier("ai-task-safe-save")
                     }
-                    if model.canPauseProviderTask
-                        || model.canResumeProviderTask
-                        || model.canStopAndKeepProviderTask
-                        || model.canDiscardProviderTask
-                        || model.canRetryProviderRun {
+                    if model.canPauseTaskSurfaceProviderTask
+                        || model.canResumeTaskSurfaceProviderTask
+                        || model.canStopAndKeepTaskSurfaceProviderTask
+                        || model.canDiscardTaskSurfaceProviderTask
+                        || model.canRetryTaskSurfaceProviderRun {
                         Section("可用操作") {
-                            if model.canPauseProviderTask {
+                            if model.canPauseTaskSurfaceProviderTask {
                                 Button("现在暂停") {
-                                    model.pauseProviderTask()
+                                    model.pauseTaskSurfaceProviderTask()
                                 }
                                 .accessibilityIdentifier("ai-task-pause-button")
                             }
-                            if model.canResumeProviderTask {
-                                Button(model.providerTaskResumeTitle) {
-                                    model.resumeProviderTask()
+                            if model.canResumeTaskSurfaceProviderTask {
+                                Button(model.taskSurfaceProviderTaskResumeTitle) {
+                                    model.resumeTaskSurfaceProviderTask()
                                 }
                                 .accessibilityIdentifier("ai-task-resume-button")
                             }
-                            if model.canStopAndKeepProviderTask {
+                            if model.canStopAndKeepTaskSurfaceProviderTask {
                                 Button("到这里结束，保留已有内容") {
-                                    model.stopAndKeepProviderTask()
+                                    model.stopAndKeepTaskSurfaceProviderTask()
                                 }
                                 .accessibilityIdentifier("ai-task-keep-button")
                             }
-                            if model.canDiscardProviderTask {
+                            if model.canDiscardTaskSurfaceProviderTask {
                                 Button("放弃未采用内容", role: .destructive) {
                                     confirmingDiscard = true
                                 }
                                 .accessibilityIdentifier("ai-task-discard-button")
                             }
-                            if model.canRetryProviderRun {
+                            if model.canRetryTaskSurfaceProviderRun {
                                 Button("明确重试") {
-                                    model.retryProviderRun()
+                                    model.retryTaskSurfaceProviderRun()
                                 }
                                 .accessibilityIdentifier("ai-task-retry-button")
                             }
@@ -334,7 +334,7 @@ private struct S1TasksPage: View {
                 titleVisibility: .visible
             ) {
                 Button("确认放弃", role: .destructive) {
-                    model.discardProviderTask()
+                    model.discardTaskSurfaceProviderTask()
                 }
                 Button("取消", role: .cancel) {}
             }
@@ -1316,6 +1316,32 @@ struct ContentView: View {
                 .padding(.bottom, 8)
                 .accessibilityIdentifier("provider-task-resume")
             }
+            #if DEBUG
+            if model.hasUITestNetworkControl {
+                HStack(spacing: 12) {
+                    Button {
+                        model.setUITestNetworkAvailability(.unavailable)
+                    } label: {
+                        Image(systemName: "wifi.slash")
+                    }
+                    .disabled(model.networkAvailabilityState == .unavailable)
+                    .accessibilityLabel("模拟断网")
+                    .accessibilityIdentifier("ui-test-network-unavailable")
+
+                    Button {
+                        model.setUITestNetworkAvailability(.available)
+                    } label: {
+                        Image(systemName: "wifi")
+                    }
+                    .disabled(model.networkAvailabilityState == .available)
+                    .accessibilityLabel("模拟联网")
+                    .accessibilityIdentifier("ui-test-network-available")
+                }
+                .frame(height: 32)
+                .padding(.horizontal)
+                .accessibilityIdentifier("ui-test-network-controls")
+            }
+            #endif
             HStack(alignment: .bottom) {
                     ZStack(alignment: .topLeading) {
                         if model.draft.isEmpty {

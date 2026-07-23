@@ -54,7 +54,9 @@ struct S2ProviderTaskProjection: Equatable {
         case .waitingUser:
             return waitingDoingText
         case .completed where task.outcome == .kept:
-            return "这件事已经结束，已有内容已保留"
+            return request.phase == .outcomeUnknown
+                ? "这件事已经结束，已收到内容已保留；原模型最终结果仍未知"
+                : "这件事已经结束，已有内容已保留"
         case .discarded:
             return "未采用的内容已经放弃"
         case .failed:
@@ -86,14 +88,19 @@ struct S2ProviderTaskProjection: Equatable {
         switch task.status {
         case .queued:
             return "等待当前主要任务释放后开始"
-        case .pauseRequested, .stopRequested, .reconciling:
+        case .pauseRequested, .stopRequested:
             return "先完成安全保存和结果核对"
+        case .reconciling:
+            return "结果仍不确定；可以结束并保留已收到内容，但不能直接重发"
         case .paused:
             return "你可以恢复、结束并保留，或放弃未采用内容"
         case .waitingUser:
             return task.waitingReason == .networkConfirmation
                 ? "网络恢复后由你确认发送"
                 : "修复原模型连接后再继续"
+        case .completed where task.outcome == .kept
+            && request.phase == .outcomeUnknown:
+            return "原请求不会重发，可以回到对话安排下一件事"
         case .discarded, .failed:
             return "可以回到对话安排下一件事"
         case .running, .completed:
@@ -115,8 +122,10 @@ struct S2ProviderTaskProjection: Equatable {
         switch task.status {
         case .queued:
             return "目前不需要你操作"
-        case .pauseRequested, .stopRequested, .reconciling:
+        case .pauseRequested, .stopRequested:
             return "请等待安全核对完成，不要重复发送"
+        case .reconciling:
+            return "如不再等待，可以结束并保留已收到内容"
         case .paused:
             return "请选择恢复、保留结束或放弃未采用内容"
         case .waitingUser:
@@ -203,6 +212,11 @@ struct S2ProviderTaskProjection: Equatable {
     }
 
     var recoveryState: AgentTaskRecoveryState? {
+        if task.status == .completed,
+           task.outcome == .kept,
+           request.phase == .outcomeUnknown {
+            return .outcomeUnknown
+        }
         if request.phase == .failed,
            request.failure == .authentication {
             return .connectionInvalid
@@ -218,6 +232,11 @@ struct S2ProviderTaskProjection: Equatable {
     }
 
     var recoveryText: String? {
+        if task.status == .completed,
+           task.outcome == .kept,
+           request.phase == .outcomeUnknown {
+            return "已结束：已收到内容已保留；原模型最终结果仍未知且不会重发"
+        }
         switch recoveryState {
         case .completed:
             return "已完成：结果和真实记录已经安全保存"
@@ -273,7 +292,9 @@ struct S2ProviderTaskProjection: Equatable {
                 ? "这条请求已经保存，尚未发送"
                 : "原模型连接已经失效，这条请求仍然保留"
         case .completed where task.outcome == .kept:
-            return "这件事已经结束，已有内容已保留"
+            return request.phase == .outcomeUnknown
+                ? "这件事已经结束，已收到内容已保留；原模型最终结果仍未知"
+                : "这件事已经结束，已有内容已保留"
         case .discarded:
             return "未采用的内容已经放弃"
         case .failed:

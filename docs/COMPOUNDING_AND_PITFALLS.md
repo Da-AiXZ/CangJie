@@ -62,11 +62,11 @@ The durable state transition, checkpoint and ToolReceipt belong in one transacti
 
 ### R-013 Reconcile unknown outcomes before retry
 
-If a crash or disconnect leaves execution uncertain, inspect the original request identity, durable transaction, usage, stream and receipt. Do not issue a new creative request while outcome remains unknown.
+If a crash or disconnect leaves execution uncertain, inspect the original request identity, durable transaction, usage, stream and receipt. Do not retry, replace or create attempt+1 for that intent while its Provider outcome remains unknown. A user may explicitly end the task and keep quarantined partial evidence; that terminal decision consumes the original intent, keeps its Provider request visibly unknown and permanently non-retryable, and does not convert it to success or acknowledged cancellation. A later, independently persisted intent is not a retry of the unknown request.
 
 ### R-014 Pending intent is a Conversation-scoped mutex
 
-Allow at most one unconsumed model intent per Conversation in both code and schema. Consume it only after the real continuation boundary is committed.
+Allow at most one unconsumed model intent per Conversation in both code and schema. Consume it only after the real continuation boundary is committed or an explicit terminal keep/discard decision is committed atomically with its task outcome. Merely reaching failure, cancellation or unknown outcome never consumes it.
 
 ### R-015 An absent intent does not match an unbound Conversation
 
@@ -192,11 +192,19 @@ Immutable Core snapshots containing `Date` must canonicalize time at their facto
 
 ### R-042 Transient inactivity is not background termination
 
-System permission sheets and other temporary interruptions can move an iOS scene through `inactive` without backgrounding the App. Checkpoint transient state, but do not cancel a live Provider request or start launch-style reconciliation while its in-process task still exists. Apply fail-closed cancellation and unknown-outcome recovery only at a real background or identity-invalidating boundary. Notification schedule/cancel operations are task-scoped and revision-monotonic: cancellation records a through-revision barrier before any suspension, and a stale lower-revision cancellation is ignored, so delayed work cannot resurrect or remove a newer notification.
+System permission sheets and other temporary interruptions can move an iOS scene through `inactive` without backgrounding the App. Checkpoint transient state, but do not cancel a live Provider request or start launch-style reconciliation while its in-process task still exists. Apply fail-closed cancellation and unknown-outcome recovery only at a real background or identity-invalidating boundary. Notification schedule/cancel operations are task-scoped and revision-monotonic: cancellation records a through-revision barrier before any suspension, and a stale lower-revision cancellation is ignored, so delayed work cannot resurrect or remove a newer notification. After a real background transition, persist the task state first and protect the asynchronous `UNUserNotificationCenter` submission with a finite `UIApplication` background task that always ends on completion or expiration; a bare fire-and-forget `Task` is not a delivery barrier.
 
 ### R-043 A pending intent is not a connection-setup requirement
 
 Derive setup presentation only from missing or invalid verified credentials. Queued, paused, offline-confirmation and reconciling tasks remain task projections even though their pending intent is unconsumed. Keep the composer editable while disabling duplicate submission, scope status to its Conversation, and persist offline admission so queue promotion cannot bypass explicit confirmation. A prepared Provider request and AgentRun may bind a waiting task only for the exact `networkConfirmation` reason; `connectionInvalid` and every other waiting reason remain fail-closed at binding. After a valid binding exists, later connection invalidation changes Task and Run projections atomically without authorizing a send.
+
+### R-044 Test task scope and real transition timing, not injected end states
+
+A selected Conversation projection and the global primary-task projection are different scopes. Conversation and Results stay selected-Conversation-bound; AI Tasks and its controls must keep the real primary visible across Conversation switches and queued work. Recovery tests must wait until the durable Provider phase actually reaches the boundary under test, such as `streaming`, before pausing or backgrounding. A synchronous fake that jumps directly from unavailable to available, or a UI test that checks only static element existence, cannot prove device behavior. Cover the complete sequence in one App integration test and one controllable Simulator UI path, while retaining physical-device gates for `NWPathMonitor`, system permission sheets, notifications, lock and force-quit behavior.
+
+### R-045 Local cancellation is not Provider acknowledgement
+
+After a Provider request reaches `sending`, local `Task` or `URLSessionTask` cancellation proves only that this process stopped waiting. It does not prove that the Provider stopped generation, usage or billing. Preserve the request as `outcomeUnknown`, prohibit attempt+1, and retain partial stream evidence. Only a never-sent `prepared` request can be cancelled terminally without reconciliation. Background handling must inspect the durable Provider phase: keep `prepared` replayable, preserve `responseComplete`, and atomically mark only `sending` or `streaming` as unknown before cancelling the in-process task. An explicit decision to end and keep partial evidence may close the task, but it must leave the original Provider result visibly unknown and must never retry that request.
 
 ## Historical lookup
 

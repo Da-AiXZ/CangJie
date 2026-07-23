@@ -410,7 +410,7 @@ final class AppViewModelTests: XCTestCase {
             XCTAssertEqual(viewModel.draft, "existing draft")
             XCTAssertEqual(
                 viewModel.businessStatus,
-                "当前只验证界面、导航和本地保存，尚未接入真正的模型任务"
+                "可以先聊想法，需要模型时再连接"
             )
             XCTAssertEqual(viewModel.transientNotice?.message, "本地内容已准备好")
 
@@ -480,7 +480,7 @@ final class AppViewModelTests: XCTestCase {
             XCTAssertEqual(viewModel.draft, "")
             XCTAssertEqual(
                 viewModel.businessStatus,
-                "当前只验证界面、导航和本地保存，尚未接入真正的模型任务"
+                "可以先聊想法，需要模型时再连接"
             )
             XCTAssertEqual(viewModel.transientNotice?.message, "本地内容已准备好")
         }
@@ -881,11 +881,11 @@ final class AppViewModelTests: XCTestCase {
     }
 
     @MainActor
-    func testFirstActivePhaseKeepsOrdinaryStartupOnS1PreviewWithoutActivatingRuntime() throws {
+    func testFirstActivePhaseKeepsOrdinaryStartupWithoutActivatingLegacyRuntime() throws {
         try withDatabase { database in
             let viewModel = AppViewModel(database: database, keychain: StubSecretRepository())
             let conversation = try database.ensureDefaultConversation()
-            let initialStatus = "当前只验证界面、导航和本地保存，尚未接入真正的模型任务"
+            let initialStatus = "可以先聊想法，需要模型时再连接"
 
             XCTAssertEqual(viewModel.businessStatus, initialStatus)
             XCTAssertTrue(try database.listAgentMessages(conversationID: conversation.id).isEmpty)

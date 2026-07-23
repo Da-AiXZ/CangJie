@@ -165,6 +165,22 @@ extension AppDatabase {
         }
     }
 
+    func latestAgentTask() throws -> AgentTaskSnapshot? {
+        try queue.read { db in
+            guard let row = try Row.fetchOne(
+                db,
+                sql: """
+                    SELECT * FROM agentTask
+                    ORDER BY updatedAt DESC, queueOrdinal DESC, rowid DESC
+                    LIMIT 1
+                    """
+            ) else {
+                return nil
+            }
+            return try Self.decodeAgentTask(row)
+        }
+    }
+
     func queuedAgentTasks() throws -> [AgentTaskSnapshot] {
         try queue.read { db in
             try Row.fetchAll(
@@ -315,7 +331,9 @@ extension AppDatabase {
         return try queue.write { db in
             guard let task = try Self.agentTask(intentID: intentID, in: db),
                   task.status == .pauseRequested
-                    || task.status == .stopRequested else {
+                    || task.status == .stopRequested
+                    || (task.status == .reconciling
+                        && task.requestedControl != nil) else {
                 return try Self.agentTask(intentID: intentID, in: db)
             }
             guard let requestRow = try Row.fetchOne(
@@ -375,11 +393,71 @@ extension AppDatabase {
                     now: timestamp,
                     in: db
                 )
+            case .outcomeUnknown
+                where task.requestedControl == .stopKeepingResults:
+                _ = try Self.transitionAgentTask(
+                    id: task.id,
+                    expectedRevision: task.revision,
+                    commandID: UUID(),
+                    to: .completed,
+                    outcome: .kept,
+                    now: timestamp,
+                    in: db
+                )
             case .cancelled, .failed, .outcomeUnknown,
                  .continuationCommitted:
                 try Self.synchronizeAgentTask(for: request, in: db)
             }
             return try Self.agentTask(intentID: intentID, in: db)
+        }
+    }
+
+    func prepareProviderRequestForLifecycleSuspension(
+        intentID: UUID,
+        now: Date = Date()
+    ) throws -> ProviderRequestSnapshot? {
+        let timestamp = try Self.canonicalAgentTaskTimestamp(now)
+        return try queue.write { db in
+            guard let task = try Self.agentTask(intentID: intentID, in: db),
+                  task.status == .running,
+                  let requestRow = try Row.fetchOne(
+                    db,
+                    sql: """
+                        SELECT * FROM providerRequest
+                        WHERE intentID = ?
+                        ORDER BY attemptNumber DESC, turnSequence DESC,
+                                 rowid DESC
+                        LIMIT 1
+                        """,
+                    arguments: [intentID.uuidString]
+                  ) else {
+                return nil
+            }
+            let request = try Self.decodeProviderRequest(requestRow)
+            switch request.phase {
+            case .sending, .streaming:
+                let unknown = try ProviderRequestLifecycle.markOutcomeUnknown(
+                    request,
+                    reason: .lifecycleInterruption,
+                    now: timestamp
+                )
+                try Self.updateProviderRequestRow(
+                    unknown,
+                    expectedPayloadHash: Self.payloadHash(
+                        try Self.encodeProviderRequest(request)
+                    ),
+                    in: db
+                )
+                try Self.updateProviderBackedRun(unknown, in: db)
+                return unknown
+            case .outcomeUnknown:
+                try Self.synchronizeAgentTask(for: request, in: db)
+                return request
+            case .prepared, .responseComplete:
+                return request
+            case .cancelled, .failed, .continuationCommitted:
+                throw AppDatabaseError.invalidProviderRequest
+            }
         }
     }
 
