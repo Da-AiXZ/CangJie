@@ -109,22 +109,133 @@ final class ProviderToolExecutionTests: XCTestCase {
         _ = try fixture.database.createProject(
             title: "甲",
             premise: "第一本",
-            now: fixture.now
+            now: fixture.now.addingTimeInterval(0.000_000_9)
         )
         _ = try fixture.database.createProject(
             title: "乙",
             premise: "第二本",
-            now: fixture.now.addingTimeInterval(1)
+            now: fixture.now.addingTimeInterval(1.000_000_9)
         )
 
         let first = try fixture.database.executeProviderTool(fixture.invocation)
+        _ = try fixture.database.createProject(
+            title: "丙",
+            premise: "列表完成后新增",
+            now: fixture.now.addingTimeInterval(2)
+        )
         let replay = try fixture.database.executeProviderTool(fixture.invocation)
 
         XCTAssertEqual(first, replay)
         XCTAssertEqual(first.status, "listed")
         XCTAssertEqual(first.projects.map(\.title), ["乙", "甲"])
-        XCTAssertNil(first.receipt.outputReference)
+        XCTAssertEqual(first.artifact?.kind, "projectListSnapshot")
+        XCTAssertEqual(first.artifact?.status, "readSnapshot")
+        XCTAssertEqual(
+            first.receipt.outputReference,
+            first.artifact?.id.uuidString
+        )
+        XCTAssertEqual(try fixture.database.listProjects().count, 3)
         XCTAssertEqual(try fixture.database.latestToolReceipt()?.id, first.receipt.id)
+        let projection = try fixture.database.s2ProviderTaskProjection(
+            conversationID: fixture.intent.conversationID
+        )
+        XCTAssertEqual(projection?.receipt, first.receipt)
+        XCTAssertNil(projection?.projectTitle)
+        XCTAssertNil(projection?.artifactTitle)
+    }
+
+    func testProjectListReplayRejectsMalformedSnapshotWithMatchingHash() throws {
+        let fixture = try makeFixture(
+            functionName: "project_list",
+            argumentsJSON: "{}"
+        )
+        _ = try fixture.database.createProject(
+            title: "甲",
+            premise: "第一本",
+            now: fixture.now
+        )
+        let first = try fixture.database.executeProviderTool(fixture.invocation)
+        let artifactID = try XCTUnwrap(first.receipt.outputReference)
+        let malformedBody = """
+            {
+              "projects": [{
+                "createdAtMicroseconds": 5000000000,
+                "id": "not-a-uuid",
+                "premise": "第一本",
+                "title": "甲",
+                "updatedAtMicroseconds": 5000000000,
+                "version": 1
+              }]
+            }
+            """
+        let matchingHash = ApprovalFingerprint.artifactHash(
+            conversationID: fixture.intent.conversationID,
+            projectID: nil,
+            kind: "projectListSnapshot",
+            title: "小说清单",
+            body: malformedBody
+        )
+        try fixture.database.queue.write { db in
+            try db.execute(
+                sql: "UPDATE agentArtifact SET body = ?, contentHash = ? WHERE id = ?",
+                arguments: [malformedBody, matchingHash, artifactID]
+            )
+        }
+
+        XCTAssertThrowsError(
+            try fixture.database.executeProviderTool(fixture.invocation)
+        ) { error in
+            XCTAssertEqual(
+                error as? AppDatabaseError,
+                .invalidToolReceiptReference
+            )
+        }
+        XCTAssertThrowsError(
+            try fixture.database.s2ProviderTaskProjection(
+                conversationID: fixture.intent.conversationID
+            )
+        ) { error in
+            XCTAssertEqual(
+                error as? AppDatabaseError,
+                .invalidToolReceiptReference
+            )
+        }
+    }
+
+    func testProjectListReplayRejectsCrossConversationSnapshot() throws {
+        let fixture = try makeFixture(
+            functionName: "project_list",
+            argumentsJSON: "{}"
+        )
+        let first = try fixture.database.executeProviderTool(fixture.invocation)
+        let artifact = try XCTUnwrap(first.artifact)
+        let foreignConversationID = UUID()
+        let foreignHash = ApprovalFingerprint.artifactHash(
+            conversationID: foreignConversationID,
+            projectID: nil,
+            kind: artifact.kind,
+            title: artifact.title,
+            body: artifact.body
+        )
+        try fixture.database.queue.write { db in
+            try db.execute(
+                sql: "UPDATE agentArtifact SET conversationID = ?, contentHash = ? WHERE id = ?",
+                arguments: [
+                    foreignConversationID.uuidString,
+                    foreignHash,
+                    artifact.id.uuidString
+                ]
+            )
+        }
+
+        XCTAssertThrowsError(
+            try fixture.database.executeProviderTool(fixture.invocation)
+        ) { error in
+            XCTAssertEqual(
+                error as? AppDatabaseError,
+                .invalidToolReceiptReference
+            )
+        }
     }
 
     func testProjectSwitchChangesConversationFocusAndReplaysExactly() throws {

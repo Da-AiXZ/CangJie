@@ -267,10 +267,16 @@ extension AppDatabase {
 
             let projectTitle: String?
             let artifactTitle: String?
-            if receipt?.toolID == "project.list" {
-                guard receipt?.outputReference == nil else {
+            if let receipt, receipt.toolID == "project.list" {
+                guard let outputReference = receipt.outputReference else {
                     throw AppDatabaseError.invalidToolReceiptReference
                 }
+                _ = try Self.providerProjectListSnapshot(
+                    id: outputReference,
+                    conversationID: conversationID,
+                    projectID: receipt.projectID,
+                    in: db
+                )
                 projectTitle = nil
                 artifactTitle = nil
             } else if receipt?.toolID == "conversation.save_discussion" {

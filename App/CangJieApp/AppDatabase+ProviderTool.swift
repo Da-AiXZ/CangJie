@@ -82,12 +82,19 @@ extension AppDatabase {
                 )
             case .list:
                 let projects = try Self.projects(in: db)
+                let artifact = try Self.insertProviderProjectListSnapshot(
+                    projects: projects,
+                    conversationID: exactInvocation.conversationID,
+                    projectID: exactInvocation.projectID,
+                    now: canonicalNow,
+                    in: db
+                )
                 result = (
                     nil,
                     projects,
-                    nil,
+                    artifact,
                     "listed",
-                    nil,
+                    artifact.id.uuidString,
                     exactInvocation.projectID
                 )
             case .status:
@@ -341,12 +348,18 @@ extension AppDatabase {
             artifact = nil
         case .list:
             guard receipt.projectID == invocation.projectID,
-                  receipt.outputReference == nil else {
+                  let outputReference = receipt.outputReference else {
                 throw AppDatabaseError.invalidToolReceiptReference
             }
+            let snapshot = try Self.providerProjectListSnapshot(
+                id: outputReference,
+                conversationID: invocation.conversationID,
+                projectID: invocation.projectID,
+                in: db
+            )
             project = nil
-            projects = try Self.projects(in: db)
-            artifact = nil
+            projects = snapshot.projects
+            artifact = snapshot.artifact
         case .status:
             if let outputReference = receipt.outputReference {
                 guard let storedProject = try Self.project(
@@ -536,15 +549,23 @@ extension AppDatabase {
         try Row.fetchAll(
             db,
             sql: "SELECT * FROM novelProject ORDER BY updatedAt DESC, rowid DESC"
-        ).compactMap { row in
-            guard let id = UUID(uuidString: row["id"]) else { return nil }
+        ).map { row in
+            guard let id = UUID(uuidString: row["id"]) else {
+                throw AppDatabaseError.invalidProviderToolInvocation
+            }
+            let createdAt = try canonicalProviderToolTimestamp(
+                Date(timeIntervalSince1970: row["createdAt"])
+            )
+            let updatedAt = try canonicalProviderToolTimestamp(
+                Date(timeIntervalSince1970: row["updatedAt"])
+            )
             return NovelProject(
                 id: id,
                 title: row["title"],
                 premise: row["premise"],
                 version: row["version"] ?? 1,
-                createdAt: Date(timeIntervalSince1970: row["createdAt"]),
-                updatedAt: Date(timeIntervalSince1970: row["updatedAt"])
+                createdAt: createdAt,
+                updatedAt: updatedAt
             )
         }
     }
