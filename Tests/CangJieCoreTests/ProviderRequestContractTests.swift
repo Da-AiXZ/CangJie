@@ -27,6 +27,50 @@ final class ProviderRequestContractTests: XCTestCase {
         )
     }
 
+    func testLifecycleCanonicalizesFractionalTimestampsForPersistence() throws {
+        let preparedInput = Date(
+            timeIntervalSinceReferenceDate: 805_149_589.000_000_1
+        )
+        let sentInput = Date(
+            timeIntervalSinceReferenceDate: 805_149_590.000_000_1
+        )
+        XCTAssertNotEqual(
+            preparedInput,
+            Date(timeIntervalSince1970: preparedInput.timeIntervalSince1970)
+        )
+
+        let prepared = try makePreparedRequest(now: preparedInput)
+        let sending = try ProviderRequestLifecycle.markSending(
+            prepared,
+            now: sentInput
+        )
+        XCTAssertNoThrow(
+            try ProviderRequestLifecycle.validateTransition(
+                from: prepared,
+                to: sending
+            )
+        )
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .secondsSince1970
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .secondsSince1970
+
+        XCTAssertEqual(
+            try decoder.decode(
+                ProviderRequestSnapshot.self,
+                from: encoder.encode(prepared)
+            ),
+            prepared
+        )
+        XCTAssertEqual(
+            try decoder.decode(
+                ProviderRequestSnapshot.self,
+                from: encoder.encode(sending)
+            ),
+            sending
+        )
+    }
+
     func testStreamCheckpointRequiresMonotonicCursorAndByteCount() throws {
         let sending = try ProviderRequestLifecycle.markSending(
             makePreparedRequest(),
@@ -314,6 +358,34 @@ final class ProviderRequestContractTests: XCTestCase {
         )
     }
 
+    func testDecodedSnapshotRejectsNoncanonicalFractionalTimestamp() throws {
+        let prepared = try makePreparedRequest()
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .secondsSince1970
+        var object = try XCTUnwrap(
+            JSONSerialization.jsonObject(
+                with: encoder.encode(prepared)
+            ) as? [String: Any]
+        )
+        object["createdAt"] = 1_753_456_789.123_456_7
+        object["updatedAt"] = 1_753_456_789.123_456_7
+        let tampered = try JSONSerialization.data(withJSONObject: object)
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .secondsSince1970
+
+        XCTAssertThrowsError(
+            try decoder.decode(
+                ProviderRequestSnapshot.self,
+                from: tampered
+            )
+        ) { error in
+            XCTAssertEqual(
+                error as? ProviderRequestError,
+                .invalidSnapshot
+            )
+        }
+    }
+
     func testUsageOverflowFailsClosed() throws {
         let sending = try ProviderRequestLifecycle.markSending(
             makePreparedRequest(),
@@ -367,7 +439,8 @@ final class ProviderRequestContractTests: XCTestCase {
         attemptNumber: Int = 1,
         turnSequence: Int = 1,
         previousRequestID: UUID? = nil,
-        runID: UUID = UUID()
+        runID: UUID = UUID(),
+        now: Date? = nil
     ) throws -> ProviderRequestSnapshot {
         try ProviderRequestLifecycle.prepare(
             identity: ProviderRequestIdentity(
@@ -397,7 +470,7 @@ final class ProviderRequestContractTests: XCTestCase {
             toolCatalogManifestHash: hash("3"),
             disclosureScopeHash: hash("4"),
             requestPolicyHash: hash("5"),
-            now: preparedAt
+            now: now ?? preparedAt
         )
     }
 

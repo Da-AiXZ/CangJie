@@ -300,14 +300,18 @@ public struct ProviderRequestSnapshot: Codable, Equatable, Sendable {
     }
 
     fileprivate func validateInvariants() throws {
-        guard ProviderRequestLifecycle.validIdentity(identity),
+        guard let canonicalCreatedAt = try? ProviderRequestLifecycle
+                .canonicalTimestamp(createdAt),
+              let canonicalUpdatedAt = try? ProviderRequestLifecycle
+                .canonicalTimestamp(updatedAt),
+              canonicalCreatedAt == createdAt,
+              canonicalUpdatedAt == updatedAt,
+              ProviderRequestLifecycle.validIdentity(identity),
               ProviderRequestLifecycle.isCanonicalSHA256(promptManifestHash),
               ProviderRequestLifecycle.isCanonicalSHA256(contextManifestHash),
               ProviderRequestLifecycle.isCanonicalSHA256(toolCatalogManifestHash),
               ProviderRequestLifecycle.isCanonicalSHA256(disclosureScopeHash),
               ProviderRequestLifecycle.isCanonicalSHA256(requestPolicyHash),
-              createdAt.timeIntervalSinceReferenceDate.isFinite,
-              updatedAt.timeIntervalSinceReferenceDate.isFinite,
               updatedAt >= createdAt,
               streamCursor >= 0,
               receivedUTF8Bytes >= 0 else {
@@ -546,7 +550,7 @@ public enum ProviderRequestLifecycle {
         ].allSatisfy(isCanonicalSHA256) else {
             throw ProviderRequestError.invalidHash
         }
-        try requireFinite(now)
+        let timestamp = try canonicalTimestamp(now)
         let request = ProviderRequestSnapshot(
             identity: identity,
             responseAssetID: responseAssetID,
@@ -562,8 +566,8 @@ public enum ProviderRequestLifecycle {
             usage: nil,
             failure: nil,
             interruption: nil,
-            createdAt: now,
-            updatedAt: now
+            createdAt: timestamp,
+            updatedAt: timestamp
         )
         try request.validateInvariants()
         return request
@@ -746,8 +750,8 @@ public enum ProviderRequestLifecycle {
         now: Date
     ) throws -> ProviderRequestSnapshot {
         try request.validateInvariants()
-        try requireFinite(now)
-        guard now >= request.updatedAt else {
+        let timestamp = try canonicalTimestamp(now)
+        guard timestamp >= request.updatedAt else {
             throw ProviderRequestError.invalidTimestamp
         }
         let transitioned = ProviderRequestSnapshot(
@@ -766,10 +770,26 @@ public enum ProviderRequestLifecycle {
             failure: failure,
             interruption: interruption,
             createdAt: request.createdAt,
-            updatedAt: now
+            updatedAt: timestamp
         )
         try transitioned.validateInvariants()
         return transitioned
+    }
+
+    fileprivate static func canonicalTimestamp(
+        _ timestamp: Date
+    ) throws -> Date {
+        try requireFinite(timestamp)
+        let microseconds = timestamp.timeIntervalSince1970 * 1_000_000
+        guard microseconds.isFinite,
+              microseconds >= Double(Int64.min),
+              microseconds < Double(Int64.max) else {
+            throw ProviderRequestError.invalidTimestamp
+        }
+        let epochMicroseconds = Int64(microseconds.rounded(.down))
+        return Date(
+            timeIntervalSince1970: Double(epochMicroseconds) / 1_000_000
+        )
     }
 
     fileprivate static func validIdentity(

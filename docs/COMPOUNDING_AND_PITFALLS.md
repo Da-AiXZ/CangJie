@@ -186,6 +186,10 @@ TrollStore overwrite behavior, Keychain isolation, activation and lifecycle beha
 
 Update current-state documents for milestone/status/blocker/queue changes, this file for reusable rules, and history for individual CI/commit evidence. Mechanical double-writing increases contradiction risk.
 
+### R-041 Canonicalize timestamps before exact JSON persistence
+
+Immutable Core snapshots containing `Date` must canonicalize time at their factory and transition boundaries to an explicit epoch precision before App persistence. Apple `secondsSince1970` JSON round-trips can change sub-ULP current timestamps; keep the adapter's strict decoded-equals-original check and test a value that actually loses one ULP.
+
 ## Historical lookup
 
 The complete former P-001 through P-305 log remains at `history/COMPOUNDING_AND_PITFALLS-through-P305.md`. Search it when an exact historical ID or failure narrative is required; promote a rule back here only when it remains broadly reusable and non-duplicative.

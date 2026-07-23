@@ -29,6 +29,27 @@ final class ProviderRequestPersistenceTests: XCTestCase {
         XCTAssertEqual(run.currentStage, "provider.prepared")
     }
 
+    func testFractionalTimestampIsCanonicalizedBeforePersistence() throws {
+        let fixture = try makeFixture(
+            now: Date(
+                timeIntervalSinceReferenceDate: 805_149_589.000_000_1
+            )
+        )
+
+        let stored = try fixture.database.persistPreparedProviderRequest(
+            fixture.request,
+            verifiedConnection: fixture.verifiedConnection
+        )
+
+        XCTAssertEqual(stored, fixture.request)
+        XCTAssertEqual(
+            stored,
+            try fixture.database.providerRequest(
+                id: fixture.request.identity.requestID
+            )
+        )
+    }
+
     func testPreparedRequestReplayRequiresExactIdentity() throws {
         let fixture = try makeFixture()
         _ = try fixture.database.persistPreparedProviderRequest(
@@ -421,7 +442,9 @@ final class ProviderRequestPersistenceTests: XCTestCase {
         )
     }
 
-    private func makeFixture() throws -> (
+    private func makeFixture(
+        now: Date = Date(timeIntervalSince1970: 2_000)
+    ) throws -> (
         database: AppDatabase,
         intent: PendingModelIntent,
         verifiedConnection: VerifiedModelConnection,
@@ -429,7 +452,6 @@ final class ProviderRequestPersistenceTests: XCTestCase {
         now: Date
     ) {
         let database = try AppDatabase(path: temporaryDatabasePath())
-        let now = Date(timeIntervalSince1970: 2_000)
         let conversation = try database.ensureDefaultConversation(now: now)
         let intent = try PendingModelIntent(
             id: UUID(),
