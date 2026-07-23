@@ -1342,7 +1342,7 @@ struct ContentView: View {
                     }
                     .disabled(
                         model.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                            || !model.isComposerAvailable
+                            || !model.canSubmitModelDependentMessage
                     )
                     .accessibilityIdentifier("agent-send-button")
                 }

@@ -147,14 +147,24 @@ extension AppDatabase {
         }
     }
 
-    func storePendingModelIntent(_ intent: PendingModelIntent) throws -> PendingModelIntent {
+    func storePendingModelIntent(
+        _ intent: PendingModelIntent,
+        admissionCondition: PendingModelIntentAdmissionCondition =
+            .modelConnectionRequired
+    ) throws -> PendingModelIntent {
         try queue.write { db in
-            try Self.storePendingModelIntent(intent, in: db)
+            try Self.storePendingModelIntent(
+                intent,
+                admissionCondition: admissionCondition,
+                in: db
+            )
         }
     }
 
     static func storePendingModelIntent(
         _ intent: PendingModelIntent,
+        admissionCondition: PendingModelIntentAdmissionCondition =
+            .modelConnectionRequired,
         in db: Database
     ) throws -> PendingModelIntent {
         if let existingRow = try Row.fetchOne(
@@ -167,7 +177,9 @@ extension AppDatabase {
                 throw AppDatabaseError.idempotencyConflict
             }
             let existing = try Self.decodePendingModelIntent(existingRow)
-            guard existing == intent else {
+            let storedAdmissionRaw: String = existingRow["admissionCondition"]
+            guard existing == intent,
+                  storedAdmissionRaw == admissionCondition.rawValue else {
                 throw AppDatabaseError.idempotencyConflict
             }
             return existing
@@ -202,8 +214,9 @@ extension AppDatabase {
             sql: """
                 INSERT INTO pendingModelIntent (
                     id, conversationID, projectID, branchID,
-                    payloadVersion, payloadJSON, payloadHash, createdAt
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    payloadVersion, payloadJSON, payloadHash, admissionCondition,
+                    createdAt
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
             arguments: [
                 intent.id.uuidString,
@@ -213,6 +226,7 @@ extension AppDatabase {
                 Self.pendingModelIntentPayloadVersion,
                 payloadJSON,
                 payloadHash,
+                admissionCondition.rawValue,
                 intent.createdAt.timeIntervalSince1970
             ]
         )

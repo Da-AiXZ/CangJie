@@ -99,15 +99,19 @@ extension AppDatabase {
             let promotedActiveRunID = try optionalAgentTaskUUID(
                 promotedActiveRunText
             )
+            let promotedState = try promotedAgentTaskState(
+                for: promotedCurrent.intentID,
+                in: db
+            )
             promotedTask = AgentTaskSnapshot(
                 id: promotedCurrent.id,
                 intentID: promotedCurrent.intentID,
                 conversationID: promotedCurrent.conversationID,
                 projectID: promotedCurrent.projectID,
                 branchID: promotedCurrent.branchID,
-                status: .running,
-                outcome: nil,
-                waitingReason: nil,
+                status: promotedState.status,
+                outcome: promotedState.outcome,
+                waitingReason: promotedState.waitingReason,
                 requestedControl: nil,
                 revision: promotedRevision,
                 queueOrdinal: promotedQueueOrdinal,

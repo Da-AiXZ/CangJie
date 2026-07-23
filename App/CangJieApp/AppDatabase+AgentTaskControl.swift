@@ -32,6 +32,12 @@ extension AppDatabase {
         ), try decodePendingModelIntent(intentRow) == intent else {
             throw AppDatabaseError.invalidAgentTask
         }
+        let admissionRaw: String = intentRow["admissionCondition"]
+        guard let admissionCondition = PendingModelIntentAdmissionCondition(
+            rawValue: admissionRaw
+        ) else {
+            throw AppDatabaseError.invalidPendingModelIntent
+        }
         if let existingRow = try Row.fetchOne(
             db,
             sql: "SELECT * FROM agentTask WHERE intentID = ?",
@@ -58,16 +64,27 @@ extension AppDatabase {
         guard hasPrimary == 0 || hasPrimary == 1 else {
             throw AppDatabaseError.invalidAgentTask
         }
-        let status: AgentTaskStatus = hasPrimary == 0 ? .running : .queued
+        let initialState: AgentTaskControlState
+        if hasPrimary == 0,
+           admissionCondition == .networkConfirmationRequired {
+            initialState = try AgentTaskControlState(
+                status: .waitingUser,
+                waitingReason: .networkConfirmation
+            )
+        } else {
+            initialState = try AgentTaskControlState(
+                status: hasPrimary == 0 ? .running : .queued
+            )
+        }
         let taskID = UUID()
         try db.execute(
             sql: """
                 INSERT INTO agentTask (
                     id, intentID, conversationID, projectID, branchID,
-                    status, outcome, requestedControl, revision,
+                    status, outcome, waitingReason, requestedControl, revision,
                     queueOrdinal, primarySlot,
                     activeRunID, enqueueCommandID, createdAt, updatedAt
-                ) VALUES (?, ?, ?, ?, ?, ?, NULL, NULL, 1, ?, ?, NULL, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, NULL, ?, NULL, 1, ?, ?, NULL, ?, ?, ?)
                 """,
             arguments: [
                 taskID.uuidString,
@@ -75,9 +92,10 @@ extension AppDatabase {
                 intent.conversationID.uuidString,
                 intent.projectID?.uuidString,
                 intent.branchID?.uuidString,
-                status.rawValue,
+                initialState.status.rawValue,
+                initialState.waitingReason?.rawValue,
                 nextOrdinal,
-                isPrimaryAgentTaskStatus(status) ? 1 : nil,
+                isPrimaryAgentTaskStatus(initialState.status) ? 1 : nil,
                 commandID.uuidString,
                 now.timeIntervalSince1970,
                 now.timeIntervalSince1970
@@ -88,7 +106,7 @@ extension AppDatabase {
             taskID: taskID,
             expectedRevision: 0,
             from: nil,
-            to: try AgentTaskControlState(status: status),
+            to: initialState,
             fromRequestedControl: nil,
             toRequestedControl: nil,
             hasAdoptedOutput: false,
@@ -156,6 +174,54 @@ extension AppDatabase {
         }
     }
 
+    static func preparedProviderRunBindingStatus(
+        for task: AgentTaskSnapshot
+    ) -> AgentRunStatus? {
+        switch task.status {
+        case .running:
+            return .running
+        case .queued:
+            return .queued
+        case .waitingUser where task.waitingReason == .networkConfirmation:
+            return .waitingUser
+        case .pauseRequested, .reconciling, .paused, .stopRequested,
+             .waitingUser, .completed, .failed, .discarded:
+            return nil
+        }
+    }
+
+    static func preparedProviderRunProjectionStatus(
+        for task: AgentTaskSnapshot
+    ) -> AgentRunStatus? {
+        if task.status == .waitingUser,
+           task.waitingReason == .connectionInvalid {
+            return .waitingUser
+        }
+        return preparedProviderRunBindingStatus(for: task)
+    }
+
+    static func promotedAgentTaskState(
+        for intentID: UUID,
+        in db: Database
+    ) throws -> AgentTaskControlState {
+        guard let admissionRaw = try String.fetchOne(
+            db,
+            sql: "SELECT admissionCondition FROM pendingModelIntent WHERE id = ?",
+            arguments: [intentID.uuidString]
+        ), let admissionCondition = PendingModelIntentAdmissionCondition(
+            rawValue: admissionRaw
+        ) else {
+            throw AppDatabaseError.invalidPendingModelIntent
+        }
+        if admissionCondition == .networkConfirmationRequired {
+            return try AgentTaskControlState(
+                status: .waitingUser,
+                waitingReason: .networkConfirmation
+            )
+        }
+        return try AgentTaskControlState(status: .running)
+    }
+
     static func bindAgentRun(
         _ runID: UUID,
         to taskID: UUID,
@@ -163,7 +229,7 @@ extension AppDatabase {
         in db: Database
     ) throws -> AgentTaskSnapshot {
         let current = try requiredAgentTask(id: taskID, in: db)
-        guard current.status == .running || current.status == .queued else {
+        guard preparedProviderRunBindingStatus(for: current) != nil else {
             throw AppDatabaseError.invalidAgentTask
         }
         if current.activeRunID == runID {
@@ -518,6 +584,7 @@ extension AppDatabase {
             throw AppDatabaseError.agentTaskRevisionConflict
         }
         let updated = try requiredAgentTask(id: id, in: db)
+        try synchronizePreparedProviderRunProjection(for: updated, in: db)
         if updated.outcome == .kept || updated.outcome == .discarded {
             try resolveAgentTaskIntent(updated, now: now, in: db)
         }
@@ -604,9 +671,14 @@ extension AppDatabase {
         }
         let queued = try decodeAgentTask(row)
         let currentState = try AgentTaskControlState(status: queued.status)
-        let running = try AgentTaskControlMachine().transition(
+        let targetState = try promotedAgentTaskState(
+            for: queued.intentID,
+            in: db
+        )
+        let promotedState = try AgentTaskControlMachine().transition(
             currentState,
-            to: .running
+            to: targetState.status,
+            waitingReason: targetState.waitingReason
         )
         let nextRevision = queued.revision.addingReportingOverflow(1)
         guard !nextRevision.overflow else {
@@ -615,11 +687,13 @@ extension AppDatabase {
         try db.execute(
             sql: """
                 UPDATE agentTask
-                SET status = ?, revision = ?, primarySlot = 1, updatedAt = ?
+                SET status = ?, waitingReason = ?, revision = ?,
+                    primarySlot = 1, updatedAt = ?
                 WHERE id = ? AND revision = ? AND status = 'queued'
                 """,
             arguments: [
-                running.status.rawValue,
+                promotedState.status.rawValue,
+                promotedState.waitingReason?.rawValue,
                 nextRevision.partialValue,
                 now.timeIntervalSince1970,
                 queued.id.uuidString,
@@ -630,12 +704,13 @@ extension AppDatabase {
             throw AppDatabaseError.agentTaskRevisionConflict
         }
         let promoted = try requiredAgentTask(id: queued.id, in: db)
+        try synchronizePreparedProviderRunProjection(for: promoted, in: db)
         try insertAgentTaskEvent(
             commandID: UUID(),
             taskID: queued.id,
             expectedRevision: queued.revision,
             from: currentState,
-            to: running,
+            to: promotedState,
             fromRequestedControl: queued.requestedControl,
             toRequestedControl: nil,
             hasAdoptedOutput: false,

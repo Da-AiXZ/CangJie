@@ -46,11 +46,11 @@ Formal prose generation is outside S2.
 | S1 cockpit and workspace | Frozen | Complete | Passed | Accepted |
 | Provider/credential/discovery hardening | Frozen | Complete for slice | Passed | Accepted on Candidate 32 |
 | Central model-connection setup | Frozen | Complete for slice | Passed | Accepted on Candidate 33 |
-| Real Provider generation | Frozen boundary | OpenAI-compatible streaming transport is wired into the central Conversation for DeepSeek, OpenAI and OpenRouter | Passed on `f4fa617` | Pending Candidate 34 |
-| Provider-backed AgentRun | Frozen boundary | Durable request, stream, usage, final-commit cancellation and unknown-outcome projection are complete | Passed on `f4fa617` | Pending Candidate 34 |
-| Typed Tool and ToolReceipt continuation | Frozen boundary | Project create/list/status/switch/save-discussion, exact receipts, Provider continuation and pending-intent consumption are complete | Passed on `f4fa617` | Pending Candidate 34 |
-| Task control, queue and shared projection | Frozen boundary | Pause/resume, stop-and-keep, guarded discard, explicit retry and single-primary FIFO all read from one durable task source shared by Conversation, Results and AI Tasks | Passed on `f4fa617` | Pending Candidate 34 |
-| Lifecycle, offline recovery and notifications | Frozen boundary | Five outcomes, no-resend reconciliation, offline confirmation, connection-invalid waiting and optional allowlisted notifications are complete | Passed on `f4fa617` | Pending Candidate 34 |
+| Real Provider generation | Frozen boundary | Replacement repair keeps a live Provider stream through transient notification-permission inactivity | Candidate 34 passed automation; replacement pending | Candidate 34 rejected |
+| Provider-backed AgentRun | Frozen boundary | Replacement repair separates transient inactivity from true background unknown-outcome handling | Candidate 34 passed automation; replacement pending | Candidate 34 rejected |
+| Typed Tool and ToolReceipt continuation | Frozen boundary | Real project creation and receipt succeeded only after avoiding the lifecycle defect; no accepted completion candidate yet | Candidate 34 passed automation; replacement pending | Candidate 34 rejected |
+| Task control, queue and shared projection | Frozen boundary | Replacement repair removes setup-card inference from queued, paused and reconciling tasks and preserves editable drafts | Candidate 34 passed automation; replacement pending | Candidate 34 rejected |
+| Lifecycle, offline recovery and notifications | Frozen boundary | Replacement repair adds durable offline admission, explicit queued confirmation, truthful notification consent and replaceable task notifications | Candidate 34 passed automation; replacement pending | Candidate 34 rejected |
 
 ## Last accepted device baseline
 
@@ -69,7 +69,7 @@ Formal prose generation is outside S2.
 
 This is the accepted central connection-setup baseline, not S2 completion.
 
-## Pending S2 completion candidate
+## Rejected S2 Candidate 34
 
 - Commit: `f4fa6172ed70590493134c6bdef3d60282988f8e`
 - Version/build: `1.0 (34001)`
@@ -83,26 +83,32 @@ This is the accepted central connection-setup baseline, not S2 completion.
 - Probe IPA: `CangJie-Keychain-Isolation-Probe.ipa`
 - Probe SHA-256: `13d49379fa8b1af0a06593053af7a99a2e77905773b21ad87794638f94763351`
 - Artifact directory: `artifacts/CangJie-S2-run-29993609075/`
-- Acceptance: fail closed pending paired TrollStore device verification.
+- Device result: rejected on 2026-07-23. Keychain isolation and basic Provider/tool execution passed, but notification-permission inactivity interrupted a live stream; pending tasks reopened a stale connection card; offline and pause flows became stuck; the composer was locked; and task notifications were not reliably delivered.
+- Acceptance: rejected. This candidate cannot complete S2.
 
 The downloaded manifest and local SHA-256 verification match the exact workflow
 identity. The macOS workflow independently verified ldid signatures and the
 separate Main/Probe entitlement groups. Windows cannot repeat `codesign`; the
-workflow result is the authority for signed-entitlement verification.
+workflow result remains the authority for signed-entitlement verification, but
+artifact integrity does not override the failed device behavior gate.
 
 ## Active blocker
 
-The S2 implementation and exact-SHA automation gates are complete. The only active
-blocker is physical-device acceptance of Candidate 34: paired TrollStore Keychain
-isolation plus the user-visible Provider, tool, task-control, offline/recovery and
-notification loop. S2 remains unaccepted until that exact device evidence exists.
+Candidate 34 is rejected. A replacement repair is implemented locally for the
+transient-inactive stream cancellation, startup reconciliation collision, stale
+connection-card inference, offline queued confirmation, cross-Conversation status,
+draft autosave, network-confirmation Provider binding and revision-ordered
+notification-consent/delivery defects. The active blocker is replacement exact-SHA
+Core/iPadOS validation followed by a new paired IPA and device acceptance. S2 remains
+unaccepted.
 
 ## Immediate queue
 
-1. Install both Candidate 34 IPA files from the exact artifact directory.
-2. Verify Main identity/canary and Probe isolation before testing product behavior.
-3. Run the S2 differential device script for real Provider streaming, governed tools, task control, offline confirmation, five-state recovery and notification consent.
-4. If the device script passes, accept S2 and advance the current milestone to S3; otherwise capture the first causal device defect class without weakening the gate.
+1. Complete local deterministic validation and review of the replacement repair.
+2. Commit and push only the repair, tests and current evidence; preserve unrelated worktree files.
+3. Require exact-SHA Core and iPadOS CI, including migration, App XCTest and XCUITest evidence.
+4. Build and verify a new paired Main/Probe IPA only after both CI workflows pass.
+5. Stop for device installation only when that replacement candidate is ready; accept S2 only after the full differential device script passes.
 
 ## Stable decision routing
 

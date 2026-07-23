@@ -9,6 +9,25 @@ enum ModelConnectionSetupConversationCopy {
         "要继续这件事，请先选一个模型服务。原消息已经保留，连接好之后会回到这里继续。"
     static let connectionReady =
         "连接已保存，正在回到原对话继续处理。"
+    static let networkConfirmationRequired =
+        "这句话已经保存，网络恢复后由你确认发送。"
+}
+
+enum PendingModelIntentAdmissionCondition: String, CaseIterable {
+    case modelConnectionRequired
+    case ready
+    case networkConfirmationRequired
+
+    var conversationSystemContent: String? {
+        switch self {
+        case .modelConnectionRequired:
+            return ModelConnectionSetupConversationCopy.intentSaved
+        case .ready:
+            return nil
+        case .networkConfirmationRequired:
+            return ModelConnectionSetupConversationCopy.networkConfirmationRequired
+        }
+    }
 }
 
 enum ModelConnectionSetupStep: Equatable {
@@ -207,12 +226,12 @@ final class ModelConnectionSetupController: ObservableObject {
 
         if let currentMetadata,
            let verified = try? credentials.verifiedConnection(for: currentMetadata.connection) {
+            currentConnection = verified.connection
+            clearSensitiveDiscoveryState()
+            step = .idle
             publishResumeDecision(
                 ModelRequestAdmission.resume(pendingIntent, with: verified)
             )
-            currentConnection = verified.connection
-            clearSensitiveDiscoveryState()
-            step = .completed
             return
         }
 
@@ -445,14 +464,16 @@ final class ModelConnectionSetupController: ObservableObject {
             }
             currentConnection = verified.connection
             currentMetadata = stored
+            refreshStoredState()
+            clearSensitiveDiscoveryState()
             if let pendingIntent {
+                step = .idle
                 publishResumeDecision(
                     ModelRequestAdmission.resume(pendingIntent, with: verified)
                 )
+            } else {
+                step = .completed
             }
-            refreshStoredState()
-            clearSensitiveDiscoveryState()
-            step = .completed
         } catch {
             step = .nameConnection
             errorMessage = Self.userMessage(for: error)
@@ -478,10 +499,10 @@ final class ModelConnectionSetupController: ObservableObject {
         currentConnection = verified.connection
         currentMetadata = stored
         if let pendingIntent {
+            step = .idle
             publishResumeDecision(
                 ModelRequestAdmission.resume(pendingIntent, with: verified)
             )
-            step = .completed
         } else {
             resumeDecision = nil
             step = isExplicitManagement ? .chooseProvider : .idle

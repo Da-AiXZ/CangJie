@@ -138,7 +138,8 @@ final class ModelConnectionRecoveryViewModelTests: XCTestCase, ModelConnectionSe
             )
             XCTAssertNil(viewModel.modelConnectionSetup.currentConnection)
             XCTAssertNil(viewModel.modelConnectionSetup.resumeDecision)
-            XCTAssertFalse(viewModel.isComposerAvailable)
+            XCTAssertTrue(viewModel.isComposerAvailable)
+            XCTAssertFalse(viewModel.canSubmitModelDependentMessage)
             XCTAssertTrue(
                 viewModel.diagnosticErrorMessage?.contains("MODEL-CONNECTION-RECOVERY") == true
             )

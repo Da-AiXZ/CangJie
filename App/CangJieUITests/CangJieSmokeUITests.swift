@@ -620,14 +620,13 @@ final class CangJieSmokeUITests: XCTestCase {
         nameField.typeText("我的测试连接")
         app.buttons["model-connection-save-current"].tap()
 
-        let current = app.staticTexts["current-model-connection"]
-        XCTAssertTrue(current.waitForExistence(timeout: 5))
-        XCTAssertTrue(current.label.contains("我的测试连接"))
-        XCTAssertTrue(current.label.contains("gpt-fixture-tail"))
         let currentHeader = app.staticTexts["current-model-connection-header"]
         XCTAssertTrue(currentHeader.waitForExistence(timeout: 5))
         XCTAssertTrue(currentHeader.label.contains("我的测试连接"))
         XCTAssertTrue(currentHeader.label.contains("gpt-fixture-tail"))
+        assertEventuallyDisappears(
+            app.descendants(matching: .any)["model-connection-setup-card"]
+        )
         XCTAssertTrue(app.staticTexts["你：" + userText].exists)
         XCTAssertEqual(
             app.descendants(matching: .any)
@@ -635,7 +634,7 @@ final class CangJieSmokeUITests: XCTestCase {
             0
         )
         XCTAssertFalse(sendButton.isEnabled)
-        XCTAssertFalse(composer.isEnabled)
+        XCTAssertTrue(composer.isEnabled)
         XCTAssertFalse(app.descendants(matching: .any)["welcome-page"].exists)
         XCTAssertFalse(app.descendants(matching: .any)["opening-plan-approval-card"].exists)
         XCTAssertFalse(app.descendants(matching: .any)["last-tool-receipt"].exists)
@@ -648,11 +647,12 @@ final class CangJieSmokeUITests: XCTestCase {
         XCTAssertTrue(restoredCurrent.waitForExistence(timeout: 5))
         XCTAssertTrue(restoredCurrent.label.contains("我的测试连接"))
         XCTAssertTrue(restoredCurrent.label.contains("gpt-fixture-tail"))
-        XCTAssertTrue(
-            app.staticTexts["model-connection-resume-notice"].waitForExistence(timeout: 5)
+        XCTAssertFalse(app.staticTexts["model-connection-resume-notice"].exists)
+        XCTAssertFalse(
+            app.descendants(matching: .any)["model-connection-setup-card"].exists
         )
         XCTAssertFalse(app.buttons["agent-send-button"].isEnabled)
-        XCTAssertFalse(app.textViews["agent-composer"].isEnabled)
+        XCTAssertTrue(app.textViews["agent-composer"].isEnabled)
         XCTAssertFalse(app.descendants(matching: .any)["welcome-page"].exists)
         XCTAssertFalse(app.descendants(matching: .any)["opening-plan-approval-card"].exists)
         XCTAssertFalse(app.descendants(matching: .any)["last-tool-receipt"].exists)

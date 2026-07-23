@@ -18,6 +18,8 @@ extension AppDatabase {
         intentID: UUID,
         projectID: UUID? = nil,
         branchID: UUID? = nil,
+        admissionCondition: PendingModelIntentAdmissionCondition =
+            .modelConnectionRequired,
         now: Date = Date()
     ) throws -> ModelConnectionPendingIntentAppendResult {
         let validatedTurn = try S1ConversationPreview.makeTurn(from: rawRequest)
@@ -33,6 +35,7 @@ extension AppDatabase {
                     throw AppDatabaseError.idempotencyConflict
                 }
                 let existing = try Self.decodePendingModelIntent(existingRow)
+                let storedAdmissionRaw: String = existingRow["admissionCondition"]
                 let durableSelectedID = try String.fetchOne(
                     db,
                     sql: "SELECT selectedConversationID FROM s1WorkspaceState WHERE id = 'default'"
@@ -44,6 +47,7 @@ extension AppDatabase {
                     existing.projectID == $0
                 } ?? true
                 guard existing.userRequest == validatedTurn.userText,
+                      storedAdmissionRaw == admissionCondition.rawValue,
                       existing.branchID == branchID,
                       explicitProjectMatches,
                       selectedConversationMatches,
@@ -105,7 +109,7 @@ extension AppDatabase {
                 conversationID: conversation.id,
                 currentTitle: conversation.title,
                 userText: validatedTurn.userText,
-                systemContent: ModelConnectionSetupConversationCopy.intentSaved,
+                systemContent: admissionCondition.conversationSystemContent,
                 now: now,
                 minimumTimestamp: conversation.updatedAt.timeIntervalSince1970,
                 in: db
@@ -157,7 +161,11 @@ extension AppDatabase {
                 arguments: [conversation.id.uuidString, effectiveDate.timeIntervalSince1970]
             )
             try Self.upsertDraft("", now: effectiveDate, in: db)
-            _ = try Self.storePendingModelIntent(pendingIntent, in: db)
+            _ = try Self.storePendingModelIntent(
+                pendingIntent,
+                admissionCondition: admissionCondition,
+                in: db
+            )
 
             return ModelConnectionPendingIntentAppendResult(
                 conversation: updatedConversation,

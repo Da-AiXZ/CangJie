@@ -226,7 +226,7 @@ extension AppDatabase {
         conversationID: UUID,
         currentTitle: String,
         userText: String,
-        systemContent: String,
+        systemContent: String?,
         now: Date,
         minimumTimestamp: TimeInterval,
         in db: Database
@@ -255,14 +255,19 @@ extension AppDatabase {
             content: userText,
             createdAt: effectiveDate
         )
-        let systemMessage = AgentMessage(
-            id: UUID(),
-            role: .system,
-            content: systemContent,
-            createdAt: effectiveDate
-        )
+        var messages = [userMessage]
+        if let systemContent {
+            messages.append(
+                AgentMessage(
+                    id: UUID(),
+                    role: .system,
+                    content: systemContent,
+                    createdAt: effectiveDate
+                )
+            )
+        }
 
-        for message in [userMessage, systemMessage] {
+        for message in messages {
             try db.execute(
                 sql: "INSERT INTO agentMessage (id, conversationID, role, content, idempotencyKey, createdAt) VALUES (?, ?, ?, ?, NULL, ?)",
                 arguments: [
@@ -279,7 +284,7 @@ extension AppDatabase {
             arguments: [conversationTitle, effectiveTimestamp, conversationID.uuidString]
         )
         return PersistedConversationTurn(
-            messages: [userMessage, systemMessage],
+            messages: messages,
             conversationTitle: conversationTitle
         )
     }

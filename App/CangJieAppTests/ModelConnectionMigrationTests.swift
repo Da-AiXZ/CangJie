@@ -307,6 +307,115 @@ final class ModelConnectionMigrationTests: XCTestCase {
         }
     }
 
+    func testPendingIntentAdmissionMigrationFailsClosedForLegacyQueuedTask() throws {
+        try withTemporaryDatabasePath { path in
+            let legacy = try makePublishedV1ProviderRequestDatabase(at: path)
+            let orphanConversationID = UUID()
+            let orphan = try PendingModelIntent(
+                id: UUID(),
+                conversationID: orphanConversationID,
+                projectID: nil,
+                branchID: nil,
+                userRequest: "无法证明原始网络状态的旧请求",
+                createdAt: Date(timeIntervalSince1970: 2_201)
+            )
+            let orphanPayload = try encodePendingIntent(orphan)
+            var configuration = Configuration()
+            configuration.foreignKeysEnabled = true
+            let legacyQueue = try DatabaseQueue(
+                path: path,
+                configuration: configuration
+            )
+            try AppDatabase.migrator.migrate(
+                legacyQueue,
+                upTo: "s2-agent-task-waiting-reason-v2"
+            )
+            try legacyQueue.write { db in
+                try db.execute(
+                    sql: """
+                        UPDATE agentTask
+                        SET status = 'queued', primarySlot = NULL
+                        WHERE intentID = ?
+                        """,
+                    arguments: [legacy.request.identity.intentID.uuidString]
+                )
+                XCTAssertEqual(db.changesCount, 1)
+                try db.execute(
+                    sql: """
+                        INSERT INTO agentConversation (
+                            id, title, createdAt, updatedAt
+                        ) VALUES (?, 'Legacy orphan', ?, ?)
+                        """,
+                    arguments: [
+                        orphanConversationID.uuidString,
+                        orphan.createdAt.timeIntervalSince1970,
+                        orphan.createdAt.timeIntervalSince1970
+                    ]
+                )
+                try db.execute(
+                    sql: """
+                        INSERT INTO pendingModelIntent (
+                            id, conversationID, projectID, branchID,
+                            payloadVersion, payloadJSON, payloadHash, createdAt,
+                            consumedAt, continuationRequestID
+                        ) VALUES (?, ?, NULL, NULL, 1, ?, ?, ?, NULL, NULL)
+                        """,
+                    arguments: [
+                        orphan.id.uuidString,
+                        orphanConversationID.uuidString,
+                        orphanPayload,
+                        AppDatabase.payloadHash(orphanPayload),
+                        orphan.createdAt.timeIntervalSince1970
+                    ]
+                )
+            }
+
+            let database = try AppDatabase(path: path)
+            let migrated = try database.queue.read { db -> (String, String, Int) in
+                let condition = try String.fetchOne(
+                    db,
+                    sql: "SELECT admissionCondition FROM pendingModelIntent WHERE id = ?",
+                    arguments: [legacy.request.identity.intentID.uuidString]
+                )
+                let orphanCondition = try String.fetchOne(
+                    db,
+                    sql: "SELECT admissionCondition FROM pendingModelIntent WHERE id = ?",
+                    arguments: [orphan.id.uuidString]
+                )
+                let migrationCount = try Int.fetchOne(
+                    db,
+                    sql: "SELECT COUNT(*) FROM grdb_migrations WHERE identifier = ?",
+                    arguments: ["s2-pending-model-intent-admission-v3"]
+                ) ?? 0
+                return (
+                    try XCTUnwrap(condition),
+                    try XCTUnwrap(orphanCondition),
+                    migrationCount
+                )
+            }
+
+            XCTAssertEqual(
+                migrated.0,
+                PendingModelIntentAdmissionCondition
+                    .networkConfirmationRequired.rawValue
+            )
+            XCTAssertEqual(
+                migrated.1,
+                PendingModelIntentAdmissionCondition
+                    .networkConfirmationRequired.rawValue
+            )
+            XCTAssertEqual(migrated.2, 1)
+            XCTAssertThrowsError(
+                try database.queue.write { db in
+                    try db.execute(
+                        sql: "UPDATE pendingModelIntent SET admissionCondition = 'ready' WHERE id = ?",
+                        arguments: [legacy.request.identity.intentID.uuidString]
+                    )
+                }
+            )
+        }
+    }
+
     func testProviderToolReceiptMigrationPreservesLegacyReceipt() throws {
         try withTemporaryDatabasePath { path in
             let receiptID = UUID()

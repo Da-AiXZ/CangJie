@@ -29,6 +29,195 @@ final class ProviderRequestPersistenceTests: XCTestCase {
         XCTAssertEqual(run.currentStage, "provider.prepared")
     }
 
+    func testOfflinePreparedRequestCommitsAsWaitingForNetworkConfirmation() throws {
+        let fixture = try makeFixture(
+            admissionCondition: .networkConfirmationRequired
+        )
+
+        let stored = try fixture.database.persistPreparedProviderRequest(
+            fixture.request,
+            verifiedConnection: fixture.verifiedConnection
+        )
+
+        XCTAssertEqual(stored, fixture.request)
+        let task = try XCTUnwrap(
+            fixture.database.agentTask(intentID: fixture.intent.id)
+        )
+        XCTAssertEqual(task.status, .waitingUser)
+        XCTAssertEqual(task.waitingReason, .networkConfirmation)
+        XCTAssertEqual(task.activeRunID, fixture.request.identity.runID)
+        let run = try XCTUnwrap(
+            fixture.database.agentRun(
+                id: fixture.request.identity.runID,
+                conversationID: fixture.intent.conversationID
+            )
+        )
+        XCTAssertEqual(run.status, .waitingUser)
+        XCTAssertEqual(run.currentStage, "provider.prepared")
+    }
+
+    func testConnectionInvalidTaskCannotBindPreparedProviderRequest() throws {
+        let fixture = try makeFixture()
+        let running = try fixture.database.enqueueAgentTask(
+            for: fixture.intent,
+            commandID: fixture.intent.id,
+            now: fixture.now
+        )
+        let waiting = try fixture.database.transitionAgentTask(
+            id: running.id,
+            expectedRevision: running.revision,
+            commandID: UUID(),
+            to: .waitingUser,
+            waitingReason: .connectionInvalid,
+            now: fixture.now.addingTimeInterval(1)
+        ).task
+        XCTAssertEqual(waiting.waitingReason, .connectionInvalid)
+
+        XCTAssertThrowsError(
+            try fixture.database.persistPreparedProviderRequest(
+                fixture.request,
+                verifiedConnection: fixture.verifiedConnection
+            )
+        ) { error in
+            XCTAssertEqual(error as? AppDatabaseError, .invalidAgentTask)
+        }
+        XCTAssertNil(
+            try fixture.database.providerRequest(
+                id: fixture.request.identity.requestID
+            )
+        )
+        XCTAssertNil(
+            try fixture.database.agentRun(
+                id: fixture.request.identity.runID,
+                conversationID: fixture.intent.conversationID
+            )
+        )
+    }
+
+    func testBoundPreparedRequestProjectsConnectionInvalidAndResumeStates() throws {
+        let fixture = try makeFixture()
+        _ = try fixture.database.persistPreparedProviderRequest(
+            fixture.request,
+            verifiedConnection: fixture.verifiedConnection
+        )
+        let running = try XCTUnwrap(
+            fixture.database.agentTask(intentID: fixture.intent.id)
+        )
+
+        let waiting = try fixture.database.transitionAgentTask(
+            id: running.id,
+            expectedRevision: running.revision,
+            commandID: UUID(),
+            to: .waitingUser,
+            waitingReason: .connectionInvalid,
+            now: fixture.now.addingTimeInterval(1)
+        ).task
+
+        XCTAssertEqual(waiting.waitingReason, .connectionInvalid)
+        XCTAssertEqual(
+            try fixture.database.providerRequest(intentID: fixture.intent.id)?.phase,
+            .prepared
+        )
+        XCTAssertEqual(
+            try fixture.database.agentRun(
+                id: fixture.request.identity.runID,
+                conversationID: fixture.intent.conversationID
+            )?.status,
+            .waitingUser
+        )
+
+        let resumed = try fixture.database.transitionAgentTask(
+            id: waiting.id,
+            expectedRevision: waiting.revision,
+            commandID: UUID(),
+            to: .running,
+            now: fixture.now.addingTimeInterval(2)
+        ).task
+        XCTAssertEqual(resumed.status, .running)
+        XCTAssertEqual(
+            try fixture.database.agentRun(
+                id: fixture.request.identity.runID,
+                conversationID: fixture.intent.conversationID
+            )?.status,
+            .running
+        )
+    }
+
+    func testQueuedOfflinePromotionAndReplayKeepTaskAndRunWaiting() throws {
+        let fixture = try makeFixture()
+        let primary = try fixture.database.enqueueAgentTask(
+            for: fixture.intent,
+            commandID: fixture.intent.id,
+            now: fixture.now
+        )
+        let secondNow = fixture.now.addingTimeInterval(1)
+        _ = try fixture.database.selectNewS1Conversation(now: secondNow)
+        let secondConversation = try fixture.database.appendS1WorkspacePreviewTurn(
+            selectedConversationID: nil,
+            turn: S1ConversationPreview.makeTurn(from: "offline queued request"),
+            now: secondNow
+        ).conversation
+        let secondIntent = try PendingModelIntent(
+            id: UUID(),
+            conversationID: secondConversation.id,
+            projectID: nil,
+            branchID: nil,
+            userRequest: "offline queued request",
+            createdAt: secondNow
+        )
+        _ = try fixture.database.storePendingModelIntent(
+            secondIntent,
+            admissionCondition: .networkConfirmationRequired
+        )
+        let secondRequest = try makeRequest(
+            intent: secondIntent,
+            verifiedConnection: fixture.verifiedConnection,
+            requestID: UUID(),
+            runID: UUID(),
+            responseAssetID: UUID(),
+            now: secondNow
+        )
+        _ = try fixture.database.persistPreparedProviderRequest(
+            secondRequest,
+            verifiedConnection: fixture.verifiedConnection
+        )
+        let queued = try XCTUnwrap(
+            fixture.database.agentTask(intentID: secondIntent.id)
+        )
+        XCTAssertEqual(queued.status, .queued)
+
+        let completionCommandID = UUID()
+        let completed = try fixture.database.transitionAgentTask(
+            id: primary.id,
+            expectedRevision: primary.revision,
+            commandID: completionCommandID,
+            to: .completed,
+            outcome: .natural,
+            now: secondNow.addingTimeInterval(1)
+        )
+        let promoted = try XCTUnwrap(completed.promotedTask)
+        XCTAssertEqual(promoted.id, queued.id)
+        XCTAssertEqual(promoted.status, .waitingUser)
+        XCTAssertEqual(promoted.waitingReason, .networkConfirmation)
+        XCTAssertEqual(
+            try fixture.database.agentRun(
+                id: secondRequest.identity.runID,
+                conversationID: secondIntent.conversationID
+            )?.status,
+            .waitingUser
+        )
+
+        let replay = try fixture.database.transitionAgentTask(
+            id: primary.id,
+            expectedRevision: primary.revision,
+            commandID: completionCommandID,
+            to: .completed,
+            outcome: .natural,
+            now: secondNow.addingTimeInterval(2)
+        )
+        XCTAssertEqual(replay.promotedTask, promoted)
+    }
+
     func testFractionalTimestampIsCanonicalizedBeforePersistence() throws {
         let fixture = try makeFixture(
             now: Date(
@@ -458,7 +647,8 @@ final class ProviderRequestPersistenceTests: XCTestCase {
     }
 
     private func makeFixture(
-        now: Date = Date(timeIntervalSince1970: 2_000)
+        now: Date = Date(timeIntervalSince1970: 2_000),
+        admissionCondition: PendingModelIntentAdmissionCondition = .ready
     ) throws -> (
         database: AppDatabase,
         intent: PendingModelIntent,
@@ -476,7 +666,10 @@ final class ProviderRequestPersistenceTests: XCTestCase {
             userRequest: "创建一本悬疑小说",
             createdAt: now
         )
-        _ = try database.storePendingModelIntent(intent)
+        _ = try database.storePendingModelIntent(
+            intent,
+            admissionCondition: admissionCondition
+        )
         let connection = try ModelConnectionTestFixture.makeConnection(
             provider: .deepSeek,
             baseURL: URL(string: "https://api.deepseek.com")!,

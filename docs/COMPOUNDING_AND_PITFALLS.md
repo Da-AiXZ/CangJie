@@ -190,6 +190,14 @@ Update current-state documents for milestone/status/blocker/queue changes, this 
 
 Immutable Core snapshots containing `Date` must canonicalize time at their factory and transition boundaries to an explicit epoch precision before App persistence. Apple `secondsSince1970` JSON round-trips can change sub-ULP current timestamps; keep the adapter's strict decoded-equals-original check and test a value that actually loses one ULP.
 
+### R-042 Transient inactivity is not background termination
+
+System permission sheets and other temporary interruptions can move an iOS scene through `inactive` without backgrounding the App. Checkpoint transient state, but do not cancel a live Provider request or start launch-style reconciliation while its in-process task still exists. Apply fail-closed cancellation and unknown-outcome recovery only at a real background or identity-invalidating boundary. Notification schedule/cancel operations are task-scoped and revision-monotonic: cancellation records a through-revision barrier before any suspension, and a stale lower-revision cancellation is ignored, so delayed work cannot resurrect or remove a newer notification.
+
+### R-043 A pending intent is not a connection-setup requirement
+
+Derive setup presentation only from missing or invalid verified credentials. Queued, paused, offline-confirmation and reconciling tasks remain task projections even though their pending intent is unconsumed. Keep the composer editable while disabling duplicate submission, scope status to its Conversation, and persist offline admission so queue promotion cannot bypass explicit confirmation. A prepared Provider request and AgentRun may bind a waiting task only for the exact `networkConfirmation` reason; `connectionInvalid` and every other waiting reason remain fail-closed at binding. After a valid binding exists, later connection invalidation changes Task and Run projections atomically without authorizing a send.
+
 ## Historical lookup
 
 The complete former P-001 through P-305 log remains at `history/COMPOUNDING_AND_PITFALLS-through-P305.md`. Search it when an exact historical ID or failure narrative is required; promote a rule back here only when it remains broadly reusable and non-duplicative.

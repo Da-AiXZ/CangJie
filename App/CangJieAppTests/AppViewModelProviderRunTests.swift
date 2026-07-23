@@ -65,6 +65,12 @@ final class AppViewModelProviderRunTests: XCTestCase {
         XCTAssertEqual(generation.callCount, 1)
         XCTAssertEqual(messages.last?.role, .assistant)
         XCTAssertEqual(messages.last?.content, "我已经接着处理这件事。")
+        XCTAssertFalse(
+            messages.contains {
+                $0.role == .system
+                    && $0.content == ModelConnectionSetupConversationCopy.intentSaved
+            }
+        )
         XCTAssertEqual(viewModel.conversationMessages.last, "仓颉：我已经接着处理这件事。")
         let request = try XCTUnwrap(
             database.providerRequest(intentID: intent.id)
@@ -137,6 +143,17 @@ final class AppViewModelProviderRunTests: XCTestCase {
         XCTAssertEqual(waiting.waitingReason, .networkConfirmation)
         XCTAssertEqual(generation.callCount, 0)
         XCTAssertFalse(viewModel.canResumeProviderTask)
+        XCTAssertFalse(
+            viewModel.modelConnectionSetup.isPresented(
+                for: intent.conversationID
+            )
+        )
+        XCTAssertTrue(viewModel.isComposerAvailable)
+        XCTAssertFalse(viewModel.canSubmitModelDependentMessage)
+        XCTAssertEqual(
+            viewModel.conversationMessages.last,
+            ModelConnectionSetupConversationCopy.networkConfirmationRequired
+        )
 
         network.update(.available)
 
@@ -180,7 +197,7 @@ final class AppViewModelProviderRunTests: XCTestCase {
         )
     }
 
-    func testSecondConversationQueuesAndRunsAfterTheFirstCompletes() async throws {
+    func testOfflineSecondConversationQueuesUntilExplicitConfirmationAfterFirstCompletes() async throws {
         let database = try AppDatabase(path: temporaryDatabasePath())
         let credentials = RecordingCredentialRepository()
         let connection = try ModelConnectionTestFixture.makeConnection(
@@ -202,12 +219,14 @@ final class AppViewModelProviderRunTests: XCTestCase {
             for: connection
         )
         let generation = FIFOAppViewModelProviderGenerationService()
+        let network = TestNetworkAvailabilityObserver(state: .available)
         let viewModel = AppViewModel(
             database: database,
             modelCredentialRepository: credentials,
             providerGenerationService: generation,
+            networkAvailabilityObserver: network,
             taskID: UUID(),
-            draftAutosaveDelayNanoseconds: UInt64.max
+            draftAutosaveDelayNanoseconds: 50_000_000
         )
 
         viewModel.draft = "先处理第一段讨论"
@@ -217,6 +236,7 @@ final class AppViewModelProviderRunTests: XCTestCase {
         )
         try await waitUntil { generation.callCount == 1 }
 
+        network.update(.unavailable)
         viewModel.startNewS1Conversation()
         XCTAssertNil(viewModel.selectedConversationID)
         viewModel.draft = "再处理第二段讨论"
@@ -232,15 +252,46 @@ final class AppViewModelProviderRunTests: XCTestCase {
         )
         XCTAssertEqual(queued.status, .queued)
         XCTAssertEqual(generation.callCount, 1)
+        XCTAssertFalse(
+            viewModel.modelConnectionSetup.isPresented(
+                for: secondConversationID
+            )
+        )
+        XCTAssertTrue(viewModel.isComposerAvailable)
+        XCTAssertFalse(viewModel.canSubmitModelDependentMessage)
+        XCTAssertEqual(
+            viewModel.displayedBusinessStatus,
+            "这件事已经排队，尚未发送新的模型请求"
+        )
+        network.update(.available)
+        viewModel.draft = "任务处理期间继续写的下一条草稿"
 
         generation.finishFirstRequest()
-        try await waitUntil { generation.callCount == 2 }
+        try await waitUntil {
+            (try? database.agentTask(intentID: secondIntent.id)?.status)
+                == .waitingUser
+        }
         await viewModel.waitForProviderRunToSettle()
 
         XCTAssertEqual(
             try database.agentTask(intentID: firstIntent.id)?.status,
             .completed
         )
+        XCTAssertEqual(
+            try database.agentTask(intentID: secondIntent.id)?.status,
+            .waitingUser
+        )
+        XCTAssertEqual(
+            try database.agentTask(intentID: secondIntent.id)?.waitingReason,
+            .networkConfirmation
+        )
+        XCTAssertEqual(generation.callCount, 1)
+        XCTAssertTrue(viewModel.canResumeProviderTask)
+        XCTAssertEqual(viewModel.providerTaskResumeTitle, "确认发送")
+
+        viewModel.resumeProviderTask()
+        await viewModel.waitForProviderRunToSettle()
+
         XCTAssertEqual(
             try database.agentTask(intentID: secondIntent.id)?.status,
             .completed
@@ -252,6 +303,11 @@ final class AppViewModelProviderRunTests: XCTestCase {
             "第二件事已经处理。"
         )
         XCTAssertEqual(generation.callCount, 2)
+        XCTAssertEqual(viewModel.draft, "任务处理期间继续写的下一条草稿")
+        try await waitUntil {
+            (try? database.restoreS1ConversationWorkspace().draft)
+                == "任务处理期间继续写的下一条草稿"
+        }
     }
 
     func testCancelPersistsUnknownOutcomeAndKeepsPendingIntent() async throws {
@@ -332,6 +388,13 @@ final class AppViewModelProviderRunTests: XCTestCase {
         )
         XCTAssertFalse(viewModel.isProviderRunActive)
         XCTAssertTrue(viewModel.providerStreamText.isEmpty)
+        XCTAssertFalse(
+            viewModel.modelConnectionSetup.isPresented(
+                for: intent.conversationID
+            )
+        )
+        XCTAssertTrue(viewModel.isComposerAvailable)
+        XCTAssertFalse(viewModel.canSubmitModelDependentMessage)
 
         viewModel.handleScenePhase(.inactive)
         viewModel.handleScenePhase(.active)
@@ -340,6 +403,11 @@ final class AppViewModelProviderRunTests: XCTestCase {
         XCTAssertEqual(
             viewModel.displayedBusinessStatus,
             "正在确认刚才的请求是否已经停止"
+        )
+        XCTAssertFalse(
+            viewModel.modelConnectionSetup.isPresented(
+                for: intent.conversationID
+            )
         )
     }
 

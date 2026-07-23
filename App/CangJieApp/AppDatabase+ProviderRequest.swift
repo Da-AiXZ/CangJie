@@ -144,7 +144,9 @@ extension AppDatabase {
                 now: validated.createdAt,
                 in: db
             )
-            guard task.status == .running || task.status == .queued else {
+            guard let preparedRunStatus = Self.preparedProviderRunBindingStatus(
+                for: task
+            ) else {
                 throw AppDatabaseError.invalidAgentTask
             }
 
@@ -175,7 +177,7 @@ extension AppDatabase {
                     id: validated.identity.runID,
                     projectID: validated.identity.projectID,
                     kind: "providerTurn",
-                    status: task.status == .queued ? .queued : .running,
+                    status: preparedRunStatus,
                     idempotencyKey: "agent.run.\(validated.identity.intentID.uuidString).\(validated.identity.attemptNumber)",
                     currentStage: "provider.prepared",
                     startedAt: validated.createdAt,
@@ -576,24 +578,35 @@ extension AppDatabase {
               scopeMatches else {
             throw AppDatabaseError.invalidAgentRun
         }
-        let projection: (AgentRunStatus, String)
+        let projection: (AgentRunStatus, String, Date)
         switch request.phase {
         case .prepared:
-            projection = (.running, "provider.prepared")
+            guard let task = try agentTask(
+                intentID: request.identity.intentID,
+                in: db
+            ), task.activeRunID == request.identity.runID,
+               let status = preparedProviderRunProjectionStatus(for: task) else {
+                throw AppDatabaseError.invalidAgentTask
+            }
+            projection = (
+                status,
+                "provider.prepared",
+                max(request.updatedAt, task.updatedAt)
+            )
         case .sending:
-            projection = (.running, "provider.sending")
+            projection = (.running, "provider.sending", request.updatedAt)
         case .streaming:
-            projection = (.running, "provider.streaming")
+            projection = (.running, "provider.streaming", request.updatedAt)
         case .responseComplete:
-            projection = (.running, "provider.responseComplete")
+            projection = (.running, "provider.responseComplete", request.updatedAt)
         case .continuationCommitted:
-            projection = (.completed, "provider.continuationCommitted")
+            projection = (.completed, "provider.continuationCommitted", request.updatedAt)
         case .cancelled:
-            projection = (.cancelled, "provider.cancelled")
+            projection = (.cancelled, "provider.cancelled", request.updatedAt)
         case .failed:
-            projection = (.failed, "provider.failed")
+            projection = (.failed, "provider.failed", request.updatedAt)
         case .outcomeUnknown:
-            projection = (.reconciling, "provider.outcomeUnknown")
+            projection = (.reconciling, "provider.outcomeUnknown", request.updatedAt)
         }
         try upsertAgentRun(
             AgentRunSnapshot(
@@ -604,7 +617,7 @@ extension AppDatabase {
                 idempotencyKey: existing.idempotencyKey,
                 currentStage: projection.1,
                 startedAt: existing.startedAt,
-                updatedAt: request.updatedAt
+                updatedAt: projection.2
             ),
             conversationID: request.identity.conversationID,
             in: db
@@ -628,7 +641,7 @@ extension AppDatabase {
         let target: (AgentTaskStatus, AgentTaskOutcome?)?
         switch request.phase {
         case .prepared:
-            guard task.status == .queued || task.status == .running else {
+            guard preparedProviderRunProjectionStatus(for: task) != nil else {
                 throw AppDatabaseError.invalidAgentTask
             }
             target = nil
@@ -758,6 +771,32 @@ extension AppDatabase {
                 throw AppDatabaseError.invalidProviderRequest
             }
         }
+    }
+
+    static func synchronizePreparedProviderRunProjection(
+        for task: AgentTaskSnapshot,
+        in db: Database
+    ) throws {
+        guard let activeRunID = task.activeRunID,
+              preparedProviderRunProjectionStatus(for: task) != nil,
+              let requestRow = try Row.fetchOne(
+                db,
+                sql: """
+                    SELECT * FROM providerRequest
+                    WHERE intentID = ?
+                    ORDER BY attemptNumber DESC, turnSequence DESC, rowid DESC
+                    LIMIT 1
+                    """,
+                arguments: [task.intentID.uuidString]
+              ) else {
+            return
+        }
+        let request = try decodeProviderRequest(requestRow)
+        guard request.phase == .prepared else { return }
+        guard request.identity.runID == activeRunID else {
+            throw AppDatabaseError.invalidAgentRun
+        }
+        try updateProviderBackedRun(request, in: db)
     }
 
     private static func providerContinuationRunScopeMatches(

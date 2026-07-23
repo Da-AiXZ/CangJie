@@ -1700,6 +1700,45 @@ final class AppDatabase {
         migrator.registerMigration("s2-agent-task-waiting-reason-v2") { db in
             try Self.migrateAgentTaskWaitingReason(db)
         }
+        migrator.registerMigration("s2-pending-model-intent-admission-v3") { db in
+            try db.execute(sql: """
+                ALTER TABLE pendingModelIntent
+                ADD COLUMN admissionCondition TEXT NOT NULL
+                    DEFAULT 'modelConnectionRequired'
+                    CHECK (
+                        admissionCondition IN (
+                            'modelConnectionRequired', 'ready',
+                            'networkConfirmationRequired'
+                        )
+                    )
+                """)
+            try db.execute(sql: """
+                UPDATE pendingModelIntent
+                SET admissionCondition = CASE
+                    WHEN EXISTS (
+                        SELECT 1 FROM agentTask
+                        WHERE agentTask.intentID = pendingModelIntent.id
+                          AND (
+                            agentTask.status = 'queued'
+                            OR agentTask.waitingReason = 'networkConfirmation'
+                          )
+                    ) THEN 'networkConfirmationRequired'
+                    WHEN EXISTS (
+                        SELECT 1 FROM providerRequest
+                        WHERE providerRequest.intentID = pendingModelIntent.id
+                    ) THEN 'ready'
+                    ELSE 'networkConfirmationRequired'
+                END
+                """)
+            try db.execute(sql: """
+                CREATE TRIGGER pendingModelIntent_admission_immutable
+                BEFORE UPDATE OF admissionCondition ON pendingModelIntent
+                WHEN NEW.admissionCondition <> OLD.admissionCondition
+                BEGIN
+                    SELECT RAISE(ABORT, 'pending intent admission is immutable');
+                END
+                """)
+        }
         return migrator
     }
 }

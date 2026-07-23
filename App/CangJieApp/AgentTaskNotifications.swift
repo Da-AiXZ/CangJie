@@ -18,6 +18,7 @@ enum AgentTaskNotificationConsentDecision: String, Equatable {
 
 struct AgentTaskNotificationRequest: Equatable {
     let id: String
+    let notificationID: String
     let taskID: UUID
     let taskRevision: Int
     let kind: AgentTaskNotificationKind
@@ -34,6 +35,7 @@ struct AgentTaskNotificationRequest: Equatable {
             String(task.revision),
             kind.rawValue
         ].joined(separator: ".")
+        notificationID = Self.notificationID(for: task.id)
         taskID = task.id
         taskRevision = task.revision
         self.kind = kind
@@ -53,12 +55,20 @@ struct AgentTaskNotificationRequest: Equatable {
             body = "故事推进到了需要你决定的位置。"
         }
     }
+
+    static func notificationID(for taskID: UUID) -> String {
+        [
+            "cangjie.task",
+            taskID.uuidString.lowercased()
+        ].joined(separator: ".")
+    }
 }
 
 @MainActor
 protocol AgentTaskNotificationScheduling: AnyObject {
     func requestAuthorization() async throws -> Bool
     func schedule(_ request: AgentTaskNotificationRequest) async throws
+    func cancelPendingNotification(for taskID: UUID, throughRevision: Int)
 }
 
 @MainActor
@@ -71,6 +81,41 @@ protocol AgentTaskNotificationConsentStoring: AnyObject {
 protocol AgentTaskNotificationDeliveryStoring: AnyObject {
     func claim(_ identifier: String) -> Bool
     func release(_ identifier: String)
+}
+
+@MainActor
+protocol AgentTaskUserNotificationCenter: AnyObject {
+    func requestAuthorization() async throws -> Bool
+    func authorizationStatus() async -> UNAuthorizationStatus
+    func add(_ request: UNNotificationRequest) async throws
+    func removePendingNotificationRequests(withIdentifiers identifiers: [String])
+}
+
+@MainActor
+private final class SystemAgentTaskUserNotificationCenter:
+    AgentTaskUserNotificationCenter
+{
+    private let center: UNUserNotificationCenter
+
+    init(center: UNUserNotificationCenter) {
+        self.center = center
+    }
+
+    func requestAuthorization() async throws -> Bool {
+        try await center.requestAuthorization(options: [.alert, .sound])
+    }
+
+    func authorizationStatus() async -> UNAuthorizationStatus {
+        await center.notificationSettings().authorizationStatus
+    }
+
+    func add(_ request: UNNotificationRequest) async throws {
+        try await center.add(request)
+    }
+
+    func removePendingNotificationRequests(withIdentifiers identifiers: [String]) {
+        center.removePendingNotificationRequests(withIdentifiers: identifiers)
+    }
 }
 
 @MainActor
@@ -132,25 +177,83 @@ final class UserDefaultsAgentTaskNotificationDeliveryStore:
 final class UserNotificationAgentTaskScheduler:
     AgentTaskNotificationScheduling
 {
-    private let center: UNUserNotificationCenter
+    private let center: any AgentTaskUserNotificationCenter
     private let deliveryStore: any AgentTaskNotificationDeliveryStoring
+    private var latestGenerationByTaskID: [UUID: UUID] = [:]
+    private var highestRevisionByTaskID: [UUID: Int] = [:]
+    private var cancelledThroughRevisionByTaskID: [UUID: Int] = [:]
+    private var schedulingOperations: [UUID: Task<Void, Error>] = [:]
+    private var schedulingOperationGenerations: [UUID: UUID] = [:]
 
     init(
         center: UNUserNotificationCenter? = nil,
         deliveryStore: (any AgentTaskNotificationDeliveryStoring)? = nil
     ) {
-        self.center = center ?? .current()
+        self.center = SystemAgentTaskUserNotificationCenter(
+            center: center ?? .current()
+        )
         self.deliveryStore = deliveryStore
             ?? UserDefaultsAgentTaskNotificationDeliveryStore()
     }
 
+    init(
+        centerAdapter: any AgentTaskUserNotificationCenter,
+        deliveryStore: any AgentTaskNotificationDeliveryStoring
+    ) {
+        center = centerAdapter
+        self.deliveryStore = deliveryStore
+    }
+
     func requestAuthorization() async throws -> Bool {
-        try await center.requestAuthorization(options: [.alert, .sound])
+        try await center.requestAuthorization()
     }
 
     func schedule(_ request: AgentTaskNotificationRequest) async throws {
-        let settings = await center.notificationSettings()
-        switch settings.authorizationStatus {
+        let cancelledThrough = cancelledThroughRevisionByTaskID[request.taskID]
+            ?? Int.min
+        let highestRevision = highestRevisionByTaskID[request.taskID]
+            ?? Int.min
+        guard request.taskRevision > cancelledThrough,
+              request.taskRevision >= highestRevision else {
+            return
+        }
+        highestRevisionByTaskID[request.taskID] = request.taskRevision
+        let generation = UUID()
+        let previous = schedulingOperations[request.taskID]
+        latestGenerationByTaskID[request.taskID] = generation
+        previous?.cancel()
+        let operation = Task { @MainActor [weak self] in
+            if let previous {
+                _ = try? await previous.value
+            }
+            guard let self,
+                  self.latestGenerationByTaskID[request.taskID] == generation else {
+                return
+            }
+            try Task.checkCancellation()
+            try await self.performSchedule(request, generation: generation)
+        }
+        schedulingOperations[request.taskID] = operation
+        schedulingOperationGenerations[request.taskID] = generation
+        defer {
+            if schedulingOperationGenerations[request.taskID] == generation {
+                schedulingOperations[request.taskID] = nil
+                schedulingOperationGenerations[request.taskID] = nil
+            }
+        }
+        try await operation.value
+    }
+
+    private func performSchedule(
+        _ request: AgentTaskNotificationRequest,
+        generation: UUID
+    ) async throws {
+        let authorizationStatus = await center.authorizationStatus()
+        try Task.checkCancellation()
+        guard latestGenerationByTaskID[request.taskID] == generation else {
+            return
+        }
+        switch authorizationStatus {
         case .authorized, .provisional, .ephemeral:
             break
         case .notDetermined, .denied:
@@ -164,16 +267,57 @@ final class UserNotificationAgentTaskScheduler:
         content.body = request.body
         content.sound = .default
         do {
+            center.removePendingNotificationRequests(
+                withIdentifiers: [request.notificationID]
+            )
+            try Task.checkCancellation()
+            guard latestGenerationByTaskID[request.taskID] == generation else {
+                deliveryStore.release(request.id)
+                return
+            }
             try await center.add(
                 UNNotificationRequest(
-                    identifier: request.id,
+                    identifier: request.notificationID,
                     content: content,
-                    trigger: nil
+                    trigger: UNTimeIntervalNotificationTrigger(
+                        timeInterval: 1,
+                        repeats: false
+                    )
                 )
             )
+            guard !Task.isCancelled,
+                  latestGenerationByTaskID[request.taskID] == generation else {
+                center.removePendingNotificationRequests(
+                    withIdentifiers: [request.notificationID]
+                )
+                deliveryStore.release(request.id)
+                return
+            }
         } catch {
+            center.removePendingNotificationRequests(
+                withIdentifiers: [request.notificationID]
+            )
             deliveryStore.release(request.id)
             throw error
         }
+    }
+
+    func cancelPendingNotification(for taskID: UUID, throughRevision: Int) {
+        let highestRevision = highestRevisionByTaskID[taskID] ?? Int.min
+        guard throughRevision >= highestRevision else { return }
+        highestRevisionByTaskID[taskID] = max(highestRevision, throughRevision)
+        let cancelledThrough = cancelledThroughRevisionByTaskID[taskID]
+            ?? Int.min
+        cancelledThroughRevisionByTaskID[taskID] = max(
+            cancelledThrough,
+            throughRevision
+        )
+        latestGenerationByTaskID[taskID] = UUID()
+        schedulingOperations[taskID]?.cancel()
+        center.removePendingNotificationRequests(
+            withIdentifiers: [
+                AgentTaskNotificationRequest.notificationID(for: taskID)
+            ]
+        )
     }
 }

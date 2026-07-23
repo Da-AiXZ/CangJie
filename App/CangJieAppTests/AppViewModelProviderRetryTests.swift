@@ -5,6 +5,57 @@ import XCTest
 
 @MainActor
 final class AppViewModelProviderRetryTests: XCTestCase {
+    func testRelaunchDoesNotAutoSendPersistedOfflineIntentBeforeConfirmation() async throws {
+        let database = try AppDatabase(path: temporaryDatabasePath())
+        let credentials = RecordingCredentialRepository()
+        let connection = try ModelConnectionTestFixture.makeConnection(
+            provider: .openAI,
+            baseURL: URL(string: "https://api.openai.com/v1")!,
+            credentialID: UUID(),
+            selectedModel: "fixture-model",
+            secret: "fixture-secret"
+        )
+        _ = try database.storeModelConnection(connection, makeCurrent: true)
+        credentials.credentialPayloadHash = hash("b")
+        try credentials.save(
+            "fixture-secret",
+            versionProof: hash("a"),
+            setupAuthorizationHash: nil,
+            for: connection
+        )
+        let append = try database.appendPendingModelIntentTurn(
+            selectedConversationID: nil,
+            rawRequest: "离线保存后重启也必须由我确认",
+            intentID: UUID(),
+            admissionCondition: .networkConfirmationRequired
+        )
+        let generation = ProviderRetryGenerationService()
+
+        let viewModel = AppViewModel(
+            database: database,
+            modelCredentialRepository: credentials,
+            providerGenerationService: generation,
+            networkAvailabilityObserver: TestNetworkAvailabilityObserver(
+                state: .available
+            ),
+            taskID: UUID(),
+            draftAutosaveDelayNanoseconds: UInt64.max
+        )
+
+        let waiting = try XCTUnwrap(
+            database.agentTask(intentID: append.pendingIntent.id)
+        )
+        XCTAssertEqual(waiting.status, .waitingUser)
+        XCTAssertEqual(waiting.waitingReason, .networkConfirmation)
+        XCTAssertEqual(generation.callCount, 0)
+        XCTAssertTrue(viewModel.canResumeProviderTask)
+        XCTAssertEqual(viewModel.providerTaskResumeTitle, "确认发送")
+
+        viewModel.resumeProviderTask()
+        await viewModel.waitForProviderRunToSettle()
+        XCTAssertEqual(generation.callCount, 1)
+    }
+
     func testTerminalRequestRetriesOnlyAfterExplicitUserAction() async throws {
         let database = try AppDatabase(path: temporaryDatabasePath())
         let credentials = RecordingCredentialRepository()

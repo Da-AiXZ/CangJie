@@ -152,6 +152,34 @@ final class ModelConnectionSetupFlowTests: XCTestCase, ModelConnectionSetupServi
         }
     }
 
+    func testPendingIntentReplayRejectsDifferentAdmissionCondition() throws {
+        try withTemporaryDatabase { database in
+            let intentID = UUID()
+            _ = try database.appendPendingModelIntentTurn(
+                selectedConversationID: nil,
+                rawRequest: "同一请求的准入条件必须保持一致",
+                intentID: intentID,
+                admissionCondition: .ready,
+                now: Date(timeIntervalSince1970: 1_750)
+            )
+
+            XCTAssertThrowsError(
+                try database.appendPendingModelIntentTurn(
+                    selectedConversationID: nil,
+                    rawRequest: "同一请求的准入条件必须保持一致",
+                    intentID: intentID,
+                    admissionCondition: .networkConfirmationRequired,
+                    now: Date(timeIntervalSince1970: 1_751)
+                )
+            ) { error in
+                XCTAssertEqual(
+                    error as? AppDatabaseError,
+                    .idempotencyConflict
+                )
+            }
+        }
+    }
+
     func testSecondPendingIntentForTheSameConversationFailsWithoutAppendingMessages() throws {
         try withTemporaryDatabase { database in
             let first = try database.appendPendingModelIntentTurn(
@@ -237,6 +265,10 @@ final class ModelConnectionSetupFlowTests: XCTestCase, ModelConnectionSetupServi
         }
         XCTAssertEqual(intent, append.pendingIntent)
         XCTAssertEqual(verifiedConnection.connection, stored.connection)
+        XCTAssertEqual(controller.step, .idle)
+        XCTAssertFalse(
+            controller.isPresented(for: append.pendingIntent.conversationID)
+        )
         XCTAssertEqual(controller.secretInput, "")
         XCTAssertFalse(controller.hasSensitiveDiscoveryState)
         XCTAssertTrue(controller.availableModelIDs.isEmpty)
@@ -256,6 +288,12 @@ final class ModelConnectionSetupFlowTests: XCTestCase, ModelConnectionSetupServi
         restoredController.restorePendingIntent(for: append.pendingIntent.conversationID)
         XCTAssertEqual(restoredController.pendingIntent, append.pendingIntent)
         XCTAssertEqual(restoredController.resumeDecision, controller.resumeDecision)
+        XCTAssertEqual(restoredController.step, .idle)
+        XCTAssertFalse(
+            restoredController.isPresented(
+                for: append.pendingIntent.conversationID
+            )
+        )
     }
 
     func testShippingCustomSetupFailsClosedBeforeSendingOrPersistingCredential() async throws {
@@ -651,6 +689,8 @@ final class ModelConnectionSetupFlowTests: XCTestCase, ModelConnectionSetupServi
             )
             XCTAssertTrue(viewModel.modelConnectionSetup.isPresented)
             XCTAssertTrue(viewModel.modelConnectionSetup.blocksComposer(for: conversationID))
+            XCTAssertTrue(viewModel.isComposerAvailable)
+            XCTAssertFalse(viewModel.canSubmitModelDependentMessage)
             XCTAssertNil(viewModel.modelConnectionSetup.resumeDecision)
             XCTAssertNil(viewModel.lastToolReceipt)
             XCTAssertNil(viewModel.latestAgentRun)

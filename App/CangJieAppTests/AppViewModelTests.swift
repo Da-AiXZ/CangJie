@@ -178,18 +178,18 @@ final class AppViewModelTests: XCTestCase {
     }
 
     @MainActor
-    func testActiveLifecycleAlwaysPausesStreamingBeforeCheckpoint() throws {
+    func testBackgroundLifecycleAlwaysPausesStreamingBeforeCheckpoint() throws {
         try withDatabase { database in
             let viewModel = AppViewModel(database: database, keychain: StubSecretRepository())
             viewModel.draft = "checkpoint this draft"
             viewModel.isStreaming = true
 
-            viewModel.handleScenePhase(.inactive)
+            viewModel.handleScenePhase(.background)
 
             XCTAssertFalse(viewModel.isStreaming)
             let storedTaskID = try XCTUnwrap(UserDefaults.standard.string(forKey: "m0TaskID"))
             let taskID = try XCTUnwrap(UUID(uuidString: storedTaskID))
-            XCTAssertEqual(try database.latestCheckpoint(taskID: taskID)?.stage, "sceneInactive")
+            XCTAssertEqual(try database.latestCheckpoint(taskID: taskID)?.stage, "sceneBackground")
 
             viewModel.draft = "must not persist after suspension"
             viewModel.saveDraft()
@@ -904,12 +904,12 @@ final class AppViewModelTests: XCTestCase {
     }
 
     @MainActor
-    func testGovernedRuntimeProjectionActivationIsBlockedWhileInactive() throws {
+    func testGovernedRuntimeProjectionActivationIsBlockedWhileBackgrounded() throws {
         try withDatabase { database in
             let viewModel = AppViewModel(database: database, keychain: StubSecretRepository())
             let conversation = try database.ensureDefaultConversation()
 
-            viewModel.handleScenePhase(.inactive)
+            viewModel.handleScenePhase(.background)
 
             XCTAssertFalse(viewModel.activateGovernedRuntimeProjection())
             XCTAssertTrue(try database.listAgentMessages(conversationID: conversation.id).isEmpty)
