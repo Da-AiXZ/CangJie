@@ -2,6 +2,7 @@ import CangJieCore
 import Foundation
 
 enum ProviderAgentRunError: Error, Equatable {
+    case queued
     case cancelled
     case connectionInvalid
     case unsupportedProvider

@@ -29,6 +29,43 @@ final class ProviderAgentRunCoordinator {
         self.now = now
     }
 
+    func prepareTask(
+        intent: PendingModelIntent,
+        verifiedConnection: VerifiedModelConnection
+    ) throws -> AgentTaskSnapshot {
+        if let existing = try database.providerRequest(intentID: intent.id) {
+            try Self.validateIntentScope(existing, intent: intent)
+            if existing.phase != .failed && existing.phase != .cancelled {
+                try Self.validateExisting(
+                    existing,
+                    intent: intent,
+                    verifiedConnection: verifiedConnection,
+                    prompt: try generationPrompt(for: existing, intent: intent)
+                )
+            }
+            guard let task = try database.agentTask(intentID: intent.id),
+                  task.activeRunID == existing.identity.runID else {
+                throw ProviderAgentRunError.persistenceFailed
+            }
+            return task
+        }
+        let request = try Self.makePreparedRequest(
+            intent: intent,
+            verifiedConnection: verifiedConnection,
+            now: now()
+        )
+        let persisted = try database.persistPreparedProviderRequest(
+            request,
+            intent: intent,
+            verifiedConnection: verifiedConnection
+        )
+        guard let task = try database.agentTask(intentID: intent.id),
+              task.activeRunID == persisted.identity.runID else {
+            throw ProviderAgentRunError.persistenceFailed
+        }
+        return task
+    }
+
     func run(
         intent: PendingModelIntent,
         verifiedConnection: VerifiedModelConnection,
@@ -36,6 +73,10 @@ final class ProviderAgentRunCoordinator {
     ) async throws -> ProviderRunCompletion {
         var request: ProviderRequestSnapshot
         if let existing = try database.providerRequest(intentID: intent.id) {
+            try requireRunnableTask(
+                intentID: intent.id,
+                runID: existing.identity.runID
+            )
             switch ProviderRequestRecovery.nextAction(for: existing) {
             case .sendPersistedRequest:
                 let prompt = try generationPrompt(
@@ -98,6 +139,11 @@ final class ProviderAgentRunCoordinator {
                 verifiedConnection: verifiedConnection
             )
         }
+
+        try requireRunnableTask(
+            intentID: intent.id,
+            runID: request.identity.runID
+        )
 
         let prompt = try generationPrompt(for: request, intent: intent)
 
@@ -265,6 +311,22 @@ final class ProviderAgentRunCoordinator {
         }
     }
 
+    private func requireRunnableTask(
+        intentID: UUID,
+        runID: UUID
+    ) throws {
+        guard let task = try database.agentTask(intentID: intentID),
+              task.activeRunID == runID else {
+            throw ProviderAgentRunError.persistenceFailed
+        }
+        guard task.status == .running else {
+            if task.status == .queued {
+                throw ProviderAgentRunError.queued
+            }
+            throw ProviderAgentRunError.terminalRequest
+        }
+    }
+
     func runToCompletion(
         intent: PendingModelIntent,
         verifiedConnection: VerifiedModelConnection,
@@ -278,7 +340,9 @@ final class ProviderAgentRunCoordinator {
         var receipts: [ToolReceipt] = []
 
         while !completion.response.toolCalls.isEmpty {
-            try Task.checkCancellation()
+            guard !Task.isCancelled else {
+                throw ProviderAgentRunError.cancelled
+            }
             guard completion.request.identity.turnSequence
                     < ProviderRequestLifecycle.maximumTurnsPerAttempt else {
                 throw ProviderAgentRunError.terminalRequest

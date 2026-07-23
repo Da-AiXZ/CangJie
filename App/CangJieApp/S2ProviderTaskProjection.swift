@@ -6,6 +6,7 @@ import GRDB
 /// Every field comes from the same SQLite read transaction.
 struct S2ProviderTaskProjection: Equatable {
     let conversationID: UUID
+    let task: AgentTaskSnapshot
     let run: AgentRunSnapshot
     let request: ProviderRequestSnapshot
     let usage: ProviderUsage?
@@ -15,6 +16,9 @@ struct S2ProviderTaskProjection: Equatable {
     let lastSafeSaveAt: Date
 
     var conversationStatus: String {
+        if let taskStatusText {
+            return taskStatusText
+        }
         switch request.phase {
         case .prepared:
             return "正在准备这件事"
@@ -36,6 +40,28 @@ struct S2ProviderTaskProjection: Equatable {
     }
 
     var doingText: String {
+        switch task.status {
+        case .queued:
+            return "这件事正在排队，前一件主要任务结束后再继续"
+        case .pauseRequested:
+            return "正在到安全位置暂停"
+        case .reconciling:
+            return reconcilingText
+        case .paused:
+            return "这件事已经安全暂停"
+        case .stopRequested:
+            return "正在结束并保留已有内容"
+        case .waitingUser:
+            return "这件事正在等待你的确认"
+        case .completed where task.outcome == .kept:
+            return "这件事已经结束，已有内容已保留"
+        case .discarded:
+            return "未采用的内容已经放弃"
+        case .failed:
+            return "这件事没有完成"
+        case .running, .completed:
+            break
+        }
         switch request.phase {
         case .prepared:
             return "正在准备当前模型请求"
@@ -57,6 +83,20 @@ struct S2ProviderTaskProjection: Equatable {
     }
 
     var nextText: String {
+        switch task.status {
+        case .queued:
+            return "等待当前主要任务释放后开始"
+        case .pauseRequested, .stopRequested, .reconciling:
+            return "先完成安全保存和结果核对"
+        case .paused:
+            return "你可以恢复、结束并保留，或放弃未采用内容"
+        case .waitingUser:
+            return "确认后才会发送新的模型请求"
+        case .completed, .discarded, .failed:
+            return "可以回到对话安排下一件事"
+        case .running:
+            break
+        }
         switch request.phase {
         case .prepared, .sending, .streaming, .responseComplete:
             return "完成后把真实结果保存到当前对话"
@@ -70,6 +110,22 @@ struct S2ProviderTaskProjection: Equatable {
     }
 
     var needsUserText: String {
+        switch task.status {
+        case .queued:
+            return "目前不需要你操作"
+        case .pauseRequested, .stopRequested, .reconciling:
+            return "请等待安全核对完成，不要重复发送"
+        case .paused:
+            return "请选择恢复、保留结束或放弃未采用内容"
+        case .waitingUser:
+            return "需要你确认是否发送"
+        case .completed, .discarded:
+            return "目前不需要你操作"
+        case .failed:
+            return "如要继续，请明确重试"
+        case .running:
+            break
+        }
         switch request.phase {
         case .outcomeUnknown:
             return "结果仍未确认，请不要重复发送"
@@ -163,6 +219,42 @@ struct S2ProviderTaskProjection: Equatable {
             return "这件事已经处理完成"
         }
     }
+
+    private var taskStatusText: String? {
+        switch task.status {
+        case .queued:
+            return "这件事已经排队，尚未发送新的模型请求"
+        case .pauseRequested:
+            return "正在到安全位置暂停"
+        case .reconciling:
+            return reconcilingText
+        case .paused:
+            return "这件事已经安全暂停"
+        case .stopRequested:
+            return "正在结束并保留已有内容"
+        case .waitingUser:
+            return "这件事正在等待你的确认"
+        case .completed where task.outcome == .kept:
+            return "这件事已经结束，已有内容已保留"
+        case .discarded:
+            return "未采用的内容已经放弃"
+        case .failed:
+            return "这件事没有完成，原请求仍然保留"
+        case .running, .completed:
+            return nil
+        }
+    }
+
+    private var reconcilingText: String {
+        switch task.requestedControl {
+        case .pauseNow:
+            return "正在确认刚才的请求是否已经停止"
+        case .stopKeepingResults:
+            return "正在确认已有内容能否安全保留后结束"
+        case nil:
+            return "正在核对上次请求的真实结果"
+        }
+    }
 }
 
 extension AppDatabase {
@@ -205,6 +297,15 @@ extension AppDatabase {
             let run = try Self.decodeAgentRun(runRow)
             guard run.id == request.identity.runID else {
                 throw AppDatabaseError.invalidAgentRun
+            }
+            guard let task = try Self.agentTask(
+                intentID: request.identity.intentID,
+                in: db
+            ), task.activeRunID == run.id,
+                  task.conversationID == conversationID,
+                  task.projectID == request.identity.projectID,
+                  task.branchID == request.identity.branchID else {
+                throw AppDatabaseError.invalidAgentTask
             }
 
             let requestRows = try Row.fetchAll(
@@ -320,6 +421,7 @@ extension AppDatabase {
 
             return S2ProviderTaskProjection(
                 conversationID: conversationID,
+                task: task,
                 run: run,
                 request: request,
                 usage: usage,
@@ -327,7 +429,7 @@ extension AppDatabase {
                 projectTitle: projectTitle,
                 artifactTitle: artifactTitle,
                 lastSafeSaveAt: max(
-                    max(request.updatedAt, run.updatedAt),
+                    max(max(request.updatedAt, run.updatedAt), task.updatedAt),
                     receipt?.createdAt ?? request.updatedAt
                 )
             )

@@ -138,10 +138,14 @@ extension AppDatabase {
                   intent.branchID == validated.identity.branchID else {
                 throw AppDatabaseError.invalidProviderRequest
             }
-
-            guard let current = try Self.currentModelConnection(in: db),
-                  current.connection == verifiedConnection.connection else {
-                throw AppDatabaseError.invalidProviderRequest
+            let task = try Self.enqueueAgentTask(
+                for: intent,
+                commandID: intent.id,
+                now: validated.createdAt,
+                in: db
+            )
+            guard task.status == .running || task.status == .queued else {
+                throw AppDatabaseError.invalidAgentTask
             }
 
             if let existingRow = try Row.fetchOne(
@@ -163,11 +167,15 @@ extension AppDatabase {
 
             let run: AgentRunSnapshot
             if validated.identity.turnSequence == 1 {
+                guard let current = try Self.currentModelConnection(in: db),
+                      current.connection == verifiedConnection.connection else {
+                    throw AppDatabaseError.invalidProviderRequest
+                }
                 run = AgentRunSnapshot(
                     id: validated.identity.runID,
                     projectID: validated.identity.projectID,
                     kind: "providerTurn",
-                    status: .running,
+                    status: task.status == .queued ? .queued : .running,
                     idempotencyKey: "agent.run.\(validated.identity.intentID.uuidString).\(validated.identity.attemptNumber)",
                     currentStage: "provider.prepared",
                     startedAt: validated.createdAt,
@@ -192,7 +200,9 @@ extension AppDatabase {
                 )
                 guard existingRun.kind == "providerTurn",
                       scopeMatches,
-                      existingRun.status == .running else {
+                      existingRun.status == .running,
+                      task.status == .running,
+                      task.activeRunID == existingRun.id else {
                     throw AppDatabaseError.invalidAgentRun
                 }
                 run = AgentRunSnapshot(
@@ -209,6 +219,12 @@ extension AppDatabase {
             try Self.upsertAgentRun(
                 run,
                 conversationID: validated.identity.conversationID,
+                in: db
+            )
+            _ = try Self.bindAgentRun(
+                run.id,
+                to: task.id,
+                now: validated.updatedAt,
                 in: db
             )
 
@@ -560,6 +576,90 @@ extension AppDatabase {
                 updatedAt: request.updatedAt
             ),
             conversationID: request.identity.conversationID,
+            in: db
+        )
+        try synchronizeAgentTask(for: request, in: db)
+    }
+
+    static func synchronizeAgentTask(
+        for request: ProviderRequestSnapshot,
+        in db: Database
+    ) throws {
+        guard let task = try agentTask(
+            intentID: request.identity.intentID,
+            in: db
+        ), task.activeRunID == request.identity.runID,
+              task.conversationID == request.identity.conversationID,
+              task.projectID == request.identity.projectID,
+              task.branchID == request.identity.branchID else {
+            throw AppDatabaseError.invalidAgentTask
+        }
+        let target: (AgentTaskStatus, AgentTaskOutcome?)?
+        switch request.phase {
+        case .prepared:
+            guard task.status == .queued || task.status == .running else {
+                throw AppDatabaseError.invalidAgentTask
+            }
+            target = nil
+        case .sending, .streaming, .responseComplete:
+            guard task.status == .running
+                    || task.status == .pauseRequested
+                    || task.status == .stopRequested else {
+                throw AppDatabaseError.invalidAgentTask
+            }
+            target = nil
+        case .outcomeUnknown:
+            if task.status == .reconciling {
+                target = nil
+            } else {
+                target = (.reconciling, nil)
+            }
+        case .cancelled:
+            switch task.status {
+            case .pauseRequested:
+                target = (.paused, nil)
+            case .stopRequested:
+                target = (.completed, .kept)
+            case .reconciling:
+                switch task.requestedControl {
+                case .pauseNow:
+                    target = (.paused, nil)
+                case .stopKeepingResults:
+                    target = (.completed, .kept)
+                case nil:
+                    target = (.failed, nil)
+                }
+            case .running:
+                target = (.failed, nil)
+            default:
+                throw AppDatabaseError.invalidAgentTask
+            }
+        case .failed:
+            if task.status == .failed {
+                target = nil
+            } else {
+                target = (.failed, nil)
+            }
+        case .continuationCommitted:
+            if task.status == .completed {
+                target = nil
+            } else if task.status == .stopRequested {
+                target = (.completed, .kept)
+            } else if task.status == .reconciling,
+                      task.requestedControl == .stopKeepingResults {
+                target = (.completed, .kept)
+            } else {
+                target = (.completed, .natural)
+            }
+        }
+        guard let target else { return }
+        _ = try transitionAgentTask(
+            id: task.id,
+            expectedRevision: task.revision,
+            commandID: UUID(),
+            to: target.0,
+            outcome: target.1,
+            now: request.updatedAt,
             in: db
         )
     }

@@ -240,6 +240,7 @@ private struct NovelProjectBrowserReaderPage: View {
 private struct S1TasksPage: View {
     @ObservedObject var model: AppViewModel
     let onBack: () -> Void
+    @State private var confirmingDiscard = false
 
     var body: some View {
         NavigationStack {
@@ -271,13 +272,35 @@ private struct S1TasksPage: View {
                         )
                         .accessibilityIdentifier("ai-task-safe-save")
                     }
-                    if model.canCancelProviderRun || model.canRetryProviderRun {
+                    if model.canPauseProviderTask
+                        || model.canResumeProviderTask
+                        || model.canStopAndKeepProviderTask
+                        || model.canDiscardProviderTask
+                        || model.canRetryProviderRun {
                         Section("可用操作") {
-                            if model.canCancelProviderRun {
-                                Button("停止这次处理") {
-                                    model.cancelProviderRun()
+                            if model.canPauseProviderTask {
+                                Button("现在暂停") {
+                                    model.pauseProviderTask()
                                 }
-                                .accessibilityIdentifier("ai-task-cancel-button")
+                                .accessibilityIdentifier("ai-task-pause-button")
+                            }
+                            if model.canResumeProviderTask {
+                                Button("恢复这件事") {
+                                    model.resumeProviderTask()
+                                }
+                                .accessibilityIdentifier("ai-task-resume-button")
+                            }
+                            if model.canStopAndKeepProviderTask {
+                                Button("到这里结束，保留已有内容") {
+                                    model.stopAndKeepProviderTask()
+                                }
+                                .accessibilityIdentifier("ai-task-keep-button")
+                            }
+                            if model.canDiscardProviderTask {
+                                Button("放弃未采用内容", role: .destructive) {
+                                    confirmingDiscard = true
+                                }
+                                .accessibilityIdentifier("ai-task-discard-button")
                             }
                             if model.canRetryProviderRun {
                                 Button("明确重试") {
@@ -299,6 +322,16 @@ private struct S1TasksPage: View {
             .navigationTitle("AI 任务")
             .navigationBarTitleDisplayMode(.inline)
             .navigationBarBackButtonHidden(true)
+            .confirmationDialog(
+                "只放弃尚未采用的临时内容？真实工具回执和审计记录不会删除。",
+                isPresented: $confirmingDiscard,
+                titleVisibility: .visible
+            ) {
+                Button("确认放弃", role: .destructive) {
+                    model.discardProviderTask()
+                }
+                Button("取消", role: .cancel) {}
+            }
             .toolbar {
                 ToolbarItem(placement: .navigationBarLeading) {
                     Button(action: onBack) {
@@ -1226,14 +1259,14 @@ struct ContentView: View {
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                     Spacer()
-                    if model.canCancelProviderRun {
+                    if model.canPauseProviderTask {
                         Button {
-                            model.cancelProviderRun()
+                            model.pauseProviderTask()
                         } label: {
-                            Image(systemName: "xmark.circle.fill")
+                            Image(systemName: "pause.circle.fill")
                         }
-                        .accessibilityLabel("停止这次处理")
-                        .accessibilityIdentifier("provider-run-cancel")
+                        .accessibilityLabel("现在暂停")
+                        .accessibilityIdentifier("provider-run-pause")
                     }
                 }
                 .padding(.horizontal)

@@ -148,6 +148,8 @@ enum AppDatabaseError: Error, Equatable {
     case draftInputLimitExceeded
     case invalidUITestDatabaseScope
     case invalidAgentRun
+    case invalidAgentTask
+    case agentTaskRevisionConflict
     case invalidModelConnection
     case invalidModelConnectionSetupJournal
     case invalidPendingModelIntent
@@ -1691,6 +1693,9 @@ final class AppDatabase {
                     SELECT RAISE(ABORT, 'provider tool receipt binding mismatch');
                 END
                 """)
+        }
+        migrator.registerMigration("s2-agent-task-control-v1") { db in
+            try Self.migrateAgentTaskControl(db)
         }
         return migrator
     }

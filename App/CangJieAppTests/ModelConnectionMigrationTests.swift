@@ -271,6 +271,42 @@ final class ModelConnectionMigrationTests: XCTestCase {
         }
     }
 
+    func testAgentTaskMigrationBackfillsPublishedProviderRunIdentity() throws {
+        try withTemporaryDatabasePath { path in
+            let legacy = try makePublishedV1ProviderRequestDatabase(at: path)
+
+            let database = try AppDatabase(path: path)
+            let task = try XCTUnwrap(
+                database.agentTask(intentID: legacy.request.identity.intentID)
+            )
+            let stored = try database.queue.read { db -> (String?, Int, Int) in
+                let taskID = try String.fetchOne(
+                    db,
+                    sql: "SELECT taskID FROM agentRun WHERE id = ?",
+                    arguments: [legacy.request.identity.runID.uuidString]
+                )
+                let eventCount = try Int.fetchOne(
+                    db,
+                    sql: "SELECT COUNT(*) FROM agentTaskEvent WHERE taskID = ?",
+                    arguments: [task.id.uuidString]
+                ) ?? 0
+                let migrationCount = try Int.fetchOne(
+                    db,
+                    sql: "SELECT COUNT(*) FROM grdb_migrations WHERE identifier = ?",
+                    arguments: ["s2-agent-task-control-v1"]
+                ) ?? 0
+                return (taskID, eventCount, migrationCount)
+            }
+
+            XCTAssertEqual(task.status, .running)
+            XCTAssertNil(task.outcome)
+            XCTAssertEqual(task.activeRunID, legacy.request.identity.runID)
+            XCTAssertEqual(stored.0, task.id.uuidString)
+            XCTAssertEqual(stored.1, 1)
+            XCTAssertEqual(stored.2, 1)
+        }
+    }
+
     func testProviderToolReceiptMigrationPreservesLegacyReceipt() throws {
         try withTemporaryDatabasePath { path in
             let receiptID = UUID()

@@ -111,6 +111,14 @@ extension AppDatabase {
         _ request: ProviderRequestSnapshot,
         in db: Database
     ) throws -> ProviderContinuationCommitResult {
+        guard let task = try agentTask(
+            intentID: request.identity.intentID,
+            in: db
+        ), task.activeRunID == request.identity.runID,
+              task.status == .completed,
+              task.outcome == .natural || task.outcome == .kept else {
+            throw AppDatabaseError.invalidAgentTask
+        }
         let messageRow = try Row.fetchOne(
             db,
             sql: """
@@ -167,6 +175,7 @@ extension AppDatabase {
             conversationID: request.identity.conversationID,
             in: db
         )
+        try synchronizeAgentTask(for: request, in: db)
     }
 
     private static func insertOrReplayAssistantMessage(

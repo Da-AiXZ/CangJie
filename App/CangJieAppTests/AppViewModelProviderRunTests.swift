@@ -81,6 +81,79 @@ final class AppViewModelProviderRunTests: XCTestCase {
         XCTAssertTrue(viewModel.providerStreamText.isEmpty)
     }
 
+    func testSecondConversationQueuesAndRunsAfterTheFirstCompletes() async throws {
+        let database = try AppDatabase(path: temporaryDatabasePath())
+        let credentials = RecordingCredentialRepository()
+        let connection = try ModelConnectionTestFixture.makeConnection(
+            provider: .openAI,
+            baseURL: URL(string: "https://api.openai.com/v1")!,
+            credentialID: UUID(),
+            selectedModel: "fixture-model",
+            secret: "fixture-secret"
+        )
+        _ = try database.storeModelConnection(
+            connection,
+            makeCurrent: true
+        )
+        credentials.credentialPayloadHash = hash("b")
+        try credentials.save(
+            "fixture-secret",
+            versionProof: hash("a"),
+            setupAuthorizationHash: nil,
+            for: connection
+        )
+        let generation = FIFOAppViewModelProviderGenerationService()
+        let viewModel = AppViewModel(
+            database: database,
+            modelCredentialRepository: credentials,
+            providerGenerationService: generation,
+            taskID: UUID(),
+            draftAutosaveDelayNanoseconds: UInt64.max
+        )
+
+        viewModel.draft = "先处理第一段讨论"
+        viewModel.sendModelDependentMessage()
+        let firstIntent = try XCTUnwrap(
+            viewModel.modelConnectionSetup.pendingIntent
+        )
+        try await waitUntil { generation.callCount == 1 }
+
+        viewModel.startNewS1Conversation()
+        let secondConversationID = try XCTUnwrap(
+            viewModel.selectedConversationID
+        )
+        viewModel.draft = "再处理第二段讨论"
+        viewModel.sendModelDependentMessage()
+        let secondIntent = try XCTUnwrap(
+            viewModel.modelConnectionSetup.pendingIntent
+        )
+        let queued = try XCTUnwrap(
+            database.agentTask(intentID: secondIntent.id)
+        )
+        XCTAssertEqual(queued.status, .queued)
+        XCTAssertEqual(generation.callCount, 1)
+
+        generation.finishFirstRequest()
+        try await waitUntil { generation.callCount == 2 }
+        await viewModel.waitForProviderRunToSettle()
+
+        XCTAssertEqual(
+            try database.agentTask(intentID: firstIntent.id)?.status,
+            .completed
+        )
+        XCTAssertEqual(
+            try database.agentTask(intentID: secondIntent.id)?.status,
+            .completed
+        )
+        XCTAssertEqual(
+            try database.listAgentMessages(
+                conversationID: secondConversationID
+            ).last?.content,
+            "第二件事已经处理。"
+        )
+        XCTAssertEqual(generation.callCount, 2)
+    }
+
     func testCancelPersistsUnknownOutcomeAndKeepsPendingIntent() async throws {
         let database = try AppDatabase(path: temporaryDatabasePath())
         let credentials = RecordingCredentialRepository()
@@ -431,5 +504,58 @@ private final class AppViewModelProviderGenerationService:
                 task.cancel()
             }
         }
+    }
+}
+
+private final class FIFOAppViewModelProviderGenerationService:
+    ProviderGenerationServing
+{
+    private var firstContinuation:
+        AsyncThrowingStream<ProviderGenerationEvent, Error>.Continuation?
+    private(set) var callCount = 0
+
+    func stream(
+        request: ProviderRequestSnapshot,
+        verifiedConnection: VerifiedModelConnection,
+        secret: String,
+        systemPrompt: String,
+        userPrompt: String
+    ) -> AsyncThrowingStream<ProviderGenerationEvent, Error> {
+        callCount += 1
+        if callCount == 1 {
+            return AsyncThrowingStream { continuation in
+                firstContinuation = continuation
+                continuation.yield(.textDelta("第一件事正在处理。"))
+            }
+        }
+        return AsyncThrowingStream { continuation in
+            continuation.yield(.textDelta("第二件事已经处理。"))
+            continuation.yield(.finished(reason: "stop"))
+            continuation.yield(
+                .usage(
+                    ProviderUsage(
+                        inputTokens: 4,
+                        outputTokens: 4,
+                        totalTokens: 8
+                    )
+                )
+            )
+            continuation.finish()
+        }
+    }
+
+    func finishFirstRequest() {
+        firstContinuation?.yield(.finished(reason: "stop"))
+        firstContinuation?.yield(
+            .usage(
+                ProviderUsage(
+                    inputTokens: 5,
+                    outputTokens: 5,
+                    totalTokens: 10
+                )
+            )
+        )
+        firstContinuation?.finish()
+        firstContinuation = nil
     }
 }

@@ -137,6 +137,7 @@ final class AppViewModel: ObservableObject {
     }
     var canRetryProviderRun: Bool {
         guard !isProviderRunActive,
+              providerTaskProjection?.task.status == .failed,
               case let .prepareProviderRequest(intent, _) =
                 modelConnectionSetup.resumeDecision,
               let database,
@@ -145,6 +146,27 @@ final class AppViewModel: ObservableObject {
             return false
         }
         return request.phase == .failed || request.phase == .cancelled
+    }
+    var canPauseProviderTask: Bool {
+        providerTaskProjection?.task.status == .running
+            && providerRunTask != nil
+    }
+    var canResumeProviderTask: Bool {
+        guard let status = providerTaskProjection?.task.status else {
+            return false
+        }
+        return (status == .paused || status == .waitingUser)
+            && providerRunTask == nil
+    }
+    var canStopAndKeepProviderTask: Bool {
+        guard let status = providerTaskProjection?.task.status else {
+            return false
+        }
+        return status == .running || status == .paused
+    }
+    var canDiscardProviderTask: Bool {
+        providerTaskProjection?.task.status == .paused
+            && providerTaskProjection?.receipt == nil
     }
     var chapterNeedsReview: Bool {
         chapter?.stage == .reviewingV1 || chapter?.stage == .reviewingV2
@@ -161,6 +183,7 @@ final class AppViewModel: ObservableObject {
     private let database: AppDatabase?
     private var runtime: AgentRuntime?
     private let keychain: any SecretRepository
+    private let modelCredentials: any ModelCredentialRepository
     private let isolationCanaryRepository: any IsolationCanaryRepository
     private let buildActivationStore: any BuildActivationStore
     private let compiledBuildStamp: BuildIdentityStamp
@@ -202,6 +225,7 @@ final class AppViewModel: ObservableObject {
         self.keychain = keychain
         let resolvedModelCredentialRepository = modelCredentialRepository
             ?? KeychainModelCredentialRepository(secrets: keychain)
+        self.modelCredentials = resolvedModelCredentialRepository
         self.isolationCanaryRepository = isolationCanaryRepository
         self.buildActivationStore = buildActivationStore
         self.compiledBuildStamp = compiledBuildStamp
@@ -388,6 +412,7 @@ final class AppViewModel: ObservableObject {
         if let decision = modelConnectionSetup.resumeDecision {
             resumeProviderRequest(decision)
         }
+        dispatchActiveProviderTaskIfPossible()
     }
 
     func reloadProjects() {
@@ -747,21 +772,6 @@ final class AppViewModel: ObservableObject {
             providerRunStartBlocker = .invalidDecision
             return
         }
-        guard intent.conversationID == selectedConversationID else {
-            providerRunStartBlocker = .conversationMismatch
-            return
-        }
-        guard activeProviderIntentID == nil else {
-            if activeProviderIntentID == intent.id, providerRunTask != nil {
-                return
-            }
-            providerRunStartBlocker = .alreadyActive
-            return
-        }
-        guard providerRunTask == nil else {
-            providerRunStartBlocker = .taskAlreadyPresent
-            return
-        }
         guard lifecyclePermitsMutations else {
             providerRunStartBlocker = .lifecycleBlocked
             return
@@ -775,6 +785,36 @@ final class AppViewModel: ObservableObject {
             return
         }
         do {
+            var task = try providerRunCoordinator.prepareTask(
+                intent: intent,
+                verifiedConnection: verifiedConnection
+            )
+            let taskWasWaitingUser = task.status == .waitingUser
+            if taskWasWaitingUser {
+                task = try database.transitionAgentTask(
+                    id: task.id,
+                    expectedRevision: task.revision,
+                    commandID: UUID(),
+                    to: .running
+                ).task
+            }
+            refreshProviderTaskProjection(publishFailure: true)
+            if task.status == .queued {
+                businessStatus = "这件事已经排队，等待前一件主要任务结束"
+                return
+            }
+            guard activeProviderIntentID == nil else {
+                if activeProviderIntentID == intent.id,
+                   providerRunTask != nil {
+                    return
+                }
+                providerRunStartBlocker = .alreadyActive
+                return
+            }
+            guard providerRunTask == nil else {
+                providerRunStartBlocker = .taskAlreadyPresent
+                return
+            }
             if let request = try database.providerRequest(intentID: intent.id) {
                 switch ProviderRequestRecovery.nextAction(for: request) {
                 case .sendPersistedRequest, .continueFromDurableResponse:
@@ -792,7 +832,7 @@ final class AppViewModel: ObservableObject {
                     providerRunStartBlocker = .reconciliationRequired
                     return
                 case .terminal:
-                    guard permitsTerminalRetry else {
+                    guard permitsTerminalRetry || taskWasWaitingUser else {
                         businessStatus = "上次请求已经结束，请明确重试后再继续"
                         providerRunStartBlocker = .explicitRetryRequired
                         return
@@ -802,6 +842,29 @@ final class AppViewModel: ObservableObject {
         } catch {
             providerRunStartBlocker = .recoveryFailed
             publishError("模型请求恢复失败（S2-PROVIDER-RESTORE）", domain: .composer)
+            return
+        }
+        let currentTask: AgentTaskSnapshot
+        do {
+            guard let storedTask = try database.agentTask(
+                intentID: intent.id
+            ) else {
+                throw AppDatabaseError.invalidAgentTask
+            }
+            currentTask = storedTask
+        } catch {
+            providerRunStartBlocker = .recoveryFailed
+            publishError("模型请求恢复失败（S2-PROVIDER-RESTORE）", domain: .composer)
+            return
+        }
+        guard currentTask.status == .running else {
+            if currentTask.status == .reconciling {
+                providerRunStartBlocker = .reconciliationRequired
+            } else if currentTask.status == .failed {
+                providerRunStartBlocker = .explicitRetryRequired
+            } else {
+                providerRunStartBlocker = .taskAlreadyPresent
+            }
             return
         }
         guard requireActiveBuildForAgentMutation() else {
@@ -855,6 +918,13 @@ final class AppViewModel: ObservableObject {
               providerRunGeneration == generation else {
             return
         }
+        let exitedTaskID: UUID?
+        if let database,
+           let task = try? database.agentTask(intentID: intentID) {
+            exitedTaskID = task.id
+        } else {
+            exitedTaskID = nil
+        }
         providerStreamText = projection.text
         canCancelProviderRun = projection.phase == .sending
             || projection.phase == .streaming
@@ -898,6 +968,16 @@ final class AppViewModel: ObservableObject {
         } catch {
             publishError("模型结果已完成，但界面恢复失败（S2-PROVIDER-PROJECT）")
         }
+        let activeTaskID: UUID?
+        if let database,
+           let task = try? database.activeAgentTask() {
+            activeTaskID = task.id
+        } else {
+            activeTaskID = nil
+        }
+        if activeTaskID != exitedTaskID {
+            dispatchActiveProviderTaskIfPossible()
+        }
     }
 
     private func failProviderRun(
@@ -917,6 +997,11 @@ final class AppViewModel: ObservableObject {
         providerStreamText = ""
         canCancelProviderRun = false
         isAgentWorking = false
+        if let database {
+            _ = try? database.settleAgentTaskControlAfterProviderExit(
+                intentID: intentID
+            )
+        }
         if let database,
            let request = try? database.providerRequest(intentID: intentID) {
             latestAgentRun = try? database.agentRun(
@@ -925,36 +1010,217 @@ final class AppViewModel: ObservableObject {
             )
         }
         refreshProviderTaskProjection(publishFailure: false)
-        guard let providerError = error as? ProviderAgentRunError else {
+        if let providerError = error as? ProviderAgentRunError {
+            switch providerError {
+            case .queued:
+                businessStatus = "这件事已经排队，等待前一件主要任务结束"
+            case .cancelled:
+                businessStatus = "这次处理已安全停止，原请求仍然保留"
+            case .requiresReconciliation, .outcomeUnknown:
+                businessStatus = "这次请求的结果还不能确认，已保留原请求等待安全对账"
+            case .connectionInvalid:
+                businessStatus = "当前模型连接已失效，原请求仍然保留"
+            case .unsupportedProvider:
+                businessStatus = "当前模型服务暂不支持真实生成，原请求仍然保留"
+            default:
+                businessStatus = "这次模型处理没有完成，原请求仍然保留"
+            }
+        } else {
             businessStatus = "这次模型处理没有完成，原请求仍然保留"
+        }
+        dispatchActiveProviderTaskIfPossible()
+    }
+
+    private func dispatchActiveProviderTaskIfPossible() {
+        guard activeProviderIntentID == nil,
+              providerRunTask == nil,
+              lifecyclePermitsMutations,
+              isAgentExecutionAllowed,
+              let database else {
             return
         }
-        switch providerError {
-        case .cancelled:
-            businessStatus = "这次处理已安全停止，原请求仍然保留"
-        case .requiresReconciliation, .outcomeUnknown:
-            businessStatus = "这次请求的结果还不能确认，已保留原请求等待安全对账"
-        case .connectionInvalid:
-            businessStatus = "当前模型连接已失效，原请求仍然保留"
-        case .unsupportedProvider:
-            businessStatus = "当前模型服务暂不支持真实生成，原请求仍然保留"
-        default:
-            businessStatus = "这次模型处理没有完成，原请求仍然保留"
+        do {
+            guard let task = try database.activeAgentTask(),
+                  task.status == .running || task.status == .waitingUser,
+                  let intent = try database.pendingModelIntent(
+                    id: task.intentID
+                  ),
+                  let request = try database.providerRequest(
+                    intentID: task.intentID
+                  ) else {
+                return
+            }
+            guard let stored = try database.listModelConnections().first(
+                where: {
+                    $0.connection.id == request.identity.connectionID
+                }
+            ), let verified = try modelCredentials.verifiedConnection(
+                for: stored.connection
+            ) else {
+                if task.status == .running {
+                    _ = try database.transitionAgentTask(
+                        id: task.id,
+                        expectedRevision: task.revision,
+                        commandID: UUID(),
+                        to: .waitingUser
+                    )
+                }
+                refreshProviderTaskProjection(publishFailure: true)
+                businessStatus = "这件事在等待原模型连接恢复"
+                return
+            }
+            resumeProviderRequest(
+                ModelRequestAdmission.resume(intent, with: verified),
+                permitsTerminalRetry: request.phase == .failed
+                    || request.phase == .cancelled
+            )
+        } catch {
+            publishError("排队任务暂时无法安全继续（S2-TASK-DISPATCH）")
         }
     }
 
     func cancelProviderRun() {
-        guard providerRunTask != nil, canCancelProviderRun else { return }
-        businessStatus = "正在安全停止这次模型处理"
-        providerRunTask?.cancel()
+        pauseProviderTask()
+    }
+
+    func pauseProviderTask() {
+        guard let database,
+              let task = providerTaskProjection?.task,
+              task.status == .running else {
+            return
+        }
+        do {
+            _ = try database.transitionAgentTask(
+                id: task.id,
+                expectedRevision: task.revision,
+                commandID: UUID(),
+                to: .pauseRequested
+            )
+            businessStatus = "正在到安全位置暂停"
+            refreshProviderTaskProjection(publishFailure: true)
+            if providerRunTask != nil {
+                providerRunTask?.cancel()
+            } else {
+                _ = try database.settleAgentTaskControlAfterProviderExit(
+                    intentID: task.intentID
+                )
+                refreshProviderTaskProjection(publishFailure: true)
+            }
+        } catch {
+            publishError("这件事暂时无法安全暂停（S2-TASK-PAUSE）")
+        }
+    }
+
+    func resumeProviderTask() {
+        guard let database,
+              let task = providerTaskProjection?.task,
+              task.status == .paused || task.status == .waitingUser else {
+            return
+        }
+        do {
+            if task.status == .paused {
+                _ = try database.transitionAgentTask(
+                    id: task.id,
+                    expectedRevision: task.revision,
+                    commandID: UUID(),
+                    to: .running
+                )
+            }
+            refreshProviderTaskProjection(publishFailure: true)
+            modelConnectionSetup.restorePendingIntent(for: task.conversationID)
+            guard let decision = modelConnectionSetup.resumeDecision else {
+                businessStatus = "任务已经恢复，等待可用的模型连接"
+                return
+            }
+            resumeProviderRequest(decision, permitsTerminalRetry: true)
+        } catch {
+            publishError("这件事暂时无法恢复（S2-TASK-RESUME）")
+        }
+    }
+
+    func stopAndKeepProviderTask() {
+        guard let database,
+              let task = providerTaskProjection?.task,
+              task.status == .running || task.status == .paused else {
+            return
+        }
+        do {
+            _ = try database.transitionAgentTask(
+                id: task.id,
+                expectedRevision: task.revision,
+                commandID: UUID(),
+                to: .stopRequested
+            )
+            businessStatus = "正在结束并保留已有内容"
+            refreshProviderTaskProjection(publishFailure: true)
+            if providerRunTask != nil {
+                providerRunTask?.cancel()
+            } else {
+                _ = try database.settleAgentTaskControlAfterProviderExit(
+                    intentID: task.intentID
+                )
+                modelConnectionSetup.restorePendingIntent(
+                    for: task.conversationID
+                )
+                refreshProviderTaskProjection(publishFailure: true)
+                dispatchActiveProviderTaskIfPossible()
+            }
+        } catch {
+            publishError("这件事暂时无法结束并保留（S2-TASK-KEEP）")
+        }
+    }
+
+    func discardProviderTask() {
+        guard let database,
+              let task = providerTaskProjection?.task,
+              task.status == .paused else {
+            return
+        }
+        do {
+            _ = try database.transitionAgentTask(
+                id: task.id,
+                expectedRevision: task.revision,
+                commandID: UUID(),
+                to: .discarded,
+                outcome: .discarded
+            )
+            modelConnectionSetup.restorePendingIntent(for: task.conversationID)
+            businessStatus = "未采用的内容已经放弃"
+            refreshProviderTaskProjection(publishFailure: true)
+            dispatchActiveProviderTaskIfPossible()
+        } catch AgentTaskControlError.adoptedOutputCannotBeDiscarded {
+            publishError("这件事已经产生真实工具结果，不能当作未采用内容放弃")
+        } catch {
+            publishError("未采用内容暂时无法放弃（S2-TASK-DISCARD）")
+        }
     }
 
     func retryProviderRun() {
         guard canRetryProviderRun,
-              let decision = modelConnectionSetup.resumeDecision else {
+              let database,
+              let task = providerTaskProjection?.task else {
             return
         }
-        resumeProviderRequest(decision, permitsTerminalRetry: true)
+        do {
+            let retried = try database.retryFailedAgentTask(
+                id: task.id,
+                expectedRevision: task.revision,
+                commandID: UUID()
+            )
+            refreshProviderTaskProjection(publishFailure: true)
+            guard retried.status == .running else {
+                businessStatus = "这件事已经排队，等待前一件主要任务结束"
+                return
+            }
+            modelConnectionSetup.restorePendingIntent(for: task.conversationID)
+            guard let decision = modelConnectionSetup.resumeDecision else {
+                businessStatus = "任务已经重新排队，等待可用的模型连接"
+                return
+            }
+            resumeProviderRequest(decision, permitsTerminalRetry: true)
+        } catch {
+            publishError("这件事暂时无法重试（S2-TASK-RETRY）")
+        }
     }
 
     func waitForProviderRunToSettle() async {
@@ -1343,6 +1609,7 @@ final class AppViewModel: ObservableObject {
             if modelConnectionSetup.resumeDecision == nil {
                 reconcileInterruptedProviderRequestAtLaunch()
             }
+            dispatchActiveProviderTaskIfPossible()
             refreshProbeState(publishSuccess: false)
             refreshIsolationCanary(publishSuccess: false)
         @unknown default:
