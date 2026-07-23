@@ -314,19 +314,19 @@ Prerequisite: complete the first connection from the CangJie conversation by sel
 3. The UI must state that progress is safely persisted but must not promise unlimited background execution on iPadOS 16.6.1.
 4. Exercise five separate recovery fixtures: completed, safely paused, definitely failed, outcome unknown, and invalid connection. Each must show a different truthful action set.
 5. For outcome unknown, prove reconciliation checks the original request, local transaction, stream, usage, receipt, and postconditions before any retry. Reconciliation must create no new creative Provider request or creative charge.
-6. While offline, open local projects, prose, materials, drafts, novel export, and project backup. These actions must remain real and usable without a model connection.
+6. While offline, open the already implemented local projects, history, saved content, drafts and connection management. S2 does not pull S6 export/backup scope forward.
 7. Create a new AI request while offline. Verify it is durably marked waiting for network/user confirmation and no sent ProviderRequest, external disclosure, model usage, or charge exists.
 8. Restore connectivity. The new offline request must remain unsent until the user confirms. Cancellation must leave no external request or fee.
 9. Disconnect after a request was already sent. On restoration, verify CangJie may automatically reconcile only that original request identity; it must not create a replacement request while the outcome is unknown.
-10. Interrupt streaming by network loss, immediate pause, lock, and cancellation. The readable fragments may exist only as incomplete temporary artifacts and must be absent from formal ChapterVersion, canon, character state, promise/foreshadowing settlement, and completed-ahead counts.
+10. Interrupt streaming by network loss, immediate pause, lock, and cancellation. The readable fragments remain incomplete Provider state; they must not create a completed tool receipt, consume the pending intent or appear as an adopted result.
 11. On first launch, verify no notification permission prompt appears.
 12. Start the first long task. Verify a plain-language explanation appears before the optional notification request.
-13. Accept notifications and prove only completion, waiting for confirmation, pause/failure, cost limit, and major-story gates produce them. Reject permission and prove all creation, recovery, offline, export, and backup functions remain available.
-14. Verify `现在暂停` cancels the current request and quarantines partial output, while `写完这一章后暂停` completes the current chapter review/temporary settlement/checkpoint and starts no next chapter.
-15. Attempt a second prose Writer for the same novel. It must queue or be rejected; no overlapping formal prose or story-state commit is allowed.
+13. Accept notifications and prove S2 completion, waiting-for-confirmation and pause/failure events use allowlisted text. Reject in-app consent and prove Provider, tool, recovery and offline functions remain available even if system notification permission was previously granted. Cost-limit and major-story notification events remain allowlisted contracts for the later stages that create those gates.
+14. Verify `现在暂停`, resume, end-and-keep and guarded discard use the same durable task source. Partial output remains incomplete, kept output is not marked adopted, and an exact receipt prevents discard.
+15. Start a second primary Agent request while the first is active. It must enter durable FIFO order and must not start a second Provider request until the active task releases ownership. Formal prose Writer behavior remains outside S2.
 16. Fail the current Provider connection. Verify only reconnect-current or user-selected saved-connection actions appear; no Provider, model, or key changes automatically.
 
-This acceptance freezes the S2 minimum lifecycle-and-recovery slice required by its real Agent loop. It does not claim H4 is complete, that the current implementation satisfies the full S2 loop, or that a simulator run proves iPadOS background behavior.
+This acceptance freezes the S2 minimum lifecycle-and-recovery slice required by its real Agent loop. It does not claim H4, formal prose or S3-S6 capabilities, and a simulator run still cannot prove physical iPad lifecycle behavior.
 
 ### 4.5 阶段退出标准
 

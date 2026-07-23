@@ -46,10 +46,11 @@ Formal prose generation is outside S2.
 | S1 cockpit and workspace | Frozen | Complete | Passed | Accepted |
 | Provider/credential/discovery hardening | Frozen | Complete for slice | Passed | Accepted on Candidate 32 |
 | Central model-connection setup | Frozen | Complete for slice | Passed | Accepted on Candidate 33 |
-| Real Provider generation | Frozen boundary | OpenAI-compatible streaming transport is wired into the central Conversation for DeepSeek, OpenAI and OpenRouter | Core and iPadOS passed on `b9523ea` | None |
-| Provider-backed AgentRun | Frozen boundary | Durable request, stream, usage, cancellation and unknown-outcome projection are wired into the central Conversation | Core and iPadOS passed on `b9523ea` | None |
-| Typed Tool and ToolReceipt continuation | Frozen boundary | Strict project create/status execution, exact receipt, Provider continuation, pending-intent consumption and shared task/result projection are wired into the central Conversation | Core and iPadOS passed on `b9523ea` | None |
-| Force-quit recovery of the real S2 loop | Frozen boundary | Sent requests reconcile locally without resend and durable complete responses continue without transport; the complete five-state and device-observable loop remains incomplete | Partial automation passed on `b9523ea` | None |
+| Real Provider generation | Frozen boundary | OpenAI-compatible streaming transport is wired into the central Conversation for DeepSeek, OpenAI and OpenRouter | Passed on `f4fa617` | Pending Candidate 34 |
+| Provider-backed AgentRun | Frozen boundary | Durable request, stream, usage, final-commit cancellation and unknown-outcome projection are complete | Passed on `f4fa617` | Pending Candidate 34 |
+| Typed Tool and ToolReceipt continuation | Frozen boundary | Project create/list/status/switch/save-discussion, exact receipts, Provider continuation and pending-intent consumption are complete | Passed on `f4fa617` | Pending Candidate 34 |
+| Task control, queue and shared projection | Frozen boundary | Pause/resume, stop-and-keep, guarded discard, explicit retry and single-primary FIFO all read from one durable task source shared by Conversation, Results and AI Tasks | Passed on `f4fa617` | Pending Candidate 34 |
+| Lifecycle, offline recovery and notifications | Frozen boundary | Five outcomes, no-resend reconciliation, offline confirmation, connection-invalid waiting and optional allowlisted notifications are complete | Passed on `f4fa617` | Pending Candidate 34 |
 
 ## Last accepted device baseline
 
@@ -68,48 +69,40 @@ Formal prose generation is outside S2.
 
 This is the accepted central connection-setup baseline, not S2 completion.
 
-## Candidate 33 scope
+## Pending S2 completion candidate
 
-Implemented and automated:
+- Commit: `f4fa6172ed70590493134c6bdef3d60282988f8e`
+- Version/build: `1.0 (34001)`
+- Candidate Set ID: `0b7e5f2911a489ae0fa5da9c1e7a9d405317e847dacb30c7f797c5b222dd51a0`
+- Core CI: `29992029384` passed
+- iPadOS CI: `29992029418` passed
+- Apple tests: 381 App XCTest, 20 App XCUITest, 13 Probe XCTest and 1 Probe XCUITest passed
+- Candidate workflow: `29993609075` passed
+- Main IPA: `CangJie-M0.ipa`
+- Main SHA-256: `207c11e7259d022e7ea383981363484f271033bf7b0bb9886006c9458442acde`
+- Probe IPA: `CangJie-Keychain-Isolation-Probe.ipa`
+- Probe SHA-256: `13d49379fa8b1af0a06593053af7a99a2e77905773b21ad87794638f94763351`
+- Artifact directory: `artifacts/CangJie-S2-run-29993609075/`
+- Acceptance: fail closed pending paired TrollStore device verification.
 
-- atomic first pending-intent Conversation turn;
-- one unconsumed pending intent per Conversation;
-- Provider selection and official/custom endpoint presentation;
-- transient Key entry and bounded discovery;
-- explicit model selection and named current connection;
-- Keychain/SQLite journal persistence and fresh verification;
-- fail-closed Custom transport behavior;
-- Conversation switching and lifecycle rehydration;
-- explicit settings management detached from hidden Conversation intent;
-- nested setup-controller observation at the SwiftUI root;
-- independently scrollable long model catalog;
-- fixture-free relaunch restoration of request, connection and model.
-
-Explicitly absent:
-
-- creative Provider request or streaming completion;
-- Provider-backed `AgentRun`;
-- Typed Tool authorization/execution;
-- `ToolReceipt`;
-- consumption of the pending intent;
-- formal prose generation.
+The downloaded manifest and local SHA-256 verification match the exact workflow
+identity. The macOS workflow independently verified ldid signatures and the
+separate Main/Probe entitlement groups. Windows cannot repeat `codesign`; the
+workflow result is the authority for signed-entitlement verification.
 
 ## Active blocker
 
-No external blocker. The central Conversation now runs the real Provider, governed
-project Tool/ToolReceipt continuation and durable pending-intent consumption on an
-exact-SHA automation baseline. S2 remains incomplete because final-commit
-cancellation, the complete task-control/queue contract, five-state lifecycle and
-offline recovery, and force-quit recovery have not yet passed as one user-visible
-device loop.
+The S2 implementation and exact-SHA automation gates are complete. The only active
+blocker is physical-device acceptance of Candidate 34: paired TrollStore Keychain
+isolation plus the user-visible Provider, tool, task-control, offline/recovery and
+notification loop. S2 remains unaccepted until that exact device evidence exists.
 
 ## Immediate queue
 
-1. Close the final-commit cancellation window without consuming the pending intent or duplicating Provider work.
-2. Complete the remaining S2 project query/switch/discussion Typed Tools and exact receipts.
-3. Complete pause/resume, stop-and-keep, discard, single-primary-task and queue semantics from one durable state source.
-4. Complete five-state lifecycle/offline recovery and force-quit reconciliation without duplicate requests, tools, receipts, usage or intent consumption.
-5. Verify the shared Conversation/result/task projections, then build the next candidate only when the complete S2 loop becomes device-observable.
+1. Install both Candidate 34 IPA files from the exact artifact directory.
+2. Verify Main identity/canary and Probe isolation before testing product behavior.
+3. Run the S2 differential device script for real Provider streaming, governed tools, task control, offline confirmation, five-state recovery and notification consent.
+4. If the device script passes, accept S2 and advance the current milestone to S3; otherwise capture the first causal device defect class without weakening the gate.
 
 ## Stable decision routing
 
