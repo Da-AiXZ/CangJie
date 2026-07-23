@@ -798,9 +798,6 @@ final class AppViewModel: ObservableObject {
                 admissionCondition: admissionCondition
             )
             applyS1ConversationWorkspace(result.workspace)
-            if let decision = modelConnectionSetup.resumeDecision {
-                resumeProviderRequest(decision)
-            }
             clearErrors(in: .composer)
             if !isProviderRunActive && providerTaskProjection == nil {
                 businessStatus = modelConnectionSetup.conversationStatus(
