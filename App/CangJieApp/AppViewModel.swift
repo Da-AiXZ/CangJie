@@ -441,7 +441,7 @@ final class AppViewModel: ObservableObject {
             )
         }
         dispatchActiveProviderTaskIfPossible()
-        networkAvailabilityObserver.start { [weak self] state in
+        resolvedNetworkAvailabilityObserver.start { [weak self] state in
             self?.handleNetworkAvailabilityChange(state)
         }
     }
