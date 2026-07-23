@@ -203,12 +203,21 @@ final class AgentTaskNotificationTests: XCTestCase {
         )
 
         network.update(.available)
+        XCTAssertEqual(fixture.viewModel.networkAvailabilityState, .available)
+        XCTAssertTrue(fixture.viewModel.canResumeProviderTask)
         fixture.viewModel.resumeProviderTask()
-        try await waitUntil {
+        let resumed = try XCTUnwrap(
+            fixture.database.agentTask(intentID: intent.id)
+        )
+        XCTAssertEqual(resumed.status, .running)
+        XCTAssertNil(resumed.waitingReason)
+        XCTAssertGreaterThan(resumed.revision, task.revision)
+        XCTAssertTrue(
             notifications.cancelledTasks.contains {
-                $0.taskID == task.id && $0.throughRevision > task.revision
+                $0.taskID == task.id
+                    && $0.throughRevision == resumed.revision
             }
-        }
+        )
 
         fixture.viewModel.handleScenePhase(.background)
         await fixture.viewModel.waitForProviderRunToSettle()

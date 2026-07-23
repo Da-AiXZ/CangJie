@@ -120,7 +120,7 @@ jobs:
           udid="$(bash scripts/find-ipad-simulator.sh)"
           [[ "${udid}" =~ ^[0-9A-Fa-f]{8}-([0-9A-Fa-f]{4}-){3}[0-9A-Fa-f]{12}$ ]] || { echo "Simulator selection returned an invalid UDID" >&2; exit 1; }
           printf 'udid=%s\n' "${udid}" >> "$GITHUB_OUTPUT"
-      - name: Test CangJie on iPad Simulator
+      - name: Test CangJie App on iPad Simulator
         run: |
           set -euo pipefail
           set -o pipefail
@@ -130,6 +130,28 @@ jobs:
             -scheme CangJie \
             -destination "platform=iOS Simulator,id=${{ steps.simulator.outputs.udid }}" \
             -resultBundlePath TestResults/CangJie.xcresult \
+            -skip-testing:CangJieUITests \
+            -clonedSourcePackagesDirPath "$RUNNER_TEMP/CangJie-SourcePackages" \
+            -disableAutomaticPackageResolution \
+            CODE_SIGNING_ALLOWED=YES \
+            CODE_SIGNING_REQUIRED=YES \
+            CODE_SIGN_IDENTITY="-" \
+            MARKETING_VERSION="${{ steps.identity.outputs.marketing_version }}" \
+            CURRENT_PROJECT_VERSION="${{ steps.identity.outputs.build_number }}" \
+            CANGJIE_GIT_COMMIT="${{ steps.identity.outputs.visible_commit }}" \
+            CANGJIE_EXECUTABLE_FINGERPRINT="${{ steps.identity.outputs.main_fingerprint }}" \
+            CANGJIE_CANDIDATE_SET_ID="${{ steps.identity.outputs.candidate_set_id }}"
+      - name: Test CangJie UI on iPad Simulator
+        run: |
+          set -euo pipefail
+          set -o pipefail
+          mkdir -p TestResults
+          xcodebuild test \
+            -project CangJie.xcodeproj \
+            -scheme CangJie \
+            -destination "platform=iOS Simulator,id=${{ steps.simulator.outputs.udid }}" \
+            -resultBundlePath TestResults/CangJieUI.xcresult \
+            -only-testing:CangJieUITests \
             -clonedSourcePackagesDirPath "$RUNNER_TEMP/CangJie-SourcePackages" \
             -disableAutomaticPackageResolution \
             CODE_SIGNING_ALLOWED=YES \
@@ -166,7 +188,9 @@ jobs:
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: CangJie-iOS-TestResults
-          path: TestResults/CangJie.xcresult
+          path: |
+            TestResults/CangJie.xcresult
+            TestResults/CangJieUI.xcresult
           if-no-files-found: warn
           retention-days: 7
       - name: Upload Keychain Isolation Probe test result
