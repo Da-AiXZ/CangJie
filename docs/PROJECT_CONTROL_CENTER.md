@@ -46,11 +46,11 @@ Formal prose generation is outside S2.
 | S1 cockpit and workspace | Frozen | Complete | Passed | Accepted |
 | Provider/credential/discovery hardening | Frozen | Complete for slice | Passed | Accepted on Candidate 32 |
 | Central model-connection setup | Frozen | Complete for slice | Passed | Accepted on Candidate 33 |
-| Real Provider generation | Frozen boundary | Streaming and real Tool execution passed on device; replacement keeps sent cancellation unknown and non-retryable | Local contracts passed; Apple replacement pending | Candidate 35 rejected |
-| Provider-backed AgentRun | Frozen boundary | Current-Conversation and global-primary task scopes are separated locally | Local contracts passed; Apple replacement pending | Candidate 35 rejected |
-| Typed Tool and ToolReceipt continuation | Frozen boundary | Real project creation and exact receipt passed on Candidate 35 before later recovery failure | Existing automation plus device evidence | Completion candidate pending |
-| Task control, queue and shared projection | Frozen boundary | Replacement adds global primary projection, cross-Conversation controls and explicit unknown-task closure without retrying the original request | Local contracts passed; Apple replacement pending | Candidate 35 rejected |
-| Lifecycle, offline recovery and notifications | Frozen boundary | Replacement adds fresh network snapshots, phase-aware background persistence, truthful streaming-cancellation unknown state and a finite UIKit background lease for notification submission | Local contracts passed; Apple replacement pending | Candidate 35 rejected |
+| Real Provider generation | Frozen boundary | Streaming and real Tool execution passed on device; replacement keeps sent cancellation unknown and non-retryable | Exact-SHA Core/App/UI automation passed | Candidate 36 pending device |
+| Provider-backed AgentRun | Frozen boundary | Current-Conversation and global-primary task scopes are separated | Exact-SHA Core/App/UI automation passed | Candidate 36 pending device |
+| Typed Tool and ToolReceipt continuation | Frozen boundary | Real project creation and exact receipt passed on Candidate 35 before later recovery failure | Existing device evidence plus exact-SHA regression passed | Candidate 36 pending device |
+| Task control, queue and shared projection | Frozen boundary | Global primary projection, cross-Conversation controls and explicit unknown-task closure do not retry the original request | Complete offline/queue/pause XCUITest passed | Candidate 36 pending device |
+| Lifecycle, offline recovery and notifications | Frozen boundary | Fresh network snapshots, phase-aware background persistence, truthful streaming-cancellation unknown state and a finite UIKit background lease are implemented | Complete background terminate/relaunch XCUITest passed | Candidate 36 pending device |
 
 ## Last accepted device baseline
 
@@ -68,6 +68,27 @@ Formal prose generation is outside S2.
 - Device result: user reported no problem after testing this candidate on 2026-07-22.
 
 This is the accepted central connection-setup baseline, not S2 completion.
+
+## Pending S2 Candidate 36
+
+- Commit: `e7fdedc8c52a0aeb8b33a2138ea227f3c0f43f94`
+- Version/build: `1.0 (36001)`
+- Candidate Set ID: `ceb0a2a30931fa4cbd0cdb5d8043889c2352e62dc26f1cca33c5e9c8c03c8c71`
+- Core CI: `30044654032` passed
+- iPadOS CI: `30044653983` passed
+- Apple tests: 402 App XCTest, 22 App XCUITest, 13 Probe XCTest and 1 Probe XCUITest passed
+- Candidate workflow: `30045964946` passed
+- Main IPA: `CangJie-M0.ipa`
+- Main SHA-256: `0f2a9c4680db1421757d9ba686414901bdabebe068af1819f0b504d1aef1c901`
+- Probe IPA: `CangJie-Keychain-Isolation-Probe.ipa`
+- Probe SHA-256: `abdb00426648a56d945c892f2c6df5b250597e7a512f73bdf5dc436a9788c514`
+- Artifact directory: `artifacts/CangJie-S2-run-30045964946/`
+- Acceptance: blocked pending exact-set TrollStore device validation.
+
+The macOS workflow independently verified strict ldid signing and distinct
+Main/Probe entitlement groups. Windows metadata-only verification independently
+matched the manifest, compiled identities, archive structure, IPA hashes and
+exported signed-entitlement files. Neither result substitutes for the device gate.
 
 ## Rejected S2 Candidate 34
 
@@ -120,19 +141,18 @@ Candidate 35 cannot complete S2.
 
 ## Active blocker
 
-Candidate 35 proved that the prior App/XCUITest matrix omitted the complete
-offline, cross-Conversation primary-task, streaming-pause and background-recovery
-sequences. The local replacement passes Swift parse, repository contracts, strict
-Core tests and the 90% coverage gate. Apple semantic compile and the replacement
-App/XCUITest paths have not yet run. S2 remains unaccepted.
+Candidate 36 has passed exact-SHA Core, App XCTest, complete App XCUITest, Probe
+and paired signing/artifact gates. The remaining blocker is physical-device
+validation of real NWPathMonitor transitions, notification permission and delivery,
+TrollStore Keychain isolation, lifecycle interruption and the full real Provider /
+Typed Tool continuation. S2 remains unaccepted until that differential script passes.
 
 ## Immediate queue
 
-1. Commit and push the locally verified replacement repair.
-2. Run one complete exact-SHA Core/iPadOS CI cycle.
-3. Read the complete Apple result, repair every occurrence in any proven causal class, and rerun only if required.
-4. Build a new paired Main/Probe candidate only after the complete replacement automation passes.
-5. Re-run the differential physical-device script; accept S2 only if every step passes.
+1. Install both exact-SHA Candidate 36 IPA files from the same artifact directory.
+2. Verify build identity and the Main/Probe isolation canary before S2 behavior checks.
+3. Re-run the differential physical-device script for real Provider/tool execution, notification interruption, offline confirmation, cross-Conversation queue control, pause/unknown handling and force-quit recovery.
+4. Record the exact device result; accept S2 only if every required step passes.
 
 ## Stable decision routing
 
