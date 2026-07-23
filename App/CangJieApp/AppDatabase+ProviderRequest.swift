@@ -283,6 +283,37 @@ extension AppDatabase {
         }
     }
 
+    func providerRequestsRequiringReconciliation() throws
+        -> [ProviderRequestSnapshot]
+    {
+        try queue.read { db in
+            let rows = try Row.fetchAll(
+                db,
+                sql: """
+                    SELECT request.*
+                    FROM providerRequest AS request
+                    JOIN pendingModelIntent AS intent
+                      ON intent.id = request.intentID
+                    WHERE intent.consumedAt IS NULL
+                      AND request.rowid = (
+                          SELECT latest.rowid
+                          FROM providerRequest AS latest
+                          WHERE latest.intentID = request.intentID
+                          ORDER BY latest.attemptNumber DESC,
+                                   latest.turnSequence DESC,
+                                   latest.rowid DESC
+                          LIMIT 1
+                      )
+                    ORDER BY request.updatedAt ASC, request.rowid ASC
+                    """
+            )
+            return try rows.map(Self.decodeProviderRequest).filter {
+                ProviderRequestRecovery.nextAction(for: $0)
+                    == .reconcileUnknownOutcome
+            }
+        }
+    }
+
     func updateProviderRequest(_ request: ProviderRequestSnapshot) throws {
         let validated = try Self.validatedProviderRequest(request)
         guard validated.phase != .responseComplete,

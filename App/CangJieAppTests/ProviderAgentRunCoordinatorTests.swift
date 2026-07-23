@@ -96,6 +96,12 @@ final class ProviderAgentRunCoordinatorTests: XCTestCase {
         )
         XCTAssertEqual(request.phase, .failed)
         XCTAssertEqual(request.failure, .authentication)
+        XCTAssertEqual(
+            try fixture.database.s2ProviderTaskProjection(
+                conversationID: fixture.intent.conversationID
+            )?.recoveryState,
+            .connectionInvalid
+        )
         XCTAssertNotNil(
             try fixture.database.latestPendingModelIntent(
                 conversationID: fixture.intent.conversationID
@@ -218,6 +224,15 @@ final class ProviderAgentRunCoordinatorTests: XCTestCase {
         let first = try XCTUnwrap(
             fixture.database.providerRequest(intentID: fixture.intent.id)
         )
+        let failedTask = try XCTUnwrap(
+            fixture.database.agentTask(intentID: fixture.intent.id)
+        )
+        _ = try fixture.database.retryFailedAgentTask(
+            id: failedTask.id,
+            expectedRevision: failedTask.revision,
+            commandID: UUID(),
+            now: fixture.now.addingTimeInterval(1)
+        )
         try fixture.credentials.save(
             "fixture-secret",
             versionProof: first.identity.credentialVersionProof,
@@ -286,6 +301,15 @@ final class ProviderAgentRunCoordinatorTests: XCTestCase {
         }
         let failed = try XCTUnwrap(
             fixture.database.providerRequest(intentID: fixture.intent.id)
+        )
+        let failedTask = try XCTUnwrap(
+            fixture.database.agentTask(intentID: fixture.intent.id)
+        )
+        _ = try fixture.database.retryFailedAgentTask(
+            id: failedTask.id,
+            expectedRevision: failedTask.revision,
+            commandID: UUID(),
+            now: fixture.now.addingTimeInterval(1)
         )
         try fixture.credentials.save(
             "fixture-secret",

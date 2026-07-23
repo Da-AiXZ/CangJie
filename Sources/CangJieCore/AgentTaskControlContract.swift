@@ -17,19 +17,38 @@ public enum AgentTaskOutcome: String, Codable, CaseIterable, Sendable {
     case discarded
 }
 
+public enum AgentTaskWaitingReason: String, Codable, CaseIterable, Sendable {
+    case networkConfirmation
+    case connectionInvalid
+}
+
+public enum AgentTaskRecoveryState: String, Codable, CaseIterable, Sendable {
+    case completed
+    case paused
+    case failed
+    case outcomeUnknown
+    case connectionInvalid
+}
+
 public enum AgentTaskControlError: Error, Equatable, Sendable {
     case invalidTransition(from: AgentTaskStatus, to: AgentTaskStatus)
     case invalidOutcome(status: AgentTaskStatus, outcome: AgentTaskOutcome?)
+    case invalidWaitingReason(
+        status: AgentTaskStatus,
+        reason: AgentTaskWaitingReason?
+    )
     case adoptedOutputCannotBeDiscarded
 }
 
 public struct AgentTaskControlState: Codable, Equatable, Sendable {
     public let status: AgentTaskStatus
     public let outcome: AgentTaskOutcome?
+    public let waitingReason: AgentTaskWaitingReason?
 
     public init(
         status: AgentTaskStatus,
-        outcome: AgentTaskOutcome? = nil
+        outcome: AgentTaskOutcome? = nil,
+        waitingReason: AgentTaskWaitingReason? = nil
     ) throws {
         switch status {
         case .completed:
@@ -55,8 +74,22 @@ public struct AgentTaskControlState: Codable, Equatable, Sendable {
                 )
             }
         }
+        if status == .waitingUser {
+            guard waitingReason != nil else {
+                throw AgentTaskControlError.invalidWaitingReason(
+                    status: status,
+                    reason: waitingReason
+                )
+            }
+        } else if waitingReason != nil {
+            throw AgentTaskControlError.invalidWaitingReason(
+                status: status,
+                reason: waitingReason
+            )
+        }
         self.status = status
         self.outcome = outcome
+        self.waitingReason = waitingReason
     }
 
     public init(from decoder: Decoder) throws {
@@ -66,6 +99,10 @@ public struct AgentTaskControlState: Codable, Equatable, Sendable {
             outcome: try container.decodeIfPresent(
                 AgentTaskOutcome.self,
                 forKey: .outcome
+            ),
+            waitingReason: try container.decodeIfPresent(
+                AgentTaskWaitingReason.self,
+                forKey: .waitingReason
             )
         )
     }
@@ -74,11 +111,31 @@ public struct AgentTaskControlState: Codable, Equatable, Sendable {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(status, forKey: .status)
         try container.encodeIfPresent(outcome, forKey: .outcome)
+        try container.encodeIfPresent(waitingReason, forKey: .waitingReason)
     }
 
     private enum CodingKeys: String, CodingKey {
         case status
         case outcome
+        case waitingReason
+    }
+
+    public var recoveryState: AgentTaskRecoveryState? {
+        switch status {
+        case .completed:
+            return .completed
+        case .paused:
+            return .paused
+        case .failed:
+            return .failed
+        case .reconciling:
+            return .outcomeUnknown
+        case .waitingUser where waitingReason == .connectionInvalid:
+            return .connectionInvalid
+        case .queued, .running, .pauseRequested, .waitingUser,
+             .stopRequested, .discarded:
+            return nil
+        }
     }
 }
 
@@ -95,7 +152,9 @@ public struct AgentTaskControlMachine: Sendable {
         .reconciling: [.paused, .stopRequested, .completed, .failed],
         .paused: [.running, .stopRequested, .discarded],
         .stopRequested: [.reconciling, .completed, .failed],
-        .waitingUser: [.running, .paused, .stopRequested, .discarded],
+        .waitingUser: [
+            .running, .paused, .stopRequested, .waitingUser, .discarded
+        ],
         .completed: [],
         .failed: [.queued, .discarded],
         .discarded: []
@@ -107,6 +166,7 @@ public struct AgentTaskControlMachine: Sendable {
         _ current: AgentTaskControlState,
         to nextStatus: AgentTaskStatus,
         outcome: AgentTaskOutcome? = nil,
+        waitingReason: AgentTaskWaitingReason? = nil,
         hasAdoptedOutput: Bool = false
     ) throws -> AgentTaskControlState {
         guard Self.allowedTransitions[current.status, default: []]
@@ -138,6 +198,10 @@ public struct AgentTaskControlMachine: Sendable {
                 }
             }
         }
-        return try AgentTaskControlState(status: nextStatus, outcome: outcome)
+        return try AgentTaskControlState(
+            status: nextStatus,
+            outcome: outcome,
+            waitingReason: waitingReason
+        )
     }
 }

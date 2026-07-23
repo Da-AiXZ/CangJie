@@ -81,6 +81,105 @@ final class AppViewModelProviderRunTests: XCTestCase {
         XCTAssertTrue(viewModel.providerStreamText.isEmpty)
     }
 
+    func testOfflineRequestWaitsForConnectivityAndExplicitConfirmation() async throws {
+        let database = try AppDatabase(path: temporaryDatabasePath())
+        let credentials = RecordingCredentialRepository()
+        let connection = try ModelConnectionTestFixture.makeConnection(
+            provider: .openAI,
+            baseURL: URL(string: "https://api.openai.com/v1")!,
+            credentialID: UUID(),
+            selectedModel: "fixture-model",
+            secret: "fixture-secret"
+        )
+        _ = try database.storeModelConnection(connection, makeCurrent: true)
+        credentials.credentialPayloadHash = hash("b")
+        try credentials.save(
+            "fixture-secret",
+            versionProof: hash("a"),
+            setupAuthorizationHash: nil,
+            for: connection
+        )
+        let generation = AppViewModelProviderGenerationService(
+            events: [
+                .textDelta("联网确认后只发送一次。"),
+                .finished(reason: "stop"),
+                .usage(
+                    ProviderUsage(
+                        inputTokens: 6,
+                        outputTokens: 4,
+                        totalTokens: 10
+                    )
+                )
+            ]
+        )
+        let network = TestNetworkAvailabilityObserver(state: .unavailable)
+        let viewModel = AppViewModel(
+            database: database,
+            modelCredentialRepository: credentials,
+            providerGenerationService: generation,
+            networkAvailabilityObserver: network,
+            taskID: UUID(),
+            draftAutosaveDelayNanoseconds: UInt64.max
+        )
+        viewModel.draft = "离线保存这条模型请求"
+
+        viewModel.sendModelDependentMessage()
+
+        let intent = try XCTUnwrap(viewModel.modelConnectionSetup.pendingIntent)
+        let request = try XCTUnwrap(
+            database.providerRequest(intentID: intent.id)
+        )
+        let waiting = try XCTUnwrap(
+            database.agentTask(intentID: intent.id)
+        )
+        XCTAssertEqual(request.phase, .prepared)
+        XCTAssertEqual(waiting.status, .waitingUser)
+        XCTAssertEqual(waiting.waitingReason, .networkConfirmation)
+        XCTAssertEqual(generation.callCount, 0)
+        XCTAssertFalse(viewModel.canResumeProviderTask)
+
+        network.update(.available)
+
+        XCTAssertEqual(generation.callCount, 0)
+        XCTAssertEqual(
+            try database.agentTask(intentID: intent.id)?.waitingReason,
+            .networkConfirmation
+        )
+        XCTAssertTrue(viewModel.canResumeProviderTask)
+        XCTAssertEqual(viewModel.providerTaskResumeTitle, "确认发送")
+
+        viewModel.handleScenePhase(.inactive)
+        viewModel.handleScenePhase(.active)
+        XCTAssertEqual(generation.callCount, 0)
+        XCTAssertEqual(
+            try database.agentTask(intentID: intent.id)?.waitingReason,
+            .networkConfirmation
+        )
+
+        let restored = AppViewModel(
+            database: database,
+            modelCredentialRepository: credentials,
+            providerGenerationService: generation,
+            networkAvailabilityObserver: TestNetworkAvailabilityObserver(
+                state: .available
+            ),
+            taskID: UUID(),
+            draftAutosaveDelayNanoseconds: UInt64.max
+        )
+        XCTAssertEqual(generation.callCount, 0)
+        XCTAssertTrue(restored.canResumeProviderTask)
+        XCTAssertEqual(restored.providerTaskResumeTitle, "确认发送")
+
+        restored.resumeProviderTask()
+        await restored.waitForProviderRunToSettle()
+
+        XCTAssertEqual(generation.callCount, 1)
+        XCTAssertEqual(
+            try database.providerRequest(intentID: intent.id)?.phase,
+            .continuationCommitted
+        )
+    }
+
     func testSecondConversationQueuesAndRunsAfterTheFirstCompletes() async throws {
         let database = try AppDatabase(path: temporaryDatabasePath())
         let credentials = RecordingCredentialRepository()
@@ -119,11 +218,12 @@ final class AppViewModelProviderRunTests: XCTestCase {
         try await waitUntil { generation.callCount == 1 }
 
         viewModel.startNewS1Conversation()
+        XCTAssertNil(viewModel.selectedConversationID)
+        viewModel.draft = "再处理第二段讨论"
+        viewModel.sendModelDependentMessage()
         let secondConversationID = try XCTUnwrap(
             viewModel.selectedConversationID
         )
-        viewModel.draft = "再处理第二段讨论"
-        viewModel.sendModelDependentMessage()
         let secondIntent = try XCTUnwrap(
             viewModel.modelConnectionSetup.pendingIntent
         )
@@ -239,7 +339,7 @@ final class AppViewModelProviderRunTests: XCTestCase {
         XCTAssertEqual(viewModel.latestAgentRun?.status, .reconciling)
         XCTAssertEqual(
             viewModel.displayedBusinessStatus,
-            "本地安全对账已完成，这次请求的结果仍不能确认"
+            "正在确认刚才的请求是否已经停止"
         )
     }
 
@@ -323,7 +423,163 @@ final class AppViewModelProviderRunTests: XCTestCase {
         XCTAssertFalse(viewModel.isProviderRunActive)
         XCTAssertEqual(
             viewModel.displayedBusinessStatus,
-            "本地安全对账已完成，这次请求的结果仍不能确认"
+            "正在核对上次请求的真实结果"
+        )
+    }
+
+    func testRelaunchReconcilesANonCurrentConversationWithoutResending() throws {
+        let database = try AppDatabase(path: temporaryDatabasePath())
+        let credentials = RecordingCredentialRepository()
+        let now = Date(timeIntervalSince1970: 9_500)
+        let firstConversation = try database.ensureDefaultConversation(now: now)
+        _ = try database.selectS1Conversation(firstConversation.id, now: now)
+        let intent = try PendingModelIntent(
+            id: UUID(),
+            conversationID: firstConversation.id,
+            projectID: nil,
+            branchID: nil,
+            userRequest: "恢复非当前对话且不要重发",
+            createdAt: now
+        )
+        _ = try database.storePendingModelIntent(intent)
+        let connection = try ModelConnectionTestFixture.makeConnection(
+            provider: .openAI,
+            baseURL: URL(string: "https://api.openai.com/v1")!,
+            credentialID: UUID(),
+            selectedModel: "fixture-model",
+            secret: "fixture-secret"
+        )
+        _ = try database.storeModelConnection(
+            connection,
+            makeCurrent: true,
+            now: now
+        )
+        credentials.credentialPayloadHash = hash("b")
+        try credentials.save(
+            "fixture-secret",
+            versionProof: hash("a"),
+            setupAuthorizationHash: nil,
+            for: connection
+        )
+        let verified = try XCTUnwrap(
+            credentials.verifiedConnection(for: connection)
+        )
+        let prepared = try ProviderAgentRunCoordinator.makePreparedRequest(
+            intent: intent,
+            verifiedConnection: verified,
+            now: now
+        )
+        _ = try database.persistPreparedProviderRequest(
+            prepared,
+            intent: intent,
+            verifiedConnection: verified
+        )
+        try database.updateProviderRequest(
+            try ProviderRequestLifecycle.markSending(
+                prepared,
+                now: now.addingTimeInterval(1)
+            )
+        )
+        _ = try database.selectNewS1Conversation(
+            now: now.addingTimeInterval(2)
+        )
+        let second = try database.appendS1WorkspacePreviewTurn(
+            selectedConversationID: nil,
+            turn: S1ConversationPreview.makeTurn(from: "这是另一段当前对话"),
+            now: now.addingTimeInterval(3)
+        ).conversation
+        let generation = AppViewModelProviderGenerationService(events: [])
+
+        let viewModel = AppViewModel(
+            database: database,
+            modelCredentialRepository: credentials,
+            providerGenerationService: generation,
+            taskID: UUID(),
+            draftAutosaveDelayNanoseconds: UInt64.max
+        )
+
+        XCTAssertEqual(viewModel.selectedConversationID, second.id)
+        XCTAssertEqual(generation.callCount, 0)
+        XCTAssertEqual(
+            try database.providerRequest(intentID: intent.id)?.phase,
+            .outcomeUnknown
+        )
+        XCTAssertEqual(
+            try database.agentTask(intentID: intent.id)?.status,
+            .reconciling
+        )
+    }
+
+    func testPreparedRequestWithMissingExactCredentialWaitsAsConnectionInvalid() throws {
+        let database = try AppDatabase(path: temporaryDatabasePath())
+        let credentials = RecordingCredentialRepository()
+        let now = Date(timeIntervalSince1970: 9_750)
+        let conversation = try database.ensureDefaultConversation(now: now)
+        _ = try database.selectS1Conversation(conversation.id, now: now)
+        let intent = try PendingModelIntent(
+            id: UUID(),
+            conversationID: conversation.id,
+            projectID: nil,
+            branchID: nil,
+            userRequest: "原连接失效后保留请求",
+            createdAt: now
+        )
+        _ = try database.storePendingModelIntent(intent)
+        let connection = try ModelConnectionTestFixture.makeConnection(
+            provider: .openAI,
+            baseURL: URL(string: "https://api.openai.com/v1")!,
+            credentialID: UUID(),
+            selectedModel: "fixture-model",
+            secret: "fixture-secret"
+        )
+        _ = try database.storeModelConnection(
+            connection,
+            makeCurrent: true,
+            now: now
+        )
+        credentials.credentialPayloadHash = hash("b")
+        try credentials.save(
+            "fixture-secret",
+            versionProof: hash("a"),
+            setupAuthorizationHash: nil,
+            for: connection
+        )
+        let verified = try XCTUnwrap(
+            credentials.verifiedConnection(for: connection)
+        )
+        _ = try database.persistPreparedProviderRequest(
+            ProviderAgentRunCoordinator.makePreparedRequest(
+                intent: intent,
+                verifiedConnection: verified,
+                now: now
+            ),
+            intent: intent,
+            verifiedConnection: verified
+        )
+        try credentials.delete(for: connection)
+        let generation = AppViewModelProviderGenerationService(events: [])
+
+        let viewModel = AppViewModel(
+            database: database,
+            modelCredentialRepository: credentials,
+            providerGenerationService: generation,
+            taskID: UUID(),
+            draftAutosaveDelayNanoseconds: UInt64.max
+        )
+
+        let waiting = try XCTUnwrap(
+            database.agentTask(intentID: intent.id)
+        )
+        XCTAssertEqual(waiting.status, .waitingUser)
+        XCTAssertEqual(waiting.waitingReason, .connectionInvalid)
+        XCTAssertEqual(generation.callCount, 0)
+        XCTAssertEqual(
+            viewModel.providerTaskProjection?.recoveryState,
+            .connectionInvalid
+        )
+        XCTAssertEqual(
+            viewModel.providerTaskProjection?.recoveryText,
+            "连接失效：原请求已保留，等待你修复连接"
         )
     }
 
@@ -557,5 +813,32 @@ private final class FIFOAppViewModelProviderGenerationService:
         )
         firstContinuation?.finish()
         firstContinuation = nil
+    }
+}
+
+@MainActor
+private final class TestNetworkAvailabilityObserver:
+    NetworkAvailabilityObserving
+{
+    private(set) var state: NetworkAvailabilityState
+    private var handler: ((NetworkAvailabilityState) -> Void)?
+
+    init(state: NetworkAvailabilityState) {
+        self.state = state
+    }
+
+    func start(
+        _ handler: @escaping (NetworkAvailabilityState) -> Void
+    ) {
+        self.handler = handler
+    }
+
+    func stop() {
+        handler = nil
+    }
+
+    func update(_ state: NetworkAvailabilityState) {
+        self.state = state
+        handler?(state)
     }
 }

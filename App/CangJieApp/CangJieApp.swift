@@ -16,6 +16,7 @@ struct CangJieApp: App {
 
         _model = StateObject(
             wrappedValue: AppViewModel(
+                networkAvailabilityObserver: NetworkPathAvailabilityObserver(),
                 bundleIdentityLoader: MainBundleBuildIdentityLoader()
             )
         )

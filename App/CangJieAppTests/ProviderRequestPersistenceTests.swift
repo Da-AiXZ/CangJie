@@ -312,6 +312,15 @@ final class ProviderRequestPersistenceTests: XCTestCase {
             now: retryFixture.now.addingTimeInterval(1)
         )
         try retryFixture.database.updateProviderRequest(failed)
+        let failedTask = try XCTUnwrap(
+            retryFixture.database.agentTask(intentID: retryFixture.intent.id)
+        )
+        _ = try retryFixture.database.retryFailedAgentTask(
+            id: failedTask.id,
+            expectedRevision: failedTask.revision,
+            commandID: UUID(),
+            now: retryFixture.now.addingTimeInterval(1.5)
+        )
         let retry = try makeRequest(
             intent: retryFixture.intent,
             verifiedConnection: retryFixture.verifiedConnection,
@@ -371,12 +380,18 @@ final class ProviderRequestPersistenceTests: XCTestCase {
                 verifiedConnection: unknownFixture.verifiedConnection
             )
         ) { error in
-            XCTAssertEqual(
-                error as? AppDatabaseError,
-                .invalidProviderRequest
-            )
-        }
-    }
+              XCTAssertEqual(
+                  error as? AppDatabaseError,
+                  .invalidAgentTask
+              )
+          }
+          XCTAssertEqual(
+              try unknownFixture.database.providerRequest(
+                  intentID: unknownFixture.intent.id
+              ),
+              unknown
+          )
+      }
 
     func testToolResultContinuationReusesRunAndAdvancesLinearTurn() throws {
         let fixture = try makeFixture()

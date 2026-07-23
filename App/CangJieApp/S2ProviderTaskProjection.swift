@@ -52,7 +52,7 @@ struct S2ProviderTaskProjection: Equatable {
         case .stopRequested:
             return "正在结束并保留已有内容"
         case .waitingUser:
-            return "这件事正在等待你的确认"
+            return waitingDoingText
         case .completed where task.outcome == .kept:
             return "这件事已经结束，已有内容已保留"
         case .discarded:
@@ -91,10 +91,12 @@ struct S2ProviderTaskProjection: Equatable {
         case .paused:
             return "你可以恢复、结束并保留，或放弃未采用内容"
         case .waitingUser:
-            return "确认后才会发送新的模型请求"
-        case .completed, .discarded, .failed:
+            return task.waitingReason == .networkConfirmation
+                ? "网络恢复后由你确认发送"
+                : "修复原模型连接后再继续"
+        case .discarded, .failed:
             return "可以回到对话安排下一件事"
-        case .running:
+        case .running, .completed:
             break
         }
         switch request.phase {
@@ -118,7 +120,9 @@ struct S2ProviderTaskProjection: Equatable {
         case .paused:
             return "请选择恢复、保留结束或放弃未采用内容"
         case .waitingUser:
-            return "需要你确认是否发送"
+            return task.waitingReason == .networkConfirmation
+                ? "需要你确认是否发送"
+                : "需要你修复或重新选择原模型连接"
         case .completed, .discarded:
             return "目前不需要你操作"
         case .failed:
@@ -198,6 +202,38 @@ struct S2ProviderTaskProjection: Equatable {
         }
     }
 
+    var recoveryState: AgentTaskRecoveryState? {
+        if request.phase == .failed,
+           request.failure == .authentication {
+            return .connectionInvalid
+        }
+        guard let state = try? AgentTaskControlState(
+            status: task.status,
+            outcome: task.outcome,
+            waitingReason: task.waitingReason
+        ) else {
+            return nil
+        }
+        return state.recoveryState
+    }
+
+    var recoveryText: String? {
+        switch recoveryState {
+        case .completed:
+            return "已完成：结果和真实记录已经安全保存"
+        case .paused:
+            return "已安全暂停：可以从上次保存位置恢复"
+        case .failed:
+            return "明确失败：原请求已保留，不会自动重试"
+        case .outcomeUnknown:
+            return "结果未知：正在按原请求身份安全对账"
+        case .connectionInvalid:
+            return "连接失效：原请求已保留，等待你修复连接"
+        case nil:
+            return nil
+        }
+    }
+
     private var completedResultText: String {
         guard let receipt else { return "这件事已经处理完成" }
         switch receipt.toolID {
@@ -233,7 +269,9 @@ struct S2ProviderTaskProjection: Equatable {
         case .stopRequested:
             return "正在结束并保留已有内容"
         case .waitingUser:
-            return "这件事正在等待你的确认"
+            return task.waitingReason == .networkConfirmation
+                ? "这条请求已经保存，尚未发送"
+                : "原模型连接已经失效，这条请求仍然保留"
         case .completed where task.outcome == .kept:
             return "这件事已经结束，已有内容已保留"
         case .discarded:
@@ -254,6 +292,12 @@ struct S2ProviderTaskProjection: Equatable {
         case nil:
             return "正在核对上次请求的真实结果"
         }
+    }
+
+    private var waitingDoingText: String {
+        task.waitingReason == .networkConfirmation
+            ? "这条请求已经保存，尚未发送"
+            : "这件事在等待原模型连接恢复"
     }
 }
 

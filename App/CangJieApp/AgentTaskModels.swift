@@ -14,6 +14,7 @@ struct AgentTaskSnapshot: Identifiable, Equatable {
     let branchID: UUID?
     let status: AgentTaskStatus
     let outcome: AgentTaskOutcome?
+    let waitingReason: AgentTaskWaitingReason?
     let requestedControl: AgentTaskRequestedControl?
     let revision: Int
     let queueOrdinal: Int64

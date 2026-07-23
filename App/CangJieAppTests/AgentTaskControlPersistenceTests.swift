@@ -274,6 +274,110 @@ final class AgentTaskControlPersistenceTests: XCTestCase {
         )
     }
 
+    func testWaitingReasonPersistsAndParticipatesInCommandReplay() throws {
+        let database = try AppDatabase(path: temporaryDatabasePath())
+        let now = Date(timeIntervalSince1970: 10_500)
+        let intent = try makeIntent(
+            in: database,
+            request: "离线等待确认",
+            now: now
+        )
+        let running = try database.enqueueAgentTask(
+            for: intent,
+            commandID: UUID(),
+            now: now.addingTimeInterval(1)
+        )
+        let commandID = UUID()
+        let waiting = try database.transitionAgentTask(
+            id: running.id,
+            expectedRevision: running.revision,
+            commandID: commandID,
+            to: .waitingUser,
+            waitingReason: .networkConfirmation,
+            now: now.addingTimeInterval(2)
+        ).task
+
+        XCTAssertEqual(waiting.waitingReason, .networkConfirmation)
+        XCTAssertEqual(
+            try database.agentTask(id: running.id)?.waitingReason,
+            .networkConfirmation
+        )
+        XCTAssertEqual(
+            try database.transitionAgentTask(
+                id: running.id,
+                expectedRevision: running.revision,
+                commandID: commandID,
+                to: .waitingUser,
+                waitingReason: .networkConfirmation,
+                now: now.addingTimeInterval(3)
+            ).task,
+            waiting
+        )
+        XCTAssertThrowsError(
+            try database.transitionAgentTask(
+                id: running.id,
+                expectedRevision: running.revision,
+                commandID: commandID,
+                to: .waitingUser,
+                waitingReason: .connectionInvalid,
+                now: now.addingTimeInterval(4)
+            )
+        ) { error in
+            XCTAssertEqual(
+                error as? AppDatabaseError,
+                .idempotencyConflict
+            )
+        }
+    }
+
+    func testDatabaseRejectsWaitingStatusWithoutAnExactReason() throws {
+        let database = try AppDatabase(path: temporaryDatabasePath())
+        let now = Date(timeIntervalSince1970: 10_750)
+        let running = try database.enqueueAgentTask(
+            for: makeIntent(
+                in: database,
+                request: "拒绝无原因等待状态",
+                now: now
+            ),
+            commandID: UUID(),
+            now: now.addingTimeInterval(1)
+        )
+
+        XCTAssertThrowsError(
+            try database.queue.write { db in
+                try db.execute(
+                    sql: """
+                        UPDATE agentTask
+                        SET status = 'waitingUser'
+                        WHERE id = ?
+                        """,
+                    arguments: [running.id.uuidString]
+                )
+            }
+        )
+
+        let waiting = try database.transitionAgentTask(
+            id: running.id,
+            expectedRevision: running.revision,
+            commandID: UUID(),
+            to: .waitingUser,
+            waitingReason: .connectionInvalid,
+            now: now.addingTimeInterval(2)
+        ).task
+        XCTAssertThrowsError(
+            try database.queue.write { db in
+                try db.execute(
+                    sql: """
+                        UPDATE agentTask
+                        SET waitingReason = NULL
+                        WHERE id = ?
+                        """,
+                    arguments: [waiting.id.uuidString]
+                )
+            }
+        )
+    }
+
     func testRetryJoinsQueueTailAndReplaysItsHistoricalResult() throws {
         let database = try AppDatabase(path: temporaryDatabasePath())
         let now = Date(timeIntervalSince1970: 11_000)
@@ -356,6 +460,7 @@ final class AgentTaskControlPersistenceTests: XCTestCase {
     ) throws -> PendingModelIntent {
         let conversation: AgentConversation
         if newConversation {
+            _ = try database.selectNewS1Conversation(now: now)
             conversation = try database.appendS1WorkspacePreviewTurn(
                 selectedConversationID: nil,
                 turn: S1ConversationPreview.makeTurn(from: request),

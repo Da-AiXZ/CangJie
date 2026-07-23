@@ -114,6 +114,98 @@ final class AgentTaskControlContractTests: XCTestCase {
         )
     }
 
+    func testWaitingForNetworkRequiresExplicitConfirmationBeforeRunning() throws {
+        let machine = AgentTaskControlMachine()
+        let waiting = try machine.transition(
+            try AgentTaskControlState(status: .running),
+            to: .waitingUser,
+            waitingReason: .networkConfirmation
+        )
+
+        XCTAssertEqual(waiting.status, .waitingUser)
+        XCTAssertEqual(waiting.waitingReason, .networkConfirmation)
+
+        let resumed = try machine.transition(waiting, to: .running)
+        XCTAssertEqual(resumed.status, .running)
+        XCTAssertNil(resumed.waitingReason)
+    }
+
+    func testWaitingReasonDistinguishesNetworkFromInvalidConnection() throws {
+        let machine = AgentTaskControlMachine()
+        let running = try AgentTaskControlState(status: .running)
+
+        XCTAssertNotEqual(
+            try machine.transition(
+                running,
+                to: .waitingUser,
+                waitingReason: .networkConfirmation
+            ),
+            try machine.transition(
+                running,
+                to: .waitingUser,
+                waitingReason: .connectionInvalid
+            )
+        )
+    }
+
+    func testWaitingReasonFailsClosedWhenMissingOrAttachedToAnotherStatus() {
+        XCTAssertThrowsError(
+            try AgentTaskControlState(status: .waitingUser)
+        ) { error in
+            XCTAssertEqual(
+                error as? AgentTaskControlError,
+                .invalidWaitingReason(status: .waitingUser, reason: nil)
+            )
+        }
+        XCTAssertThrowsError(
+            try AgentTaskControlState(
+                status: .running,
+                waitingReason: .networkConfirmation
+            )
+        ) { error in
+            XCTAssertEqual(
+                error as? AgentTaskControlError,
+                .invalidWaitingReason(
+                    status: .running,
+                    reason: .networkConfirmation
+                )
+            )
+        }
+    }
+
+    func testRecoveryProjectionHasExactlyFiveTruthfulStates() throws {
+        let cases: [(AgentTaskControlState, AgentTaskRecoveryState)] = [
+            (
+                try AgentTaskControlState(
+                    status: .completed,
+                    outcome: .natural
+                ),
+                .completed
+            ),
+            (try AgentTaskControlState(status: .paused), .paused),
+            (try AgentTaskControlState(status: .failed), .failed),
+            (try AgentTaskControlState(status: .reconciling), .outcomeUnknown),
+            (
+                try AgentTaskControlState(
+                    status: .waitingUser,
+                    waitingReason: .connectionInvalid
+                ),
+                .connectionInvalid
+            )
+        ]
+
+        for (state, expected) in cases {
+            XCTAssertEqual(state.recoveryState, expected)
+        }
+        XCTAssertNil(
+            try AgentTaskControlState(
+                status: .waitingUser,
+                waitingReason: .networkConfirmation
+            ).recoveryState
+        )
+        XCTAssertEqual(Set(cases.map(\.1)), Set(AgentTaskRecoveryState.allCases))
+    }
+
     func testInvalidStatusOutcomePairFailsAtDecodeBoundary() {
         let data = Data(#"{"status":"running","outcome":"kept"}"#.utf8)
 

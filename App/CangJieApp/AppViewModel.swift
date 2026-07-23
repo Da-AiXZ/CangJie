@@ -88,6 +88,7 @@ final class AppViewModel: ObservableObject {
     @Published private(set) var providerStreamText = ""
     @Published private(set) var canCancelProviderRun = false
     @Published private(set) var providerTaskProjection: S2ProviderTaskProjection?
+    @Published private(set) var networkAvailabilityState: NetworkAvailabilityState
     private(set) var providerRunStartBlocker: ProviderRunStartBlocker?
     private(set) var providerRunFailureDescription: String?
     private(set) var providerRecoveryFailureDescription: String?
@@ -152,11 +153,20 @@ final class AppViewModel: ObservableObject {
             && providerRunTask != nil
     }
     var canResumeProviderTask: Bool {
-        guard let status = providerTaskProjection?.task.status else {
+        guard let task = providerTaskProjection?.task else {
             return false
         }
-        return (status == .paused || status == .waitingUser)
-            && providerRunTask == nil
+        guard task.status == .paused || task.status == .waitingUser,
+              providerRunTask == nil else {
+            return false
+        }
+        return task.waitingReason != .networkConfirmation
+            || networkAvailabilityState == .available
+    }
+    var providerTaskResumeTitle: String {
+        providerTaskProjection?.task.waitingReason == .networkConfirmation
+            ? "确认发送"
+            : "恢复这件事"
     }
     var canStopAndKeepProviderTask: Bool {
         guard let status = providerTaskProjection?.task.status else {
@@ -190,6 +200,7 @@ final class AppViewModel: ObservableObject {
     private let bundleIdentityLoader: any BundleBuildIdentityLoading
     private let executionAuthorizer: BuildActivationAgentAuthorizer
     private let providerRunCoordinator: ProviderAgentRunCoordinator?
+    private let networkAvailabilityObserver: any NetworkAvailabilityObserving
     private let taskID: UUID
     private var streamTask: Task<Void, Never>?
     private var streamGeneration: UUID?
@@ -214,6 +225,8 @@ final class AppViewModel: ObservableObject {
         modelDiscoveryClient: any ModelDiscoveryServing = ModelDiscoveryNetworkClient(),
         providerGenerationService: any ProviderGenerationServing =
             ProviderGenerationNetworkClient(),
+        networkAvailabilityObserver: any NetworkAvailabilityObserving =
+            AssumedAvailableNetworkAvailabilityObserver(),
         isolationCanaryRepository: any IsolationCanaryRepository = KeychainIsolationCanaryRepository(),
         bundleInfo: [String: Any]? = BuildIdentityStamp.generated.infoDictionary,
         compiledBuildStamp: BuildIdentityStamp = .generated,
@@ -227,6 +240,8 @@ final class AppViewModel: ObservableObject {
             ?? KeychainModelCredentialRepository(secrets: keychain)
         self.modelCredentials = resolvedModelCredentialRepository
         self.isolationCanaryRepository = isolationCanaryRepository
+        self.networkAvailabilityObserver = networkAvailabilityObserver
+        networkAvailabilityState = networkAvailabilityObserver.state
         self.buildActivationStore = buildActivationStore
         self.compiledBuildStamp = compiledBuildStamp
         self.draftAutosaveDelayNanoseconds = draftAutosaveDelayNanoseconds
@@ -371,7 +386,7 @@ final class AppViewModel: ObservableObject {
         if let databaseError = databaseState.error {
             errorMessagesByDomain[.persistent] = databaseError
         }
-        reconcileInterruptedProviderRequestAtLaunch()
+        reconcileInterruptedProviderRequestsAtLaunch()
         refreshProviderTaskProjection(publishFailure: true)
 
         if buildIdentity.isAgentExecutionAllowed {
@@ -407,12 +422,18 @@ final class AppViewModel: ObservableObject {
             refreshIsolationCanary(publishSuccess: false)
         }
         modelConnectionSetup.setResumeDecisionHandler { [weak self] decision in
-            self?.resumeProviderRequest(decision)
+            self?.resumeProviderRequestFromConnectionDecision(decision)
         }
         if let decision = modelConnectionSetup.resumeDecision {
-            resumeProviderRequest(decision)
+            resumeProviderRequest(
+                decision,
+                waitsForNetworkCheck: true
+            )
         }
         dispatchActiveProviderTaskIfPossible()
+        networkAvailabilityObserver.start { [weak self] state in
+            self?.handleNetworkAvailabilityChange(state)
+        }
     }
 
     func reloadProjects() {
@@ -765,7 +786,9 @@ final class AppViewModel: ObservableObject {
 
     private func resumeProviderRequest(
         _ decision: ModelRequestAdmissionDecision,
-        permitsTerminalRetry: Bool = false
+        permitsTerminalRetry: Bool = false,
+        permitsWaitingUserResume: Bool = false,
+        waitsForNetworkCheck: Bool = false
     ) {
         providerRunStartBlocker = nil
         guard case let .prepareProviderRequest(intent, verifiedConnection) = decision else {
@@ -789,8 +812,26 @@ final class AppViewModel: ObservableObject {
                 intent: intent,
                 verifiedConnection: verifiedConnection
             )
-            let taskWasWaitingUser = task.status == .waitingUser
-            if taskWasWaitingUser {
+            if task.status == .queued {
+                refreshProviderTaskProjection(publishFailure: true)
+                businessStatus = "这件事已经排队，等待前一件主要任务结束"
+                return
+            }
+            let resumedWaitingUser = task.status == .waitingUser
+            if task.status == .waitingUser {
+                guard permitsWaitingUserResume else {
+                    refreshProviderTaskProjection(publishFailure: true)
+                    businessStatus = task.waitingReason == .networkConfirmation
+                        ? "网络已恢复，确认后才会发送这条请求"
+                        : "这件事在等待原模型连接恢复"
+                    return
+                }
+                guard task.waitingReason != .networkConfirmation
+                        || networkAvailabilityState == .available else {
+                    refreshProviderTaskProjection(publishFailure: true)
+                    businessStatus = "当前没有网络，这条请求仍未发送"
+                    return
+                }
                 task = try database.transitionAgentTask(
                     id: task.id,
                     expectedRevision: task.revision,
@@ -798,11 +839,26 @@ final class AppViewModel: ObservableObject {
                     to: .running
                 ).task
             }
-            refreshProviderTaskProjection(publishFailure: true)
-            if task.status == .queued {
-                businessStatus = "这件事已经排队，等待前一件主要任务结束"
+            if task.status == .running,
+               networkAvailabilityState != .available {
+                if networkAvailabilityState == .checking,
+                   waitsForNetworkCheck {
+                    refreshProviderTaskProjection(publishFailure: true)
+                    businessStatus = "正在确认网络状态，这条请求尚未发送"
+                    return
+                }
+                task = try database.transitionAgentTask(
+                    id: task.id,
+                    expectedRevision: task.revision,
+                    commandID: UUID(),
+                    to: .waitingUser,
+                    waitingReason: .networkConfirmation
+                ).task
+                refreshProviderTaskProjection(publishFailure: true)
+                businessStatus = "当前没有网络，这条请求已经保存，联网后需要你确认发送"
                 return
             }
+            refreshProviderTaskProjection(publishFailure: true)
             guard activeProviderIntentID == nil else {
                 if activeProviderIntentID == intent.id,
                    providerRunTask != nil {
@@ -832,7 +888,7 @@ final class AppViewModel: ObservableObject {
                     providerRunStartBlocker = .reconciliationRequired
                     return
                 case .terminal:
-                    guard permitsTerminalRetry || taskWasWaitingUser else {
+                    guard permitsTerminalRetry || resumedWaitingUser else {
                         businessStatus = "上次请求已经结束，请明确重试后再继续"
                         providerRunStartBlocker = .explicitRetryRequired
                         return
@@ -907,6 +963,26 @@ final class AppViewModel: ObservableObject {
                 )
             }
         }
+    }
+
+    private func resumeProviderRequestFromConnectionDecision(
+        _ decision: ModelRequestAdmissionDecision
+    ) {
+        guard case let .prepareProviderRequest(intent, _) = decision else {
+            resumeProviderRequest(decision)
+            return
+        }
+        let waitingReason: AgentTaskWaitingReason?
+        if let database,
+           let task = try? database.agentTask(intentID: intent.id) {
+            waitingReason = task.waitingReason
+        } else {
+            waitingReason = nil
+        }
+        resumeProviderRequest(
+            decision,
+            permitsWaitingUserResume: waitingReason == .connectionInvalid
+        )
     }
 
     private func applyProviderRunProjection(
@@ -1031,7 +1107,9 @@ final class AppViewModel: ObservableObject {
         dispatchActiveProviderTaskIfPossible()
     }
 
-    private func dispatchActiveProviderTaskIfPossible() {
+    private func dispatchActiveProviderTaskIfPossible(
+        permitsWaitingUserResume: Bool = false
+    ) {
         guard activeProviderIntentID == nil,
               providerRunTask == nil,
               lifecyclePermitsMutations,
@@ -1050,6 +1128,19 @@ final class AppViewModel: ObservableObject {
                   ) else {
                 return
             }
+            if task.status == .waitingUser && !permitsWaitingUserResume {
+                refreshProviderTaskProjection(publishFailure: true)
+                businessStatus = task.waitingReason == .networkConfirmation
+                    ? "这条请求已经保存，网络恢复后需要你确认发送"
+                    : "这件事在等待原模型连接恢复"
+                return
+            }
+            if task.status == .running,
+               networkAvailabilityState == .checking {
+                refreshProviderTaskProjection(publishFailure: true)
+                businessStatus = "正在确认网络状态，这条请求尚未发送"
+                return
+            }
             guard let stored = try database.listModelConnections().first(
                 where: {
                     $0.connection.id == request.identity.connectionID
@@ -1062,7 +1153,16 @@ final class AppViewModel: ObservableObject {
                         id: task.id,
                         expectedRevision: task.revision,
                         commandID: UUID(),
-                        to: .waitingUser
+                        to: .waitingUser,
+                        waitingReason: .connectionInvalid
+                    )
+                } else if task.waitingReason != .connectionInvalid {
+                    _ = try database.transitionAgentTask(
+                        id: task.id,
+                        expectedRevision: task.revision,
+                        commandID: UUID(),
+                        to: .waitingUser,
+                        waitingReason: .connectionInvalid
                     )
                 }
                 refreshProviderTaskProjection(publishFailure: true)
@@ -1072,10 +1172,40 @@ final class AppViewModel: ObservableObject {
             resumeProviderRequest(
                 ModelRequestAdmission.resume(intent, with: verified),
                 permitsTerminalRetry: request.phase == .failed
-                    || request.phase == .cancelled
+                    || request.phase == .cancelled,
+                permitsWaitingUserResume: permitsWaitingUserResume
             )
         } catch {
             publishError("排队任务暂时无法安全继续（S2-TASK-DISPATCH）")
+        }
+    }
+
+    private func handleNetworkAvailabilityChange(
+        _ state: NetworkAvailabilityState
+    ) {
+        networkAvailabilityState = state
+        refreshProviderTaskProjection(publishFailure: false)
+        guard providerTaskProjection?.task.waitingReason
+                == .networkConfirmation else {
+            switch state {
+            case .available, .unavailable:
+                dispatchActiveProviderTaskIfPossible()
+            case .checking:
+                break
+            }
+            if state == .unavailable {
+                publishTransientNotice(
+                    kind: .network,
+                    message: "网络已断开；本地内容仍可使用"
+                )
+            }
+            return
+        }
+        switch state {
+        case .available:
+            businessStatus = "网络已恢复，确认后才会发送这条请求"
+        case .checking, .unavailable:
+            businessStatus = "当前没有网络，这条请求仍未发送"
         }
     }
 
@@ -1127,12 +1257,9 @@ final class AppViewModel: ObservableObject {
                 )
             }
             refreshProviderTaskProjection(publishFailure: true)
-            modelConnectionSetup.restorePendingIntent(for: task.conversationID)
-            guard let decision = modelConnectionSetup.resumeDecision else {
-                businessStatus = "任务已经恢复，等待可用的模型连接"
-                return
-            }
-            resumeProviderRequest(decision, permitsTerminalRetry: true)
+            dispatchActiveProviderTaskIfPossible(
+                permitsWaitingUserResume: true
+            )
         } catch {
             publishError("这件事暂时无法恢复（S2-TASK-RESUME）")
         }
@@ -1329,27 +1456,28 @@ final class AppViewModel: ObservableObject {
         }
     }
 
-    private func reconcileInterruptedProviderRequestAtLaunch() {
-        guard let database, let selectedConversationID else {
+    private func reconcileInterruptedProviderRequestsAtLaunch() {
+        guard let database else {
             return
         }
         providerRecoveryFailureDescription = nil
         do {
-            guard let intent = try database.latestPendingModelIntent(
-                conversationID: selectedConversationID
-            ), let request = try database.providerRequest(intentID: intent.id),
-                  ProviderRequestRecovery.nextAction(for: request)
-                    == .reconcileUnknownOutcome else {
-                return
+            var reconciledSelectedConversation = false
+            for request in try database.providerRequestsRequiringReconciliation() {
+                let reconciled = try ProviderRequestReconciler(
+                    database: database
+                ).reconcile(request)
+                if reconciled.identity.conversationID == selectedConversationID {
+                    latestAgentRun = try database.agentRun(
+                        id: reconciled.identity.runID,
+                        conversationID: reconciled.identity.conversationID
+                    )
+                    reconciledSelectedConversation = true
+                }
             }
-            let reconciled = try ProviderRequestReconciler(
-                database: database
-            ).reconcile(request)
-            latestAgentRun = try database.agentRun(
-                id: reconciled.identity.runID,
-                conversationID: reconciled.identity.conversationID
-            )
-            businessStatus = "本地安全对账已完成，这次请求的结果仍不能确认"
+            if reconciledSelectedConversation {
+                businessStatus = "本地安全对账已完成，这次请求的结果仍不能确认"
+            }
         } catch {
             providerRecoveryFailureDescription = Self.providerDiagnosticCode(for: error)
             publishError("模型请求恢复失败（S2-PROVIDER-RESTORE）", domain: .composer)
@@ -1606,9 +1734,7 @@ final class AppViewModel: ObservableObject {
                 restoreRuntimeProjection()
             }
             modelConnectionSetup.restorePendingIntent(for: selectedConversationID)
-            if modelConnectionSetup.resumeDecision == nil {
-                reconcileInterruptedProviderRequestAtLaunch()
-            }
+            reconcileInterruptedProviderRequestsAtLaunch()
             dispatchActiveProviderTaskIfPossible()
             refreshProbeState(publishSuccess: false)
             refreshIsolationCanary(publishSuccess: false)

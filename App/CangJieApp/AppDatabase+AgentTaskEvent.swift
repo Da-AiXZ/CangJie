@@ -9,6 +9,7 @@ extension AppDatabase {
         expectedRevision: Int,
         status: AgentTaskStatus,
         outcome: AgentTaskOutcome?,
+        waitingReason: AgentTaskWaitingReason? = nil,
         hasAdoptedOutput: Bool,
         in db: Database
     ) throws -> AgentTaskTransitionResult {
@@ -16,12 +17,14 @@ extension AppDatabase {
         let storedExpectedRevision: Int = event["expectedRevision"]
         let storedStatus: String = event["toStatus"]
         let storedOutcome: String? = event["toOutcome"]
+        let storedWaitingReason: String? = event["toWaitingReason"]
         let storedRequestedControlText: String? = event["toRequestedControl"]
         let storedAdoption: Bool = event["hasAdoptedOutput"]
         guard storedTaskID == taskID.uuidString,
               storedExpectedRevision == expectedRevision,
               storedStatus == status.rawValue,
               storedOutcome == outcome?.rawValue,
+              storedWaitingReason == waitingReason?.rawValue,
               storedAdoption == hasAdoptedOutput else {
             throw AppDatabaseError.idempotencyConflict
         }
@@ -49,6 +52,15 @@ extension AppDatabase {
               ) else {
             throw AppDatabaseError.invalidAgentTask
         }
+        do {
+            _ = try AgentTaskControlState(
+                status: status,
+                outcome: outcome,
+                waitingReason: waitingReason
+            )
+        } catch {
+            throw AppDatabaseError.invalidAgentTask
+        }
         let result = AgentTaskSnapshot(
             id: current.id,
             intentID: current.intentID,
@@ -57,6 +69,7 @@ extension AppDatabase {
             branchID: current.branchID,
             status: status,
             outcome: outcome,
+            waitingReason: waitingReason,
             requestedControl: resultRequestedControl,
             revision: resultRevision,
             queueOrdinal: resultQueueOrdinal,
@@ -94,6 +107,7 @@ extension AppDatabase {
                 branchID: promotedCurrent.branchID,
                 status: .running,
                 outcome: nil,
+                waitingReason: nil,
                 requestedControl: nil,
                 revision: promotedRevision,
                 queueOrdinal: promotedQueueOrdinal,
@@ -132,13 +146,18 @@ extension AppDatabase {
             sql: """
                 INSERT INTO agentTaskEvent (
                     commandID, taskID, expectedRevision, resultRevision,
-                    fromStatus, fromOutcome, fromRequestedControl,
-                    toStatus, toOutcome, toRequestedControl,
+                    fromStatus, fromOutcome, fromWaitingReason,
+                    fromRequestedControl,
+                    toStatus, toOutcome, toWaitingReason,
+                    toRequestedControl,
                     hasAdoptedOutput, resultActiveRunID, resultQueueOrdinal,
                     promotedTaskID,
                     promotedRevision, promotedQueueOrdinal,
                     promotedActiveRunID, promotedUpdatedAt, createdAt
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (
+                    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                    ?, ?, ?
+                )
                 """,
             arguments: [
                 commandID.uuidString,
@@ -147,9 +166,11 @@ extension AppDatabase {
                 expectedRevision + 1,
                 from?.status.rawValue,
                 from?.outcome?.rawValue,
+                from?.waitingReason?.rawValue,
                 fromRequestedControl?.rawValue,
                 to.status.rawValue,
                 to.outcome?.rawValue,
+                to.waitingReason?.rawValue,
                 toRequestedControl?.rawValue,
                 hasAdoptedOutput,
                 resultActiveRunID?.uuidString,

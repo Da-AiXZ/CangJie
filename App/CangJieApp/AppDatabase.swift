@@ -1697,6 +1697,9 @@ final class AppDatabase {
         migrator.registerMigration("s2-agent-task-control-v1") { db in
             try Self.migrateAgentTaskControl(db)
         }
+        migrator.registerMigration("s2-agent-task-waiting-reason-v2") { db in
+            try Self.migrateAgentTaskWaitingReason(db)
+        }
         return migrator
     }
 }

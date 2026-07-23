@@ -258,6 +258,12 @@ private struct S1TasksPage: View {
                         Text(projection.needsUserText)
                             .accessibilityIdentifier("ai-task-needs-user")
                     }
+                    if let recoveryText = projection.recoveryText {
+                        Section("恢复结果") {
+                            Text(recoveryText)
+                                .accessibilityIdentifier("ai-task-recovery-state")
+                        }
+                    }
                     Section("真实记录") {
                         if let usageText = projection.usageText {
                             Text(usageText)
@@ -285,7 +291,7 @@ private struct S1TasksPage: View {
                                 .accessibilityIdentifier("ai-task-pause-button")
                             }
                             if model.canResumeProviderTask {
-                                Button("恢复这件事") {
+                                Button(model.providerTaskResumeTitle) {
                                     model.resumeProviderTask()
                                 }
                                 .accessibilityIdentifier("ai-task-resume-button")
@@ -1282,6 +1288,20 @@ struct ContentView: View {
                 .padding(.horizontal)
                 .padding(.bottom, 8)
                 .accessibilityIdentifier("provider-run-retry")
+            }
+            if model.canResumeProviderTask {
+                Button {
+                    model.resumeProviderTask()
+                } label: {
+                    Label(
+                        model.providerTaskResumeTitle,
+                        systemImage: "play.circle"
+                    )
+                }
+                .buttonStyle(.bordered)
+                .padding(.horizontal)
+                .padding(.bottom, 8)
+                .accessibilityIdentifier("provider-task-resume")
             }
             HStack(alignment: .bottom) {
                     ZStack(alignment: .topLeading) {
