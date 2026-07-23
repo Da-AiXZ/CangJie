@@ -757,9 +757,7 @@ final class CangJieSmokeUITests: XCTestCase {
         )
 
         XCUIDevice.shared.press(.home)
-        XCTAssertTrue(
-            app.wait(for: .runningBackgroundSuspended, timeout: 5)
-        )
+        assertEventuallyEntersBackground(app)
         relaunchWithoutFixturePreservingDatabaseScope(app)
         XCTAssertTrue(
             app.descendants(matching: .any)["workspace-landscape-columns"]
@@ -1567,6 +1565,31 @@ final class CangJieSmokeUITests: XCTestCase {
             XCTWaiter.wait(for: [expectation], timeout: timeout),
             .completed,
             "Expected label \(expectedLabel), got \(element.label)",
+            file: file,
+            line: line
+        )
+    }
+
+    private func assertEventuallyEntersBackground(
+        _ app: XCUIApplication,
+        timeout: TimeInterval = 5,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        let expectation = XCTNSPredicateExpectation(
+            predicate: NSPredicate { object, _ in
+                guard let application = object as? XCUIApplication else {
+                    return false
+                }
+                return application.state == .runningBackground
+                    || application.state == .runningBackgroundSuspended
+            },
+            object: app
+        )
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [expectation], timeout: timeout),
+            .completed,
+            "Expected the app to enter background, got \(app.state)",
             file: file,
             line: line
         )
