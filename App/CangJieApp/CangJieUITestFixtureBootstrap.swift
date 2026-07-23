@@ -101,7 +101,7 @@ enum CangJieUITestFixtureBootstrap {
     ) throws {
         try requireFreshFixtureScope(in: database)
         let secret = String(repeating: "x", count: 32)
-        let candidate = try ModelDiscoveryAttempt.makeUITestSetupCandidate(
+        let candidate = try CangJieUITestModelConnectionFixture.makeSetupCandidate(
             name: "S2 UI fixture",
             modelID: "gpt-s2-fixture",
             secret: secret
@@ -987,4 +987,5 @@ private final class CangJieUITestProviderGenerationService:
         }
     }
 }
+
 #endif

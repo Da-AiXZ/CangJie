@@ -33,6 +33,7 @@ PRIVILEGED_CORE_IMPORT_BLOCK = re.compile(
 SPI_NAME = re.compile(
     rf"@_spi[ \t]*\([ \t]*(?P<name>{SWIFT_IDENTIFIER})[ \t]*\)")
 EXPECTED_SPI_IMPORTS = {
+    "App/CangJieApp/CangJieUITestModelConnectionFixture.swift": frozenset({"ModelDiscoveryTransport"}),
     "App/CangJieApp/ModelCredentialRepository.swift": frozenset({"ModelCredentialVerification"}),
     "App/CangJieApp/ModelDiscoveryAttempt.swift": frozenset({"ModelDiscoveryCredentialBinding"}),
     "App/CangJieApp/ModelDiscoveryNetworkClient.swift": frozenset({"ModelDiscoveryTransport"}),
