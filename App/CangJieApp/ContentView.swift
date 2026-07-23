@@ -463,6 +463,19 @@ struct ContentView: View {
                 displayedContentHash: review.contentHash
             )
         }
+        .alert(
+            "任务完成时通知你？",
+            isPresented: $model.isAgentNotificationConsentPresented
+        ) {
+            Button("允许通知") {
+                model.allowAgentTaskNotifications()
+            }
+            Button("暂不", role: .cancel) {
+                model.declineAgentTaskNotifications()
+            }
+        } message: {
+            Text("长任务完成、暂停或需要你确认时，仓颉可以在你离开 App 后提醒你。")
+        }
     }
 
     @ViewBuilder

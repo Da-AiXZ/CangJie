@@ -89,6 +89,7 @@ final class AppViewModel: ObservableObject {
     @Published private(set) var canCancelProviderRun = false
     @Published private(set) var providerTaskProjection: S2ProviderTaskProjection?
     @Published private(set) var networkAvailabilityState: NetworkAvailabilityState
+    @Published var isAgentNotificationConsentPresented = false
     private(set) var providerRunStartBlocker: ProviderRunStartBlocker?
     private(set) var providerRunFailureDescription: String?
     private(set) var providerRecoveryFailureDescription: String?
@@ -201,6 +202,8 @@ final class AppViewModel: ObservableObject {
     private let executionAuthorizer: BuildActivationAgentAuthorizer
     private let providerRunCoordinator: ProviderAgentRunCoordinator?
     private let networkAvailabilityObserver: any NetworkAvailabilityObserving
+    private let agentTaskNotifications: any AgentTaskNotificationScheduling
+    private let notificationConsentStore: any AgentTaskNotificationConsentStoring
     private let taskID: UUID
     private var streamTask: Task<Void, Never>?
     private var streamGeneration: UUID?
@@ -225,8 +228,9 @@ final class AppViewModel: ObservableObject {
         modelDiscoveryClient: any ModelDiscoveryServing = ModelDiscoveryNetworkClient(),
         providerGenerationService: any ProviderGenerationServing =
             ProviderGenerationNetworkClient(),
-        networkAvailabilityObserver: any NetworkAvailabilityObserving =
-            AssumedAvailableNetworkAvailabilityObserver(),
+        networkAvailabilityObserver: (any NetworkAvailabilityObserving)? = nil,
+        agentTaskNotifications: (any AgentTaskNotificationScheduling)? = nil,
+        notificationConsentStore: (any AgentTaskNotificationConsentStoring)? = nil,
         isolationCanaryRepository: any IsolationCanaryRepository = KeychainIsolationCanaryRepository(),
         bundleInfo: [String: Any]? = BuildIdentityStamp.generated.infoDictionary,
         compiledBuildStamp: BuildIdentityStamp = .generated,
@@ -240,8 +244,14 @@ final class AppViewModel: ObservableObject {
             ?? KeychainModelCredentialRepository(secrets: keychain)
         self.modelCredentials = resolvedModelCredentialRepository
         self.isolationCanaryRepository = isolationCanaryRepository
-        self.networkAvailabilityObserver = networkAvailabilityObserver
-        networkAvailabilityState = networkAvailabilityObserver.state
+        let resolvedNetworkAvailabilityObserver = networkAvailabilityObserver
+            ?? AssumedAvailableNetworkAvailabilityObserver()
+        self.networkAvailabilityObserver = resolvedNetworkAvailabilityObserver
+        networkAvailabilityState = resolvedNetworkAvailabilityObserver.state
+        self.agentTaskNotifications = agentTaskNotifications
+            ?? UserNotificationAgentTaskScheduler()
+        self.notificationConsentStore = notificationConsentStore
+            ?? UserDefaultsAgentTaskNotificationConsentStore()
         self.buildActivationStore = buildActivationStore
         self.compiledBuildStamp = compiledBuildStamp
         self.draftAutosaveDelayNanoseconds = draftAutosaveDelayNanoseconds
@@ -856,6 +866,10 @@ final class AppViewModel: ObservableObject {
                 ).task
                 refreshProviderTaskProjection(publishFailure: true)
                 businessStatus = "当前没有网络，这条请求已经保存，联网后需要你确认发送"
+                scheduleAgentTaskNotification(
+                    .waitingUser,
+                    intentID: intent.id
+                )
                 return
             }
             refreshProviderTaskProjection(publishFailure: true)
@@ -937,6 +951,7 @@ final class AppViewModel: ObservableObject {
         canCancelProviderRun = true
         isAgentWorking = true
         businessStatus = "正在通过当前模型连接处理这件事"
+        offerAgentTaskNotificationsIfNeeded()
         providerRunTask = Task { @MainActor [weak self] in
             guard let self else { return }
             do {
@@ -1044,6 +1059,7 @@ final class AppViewModel: ObservableObject {
         } catch {
             publishError("模型结果已完成，但界面恢复失败（S2-PROVIDER-PROJECT）")
         }
+        scheduleAgentTaskNotification(.completed, intentID: intentID)
         let activeTaskID: UUID?
         if let database,
            let task = try? database.activeAgentTask() {
@@ -1086,6 +1102,7 @@ final class AppViewModel: ObservableObject {
             )
         }
         refreshProviderTaskProjection(publishFailure: false)
+        scheduleAgentTaskNotificationForCurrentState(intentID: intentID)
         if let providerError = error as? ProviderAgentRunError {
             switch providerError {
             case .queued:
@@ -1167,6 +1184,10 @@ final class AppViewModel: ObservableObject {
                 }
                 refreshProviderTaskProjection(publishFailure: true)
                 businessStatus = "这件事在等待原模型连接恢复"
+                scheduleAgentTaskNotification(
+                    .waitingUser,
+                    intentID: task.intentID
+                )
                 return
             }
             resumeProviderRequest(
@@ -1209,6 +1230,22 @@ final class AppViewModel: ObservableObject {
         }
     }
 
+    func allowAgentTaskNotifications() {
+        guard isAgentNotificationConsentPresented else { return }
+        isAgentNotificationConsentPresented = false
+        notificationConsentStore.setDecision(.allowed)
+        let notifications = agentTaskNotifications
+        Task { @MainActor in
+            _ = try? await notifications.requestAuthorization()
+        }
+    }
+
+    func declineAgentTaskNotifications() {
+        guard isAgentNotificationConsentPresented else { return }
+        isAgentNotificationConsentPresented = false
+        notificationConsentStore.setDecision(.declined)
+    }
+
     func cancelProviderRun() {
         pauseProviderTask()
     }
@@ -1235,6 +1272,9 @@ final class AppViewModel: ObservableObject {
                     intentID: task.intentID
                 )
                 refreshProviderTaskProjection(publishFailure: true)
+                scheduleAgentTaskNotificationForCurrentState(
+                    intentID: task.intentID
+                )
             }
         } catch {
             publishError("这件事暂时无法安全暂停（S2-TASK-PAUSE）")
@@ -1290,6 +1330,9 @@ final class AppViewModel: ObservableObject {
                     for: task.conversationID
                 )
                 refreshProviderTaskProjection(publishFailure: true)
+                scheduleAgentTaskNotificationForCurrentState(
+                    intentID: task.intentID
+                )
                 dispatchActiveProviderTaskIfPossible()
             }
         } catch {
@@ -1492,6 +1535,54 @@ final class AppViewModel: ObservableObject {
             return String(describing: databaseError)
         }
         return String(reflecting: type(of: error))
+    }
+
+    private func offerAgentTaskNotificationsIfNeeded() {
+        guard notificationConsentStore.decision == .undecided,
+              !isAgentNotificationConsentPresented else {
+            return
+        }
+        isAgentNotificationConsentPresented = true
+    }
+
+    private func scheduleAgentTaskNotificationForCurrentState(
+        intentID: UUID
+    ) {
+        guard let database,
+              let task = try? database.agentTask(intentID: intentID) else {
+            return
+        }
+        let kind: AgentTaskNotificationKind?
+        switch task.status {
+        case .completed:
+            kind = .completed
+        case .paused:
+            kind = .paused
+        case .failed:
+            kind = .failed
+        case .waitingUser, .reconciling:
+            kind = .waitingUser
+        case .queued, .running, .pauseRequested, .stopRequested, .discarded:
+            kind = nil
+        }
+        guard let kind else { return }
+        scheduleAgentTaskNotification(kind, intentID: intentID)
+    }
+
+    private func scheduleAgentTaskNotification(
+        _ kind: AgentTaskNotificationKind,
+        intentID: UUID
+    ) {
+        guard notificationConsentStore.decision == .allowed,
+              let database,
+              let task = try? database.agentTask(intentID: intentID) else {
+            return
+        }
+        let request = AgentTaskNotificationRequest(task: task, kind: kind)
+        let notifications = agentTaskNotifications
+        Task { @MainActor in
+            try? await notifications.schedule(request)
+        }
     }
 
     private func refreshS1NovelProgress() {
