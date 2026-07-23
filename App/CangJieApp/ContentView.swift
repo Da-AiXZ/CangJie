@@ -1339,7 +1339,6 @@ struct ContentView: View {
                 }
                 .frame(height: 32)
                 .padding(.horizontal)
-                .accessibilityIdentifier("ui-test-network-controls")
             }
             #endif
             HStack(alignment: .bottom) {
