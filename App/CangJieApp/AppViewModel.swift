@@ -1339,6 +1339,10 @@ final class AppViewModel: ObservableObject {
             } else {
                 restoreRuntimeProjection()
             }
+            modelConnectionSetup.restorePendingIntent(for: selectedConversationID)
+            if modelConnectionSetup.resumeDecision == nil {
+                reconcileInterruptedProviderRequestAtLaunch()
+            }
             refreshProbeState(publishSuccess: false)
             refreshIsolationCanary(publishSuccess: false)
         @unknown default:
