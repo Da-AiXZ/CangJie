@@ -21,10 +21,10 @@ Stable product requirements belong in `IMPLEMENTATION_PLAN.md`; architecture bel
 
 Active repair scope: S1 regressions and the S2 Provider runtime.
 
-The previously accepted device baseline remains historical evidence. The current
-worktree changes S1 interaction and S2 runtime behavior and is not an accepted
-candidate until its exact commit passes Apple CI and device validation. S2 is not
-complete.
+The previously accepted device baseline remains historical evidence. Exact commit
+`7c6b059b3841be6709fb760affed522ec387000f` passes Core and iPadOS CI, but it is
+not an accepted candidate until candidate construction and device validation.
+S2 is not complete.
 
 S2 must prove this exact vertical loop:
 
@@ -48,12 +48,25 @@ Formal prose generation is outside S2.
 
 | Area | Decision | Implementation | Automation | Device |
 |---|---|---|---|---|
-| S1 cockpit and workspace | Frozen | Main workspace, durable conversation, paging and queue UI exist; current scroll retention, Dynamic Type and accessibility repairs await Apple verification | Core contracts passed locally | Current exact SHA pending |
-| Provider/credential/discovery | Frozen | Credential binding and supported-provider gating are implemented | Core and Python contracts passed locally | Current exact SHA pending |
-| Real Provider generation | Frozen boundary | Durable request/usage and strict finish semantics implemented; stream checkpointing is throttled but coordinator remains MainActor | Windows parse only for App | Current exact SHA pending |
-| Typed Tool and ToolReceipt | Frozen boundary | One authorized tool batch plus no-tool final turn; create premise and read disclosure are host-gated; switch/save remain unadvertised | App tests added, not yet run on Apple | Current exact SHA pending |
-| Task control and recovery | Frozen boundary | Explicit retry, responseComplete local continuation, unknown-outcome non-retry and terminal turn limit are implemented | App tests added, not yet run on Apple | Current exact SHA pending |
+| S1 cockpit and workspace | Frozen | Main workspace, durable conversation, paging and queue UI exist; persistent-center interaction and accessibility repairs are implemented | Exact-SHA App and UI suites passed | Dynamic Type, VoiceOver, rotation/navigation and scroll retention pending |
+| Provider/credential/discovery | Frozen | Credential binding and supported-provider gating are implemented | Exact-SHA Core, App and Keychain probe passed | Real connection setup pending |
+| Real Provider generation | Frozen boundary | Durable request/usage and strict finish semantics implemented; stream checkpointing is throttled but coordinator remains MainActor | Deterministic Provider App/UI contracts passed | Real Provider streaming pending |
+| Typed Tool and ToolReceipt | Frozen boundary | One authorized tool batch plus no-tool final turn; create premise and read disclosure are host-gated; switch/save remain unadvertised | Exact-SHA App and UI contracts passed | Real Provider tool lifecycle pending |
+| Task control and recovery | Frozen boundary | Explicit retry, responseComplete local continuation, unknown-outcome non-retry and terminal turn limit are implemented | Exact-SHA App and UI lifecycle suites passed | Lock, force-quit and notification checks pending |
 | Budget governance | Frozen requirement | Per-request output cap and at-most-two automatic Provider turns only | No persisted token/cost/time approval loop | Incomplete |
+
+## Current exact-SHA automation
+
+- Commit: `7c6b059b3841be6709fb760affed522ec387000f`
+- Core CI: `30093994570` passed.
+- iPadOS CI: `30093994501` passed.
+- App XCTest: 423 passed; XCUITest: 22 passed; Keychain isolation probe: 13 passed.
+- Local Core: 174 XCTest and 15 Swift Testing passed with 92.35% line coverage.
+- Python build/import/candidate contracts: 9 scripts passed.
+
+This proves the checked-in contracts and deterministic fixtures. It does not prove
+a real paid Provider response, device VoiceOver focus, physical lifecycle behavior
+or candidate identity.
 
 ## Last accepted device baseline
 
@@ -78,18 +91,16 @@ device status.
 
 ## Active blocker
 
-The current repair has no exact-SHA Apple semantic compile, App XCTest or XCUITest
-result. After those gates, S1 still needs Dynamic Type, rotation/navigation and
-scroll-retention device checks. S2 additionally lacks a persisted cumulative
-token/cost/time budget approval loop and still needs the complete real Provider /
-Typed Tool lifecycle on device.
+S1 still needs Dynamic Type, VoiceOver, rotation/navigation and scroll-retention
+device checks. S2 lacks a persisted cumulative token/cost/time budget approval
+loop and still needs the complete real Provider / Typed Tool lifecycle on device.
 
 ## Immediate queue
 
-1. Commit the audited repair and run exact-SHA Core and iPadOS CI.
-2. Fix the first causal Apple compile/XCTest/XCUITest defect, if any, without weakening gates.
-3. Add the persisted cumulative budget and approval loop before claiming S2 budget safety.
-4. Build a new candidate only after exact-SHA automation is green, then run the physical-device differential script.
+1. Add the persisted cumulative budget and approval loop before claiming S2 budget safety.
+2. Rerun the exact-SHA Core and iPadOS gates for that budget boundary.
+3. Build a new candidate only after those gates are green.
+4. Run the physical-device differential script, including real Provider, VoiceOver and lifecycle checks.
 
 ## Stable decision routing
 
