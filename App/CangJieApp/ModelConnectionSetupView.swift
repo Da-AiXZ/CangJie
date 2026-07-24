@@ -148,7 +148,7 @@ struct ModelConnectionSetupCard: View {
 
     private func providerButton(_ connector: ProviderConnector) -> some View {
         let isAvailable = setup.canUseForGeneration(connector.provider)
-        Button {
+        return Button {
             setup.selectProvider(connector.provider)
         } label: {
             HStack {
