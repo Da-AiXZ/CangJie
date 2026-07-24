@@ -341,6 +341,10 @@ final class S1CockpitViewModelTests: XCTestCase {
             let conversation = try database.ensureDefaultConversation(
                 now: Date(timeIntervalSince1970: 1_000)
             )
+            _ = try database.selectS1Conversation(
+                conversation.id,
+                now: Date(timeIntervalSince1970: 1_000)
+            )
             var storedMessages: [AgentMessage] = []
             for index in 1...240 {
                 storedMessages.append(

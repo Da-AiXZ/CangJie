@@ -1261,7 +1261,9 @@ final class AppViewModel: ObservableObject {
         isAgentWorking = false
         if let database {
             _ = try? database.settleAgentTaskControlAfterProviderExit(
-                intentID: intentID
+                intentID: intentID,
+                preservePreparedIfUnsent:
+                    error as? ProviderAgentRunError == .cancelled
             )
         }
         if let database,

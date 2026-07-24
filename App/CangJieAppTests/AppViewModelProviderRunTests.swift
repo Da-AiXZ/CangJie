@@ -265,6 +265,7 @@ final class AppViewModelProviderRunTests: XCTestCase {
             database.providerRequest(intentID: intent.id)
         )
         XCTAssertEqual(completed.phase, .continuationCommitted)
+        XCTAssertEqual(completed.identity.requestID, suspended.identity.requestID)
         XCTAssertEqual(completed.identity.attemptNumber, 1)
         XCTAssertEqual(generation.callCount, 1)
     }
@@ -890,7 +891,7 @@ final class AppViewModelProviderRunTests: XCTestCase {
         )
         XCTAssertEqual(
             viewModel.providerTaskProjection?.recoveryText,
-            "连接失效：原请求已保留，等待你修复连接"
+            "连接失效：原请求已保留，等待你重新建立或选择连接"
         )
     }
 

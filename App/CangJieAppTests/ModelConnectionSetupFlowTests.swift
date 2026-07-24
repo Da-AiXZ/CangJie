@@ -352,7 +352,7 @@ final class ModelConnectionSetupFlowTests: XCTestCase, ModelConnectionSetupServi
         let candidate = try ModelConnectionTestFixture.makeSetupCandidate(
             name: "旧 Anthropic 连接",
             provider: .anthropic,
-            baseURL: URL(string: "https://api.anthropic.com/v1")!,
+            baseURL: URL(string: "https://api.anthropic.com")!,
             selectedModel: "claude-fixture",
             secret: "unsupported-provider-secret"
         )

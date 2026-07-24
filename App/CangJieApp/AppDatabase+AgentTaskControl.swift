@@ -325,6 +325,7 @@ extension AppDatabase {
 
     func settleAgentTaskControlAfterProviderExit(
         intentID: UUID,
+        preservePreparedIfUnsent: Bool = false,
         now: Date = Date()
     ) throws -> AgentTaskSnapshot? {
         let timestamp = try Self.canonicalAgentTaskTimestamp(now)
@@ -351,6 +352,9 @@ extension AppDatabase {
             }
             let request = try Self.decodeProviderRequest(requestRow)
             switch request.phase {
+            case .prepared
+                where preservePreparedIfUnsent && task.status == .running:
+                break
             case .prepared:
                 let cancelled = try ProviderRequestLifecycle.cancel(
                     request,

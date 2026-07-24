@@ -5,6 +5,67 @@ import XCTest
 @testable import CangJie
 
 final class ProviderRequestPersistenceTests: XCTestCase {
+    func testCancelledRunPreservesPreparedRequestWhenItWasNeverSent() throws {
+        let fixture = try makeFixture()
+        let prepared = try fixture.database.persistPreparedProviderRequest(
+            fixture.request,
+            verifiedConnection: fixture.verifiedConnection
+        )
+        let running = try XCTUnwrap(
+            fixture.database.agentTask(intentID: fixture.intent.id)
+        )
+
+        let settled = try fixture.database.settleAgentTaskControlAfterProviderExit(
+            intentID: fixture.intent.id,
+            preservePreparedIfUnsent: true,
+            now: fixture.now.addingTimeInterval(1)
+        )
+
+        XCTAssertEqual(settled, running)
+        XCTAssertEqual(
+            try fixture.database.providerRequest(id: prepared.identity.requestID),
+            prepared
+        )
+        XCTAssertEqual(
+            try fixture.database.agentRun(
+                id: prepared.identity.runID,
+                conversationID: prepared.identity.conversationID
+            )?.currentStage,
+            "provider.prepared"
+        )
+    }
+
+    func testPreparedRequestStillSettlesAnExplicitPause() throws {
+        let fixture = try makeFixture()
+        let prepared = try fixture.database.persistPreparedProviderRequest(
+            fixture.request,
+            verifiedConnection: fixture.verifiedConnection
+        )
+        let running = try XCTUnwrap(
+            fixture.database.agentTask(intentID: fixture.intent.id)
+        )
+        let pauseRequested = try fixture.database.transitionAgentTask(
+            id: running.id,
+            expectedRevision: running.revision,
+            commandID: UUID(),
+            to: .pauseRequested,
+            now: fixture.now.addingTimeInterval(1)
+        ).task
+
+        let settled = try fixture.database.settleAgentTaskControlAfterProviderExit(
+            intentID: fixture.intent.id,
+            preservePreparedIfUnsent: true,
+            now: fixture.now.addingTimeInterval(2)
+        )
+
+        XCTAssertEqual(settled?.status, .paused)
+        XCTAssertEqual(settled?.revision, pauseRequested.revision + 1)
+        XCTAssertEqual(
+            try fixture.database.providerRequest(id: prepared.identity.requestID)?.phase,
+            .cancelled
+        )
+    }
+
     func testCompletedResponseRequiresFinishReasonMatchingToolShape() throws {
         let call = ProviderToolCallPayload(
             index: 0,
@@ -636,7 +697,23 @@ final class ProviderRequestPersistenceTests: XCTestCase {
             now: fixture.now.addingTimeInterval(1)
         )
         try fixture.database.updateProviderRequest(sending)
-        let payloadJSON = #"{"finishReason":"tool_calls","text":"","toolCalls":[{"index":0,"id":"call-1","name":"project_create","argumentsJSON":"{\"premise\":\"悬疑小说\",\"title\":\"星河\"}"}]}"#
+        let payload = ProviderResponsePayload(
+            text: "",
+            toolCalls: [
+                ProviderToolCallPayload(
+                    index: 0,
+                    id: "call-1",
+                    name: "project_create",
+                    argumentsJSON: #"{"premise":"悬疑小说","title":"星河"}"#
+                )
+            ],
+            finishReason: "tool_calls"
+        )
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
+        let payloadJSON = try XCTUnwrap(
+            String(data: try encoder.encode(payload), encoding: .utf8)
+        )
         let streaming = try ProviderRequestLifecycle.checkpointStream(
             sending,
             cursor: 1,
