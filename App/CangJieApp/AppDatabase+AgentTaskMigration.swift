@@ -317,10 +317,12 @@ extension AppDatabase {
         )
     }
 
-    private static func replacePendingIntentConsumptionGuard(
+    static func replacePendingIntentConsumptionGuard(
         in db: Database
     ) throws {
-        try db.execute(sql: "DROP TRIGGER pendingModelIntent_consumption_guard")
+        try db.execute(
+            sql: "DROP TRIGGER IF EXISTS pendingModelIntent_consumption_guard"
+        )
         try db.execute(sql: """
             CREATE TRIGGER pendingModelIntent_consumption_guard
             BEFORE UPDATE OF consumedAt, continuationRequestID,

@@ -284,7 +284,7 @@ final class ModelConnectionMigrationTests: XCTestCase {
             }
             let database = try AppDatabase(path: path)
 
-            let state = try database.queue.write { db -> (String, String, Int, Int, Int, String) in
+            let state = try database.queue.write { db -> (String, String, Int, Int, Int, String, String) in
                 try db.execute(
                     sql: "UPDATE providerRequest SET phase = 'terminated' WHERE id = ?",
                     arguments: [legacy.request.identity.requestID.uuidString]
@@ -326,13 +326,22 @@ final class ModelConnectionMigrationTests: XCTestCase {
                         WHERE "from" = 'previousRequestID'
                         """
                 ) ?? ""
+                let consumptionTriggerSQL = try String.fetchOne(
+                    db,
+                    sql: """
+                        SELECT sql FROM sqlite_master
+                        WHERE type = 'trigger'
+                          AND name = 'pendingModelIntent_consumption_guard'
+                        """
+                ) ?? ""
                 return (
                     tableSQL,
                     triggerSQL,
                     migrationCount,
                     foreignKeyViolations,
                     receiptCount,
-                    selfReferenceTable
+                    selfReferenceTable,
+                    consumptionTriggerSQL
                 )
             }
 
@@ -342,6 +351,8 @@ final class ModelConnectionMigrationTests: XCTestCase {
             XCTAssertEqual(state.3, 0)
             XCTAssertEqual(state.4, 1)
             XCTAssertEqual(state.5, "providerRequest")
+            XCTAssertTrue(state.6.contains("resolvedTaskID"))
+            XCTAssertTrue(state.6.contains("pending intent requires settled task"))
         }
     }
 

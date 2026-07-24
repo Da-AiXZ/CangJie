@@ -138,24 +138,7 @@ extension AppDatabase {
                 SELECT RAISE(ABORT, 'invalid provider request transition');
             END
             """)
-        try db.execute(sql: """
-            CREATE TRIGGER pendingModelIntent_consumption_guard
-            BEFORE UPDATE OF consumedAt, continuationRequestID
-            ON pendingModelIntent
-            WHEN OLD.consumedAt IS NULL
-              AND NEW.consumedAt IS NOT NULL
-              AND NOT EXISTS (
-                SELECT 1
-                FROM providerRequest AS request
-                WHERE request.id = NEW.continuationRequestID
-                  AND request.intentID = NEW.id
-                  AND request.conversationID = NEW.conversationID
-                  AND request.phase = 'continuationCommitted'
-              )
-            BEGIN
-                SELECT RAISE(ABORT, 'pending intent requires committed continuation');
-            END
-            """)
+        try replacePendingIntentConsumptionGuard(in: db)
         try db.execute(sql: """
             CREATE TRIGGER toolReceipt_provider_binding_guard
             BEFORE INSERT ON toolReceipt
