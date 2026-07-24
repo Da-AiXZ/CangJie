@@ -828,6 +828,27 @@ extension AppDatabase {
     }
 }
 
+extension AppDatabase {
+    static func providerBudgetElapsedMilliseconds(
+        startedAtEpoch: Double,
+        finishedAtEpoch: Double
+    ) throws -> Int64 {
+        guard startedAtEpoch.isFinite, finishedAtEpoch.isFinite else {
+            throw AppDatabaseError.invalidProviderBudget
+        }
+        let elapsedSeconds = finishedAtEpoch - startedAtEpoch
+        guard elapsedSeconds.isFinite else {
+            throw AppDatabaseError.invalidProviderBudget
+        }
+        let milliseconds = max(0, elapsedSeconds) * 1_000
+        guard milliseconds.isFinite,
+              milliseconds < Double(Int64.max) else {
+            throw AppDatabaseError.invalidProviderBudget
+        }
+        return Int64(milliseconds.rounded(.down))
+    }
+}
+
 private extension AppDatabase {
     struct StoredProviderBudgetApproval {
         let binding: BudgetApprovalBinding
@@ -1436,25 +1457,6 @@ private extension AppDatabase {
         let milliseconds = date.timeIntervalSince1970 * 1_000
         guard milliseconds.isFinite,
               milliseconds >= 0,
-              milliseconds < Double(Int64.max) else {
-            throw AppDatabaseError.invalidProviderBudget
-        }
-        return Int64(milliseconds.rounded(.down))
-    }
-
-    static func providerBudgetElapsedMilliseconds(
-        startedAtEpoch: Double,
-        finishedAtEpoch: Double
-    ) throws -> Int64 {
-        guard startedAtEpoch.isFinite, finishedAtEpoch.isFinite else {
-            throw AppDatabaseError.invalidProviderBudget
-        }
-        let elapsedSeconds = finishedAtEpoch - startedAtEpoch
-        guard elapsedSeconds.isFinite else {
-            throw AppDatabaseError.invalidProviderBudget
-        }
-        let milliseconds = max(0, elapsedSeconds) * 1_000
-        guard milliseconds.isFinite,
               milliseconds < Double(Int64.max) else {
             throw AppDatabaseError.invalidProviderBudget
         }
