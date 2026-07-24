@@ -13,6 +13,12 @@ extension AppDatabase {
             throw AppDatabaseError.invalidProviderRequest
         }
 
+        try db.execute(
+            sql: "DROP TRIGGER pendingModelIntent_consumption_guard"
+        )
+        try db.execute(
+            sql: "DROP TRIGGER toolReceipt_provider_binding_guard"
+        )
         try db.execute(sql: """
             CREATE TABLE providerRequest_v4 (
                 id TEXT PRIMARY KEY NOT NULL,
@@ -130,6 +136,48 @@ extension AppDatabase {
             )
             BEGIN
                 SELECT RAISE(ABORT, 'invalid provider request transition');
+            END
+            """)
+        try db.execute(sql: """
+            CREATE TRIGGER pendingModelIntent_consumption_guard
+            BEFORE UPDATE OF consumedAt, continuationRequestID
+            ON pendingModelIntent
+            WHEN OLD.consumedAt IS NULL
+              AND NEW.consumedAt IS NOT NULL
+              AND NOT EXISTS (
+                SELECT 1
+                FROM providerRequest AS request
+                WHERE request.id = NEW.continuationRequestID
+                  AND request.intentID = NEW.id
+                  AND request.conversationID = NEW.conversationID
+                  AND request.phase = 'continuationCommitted'
+              )
+            BEGIN
+                SELECT RAISE(ABORT, 'pending intent requires committed continuation');
+            END
+            """)
+        try db.execute(sql: """
+            CREATE TRIGGER toolReceipt_provider_binding_guard
+            BEFORE INSERT ON toolReceipt
+            WHEN NEW.providerRequestID IS NOT NULL
+              AND (
+                NEW.providerCallID IS NULL
+                OR length(NEW.providerCallID) = 0
+                OR NEW.providerCallIndex IS NULL
+                OR NEW.providerCallIndex < 0
+                OR NEW.providerCallIndex > 7
+                OR NEW.originRunID IS NULL
+                OR NEW.conversationID IS NULL
+                OR NOT EXISTS (
+                    SELECT 1 FROM providerRequest
+                    WHERE id = NEW.providerRequestID
+                      AND runID = NEW.originRunID
+                      AND conversationID = NEW.conversationID
+                      AND phase = 'responseComplete'
+                )
+              )
+            BEGIN
+                SELECT RAISE(ABORT, 'provider tool receipt binding mismatch');
             END
             """)
 
