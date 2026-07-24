@@ -284,7 +284,7 @@ final class ModelConnectionMigrationTests: XCTestCase {
             }
             let database = try AppDatabase(path: path)
 
-            let state = try database.queue.write { db -> (String, String, Int, Int, Int) in
+            let state = try database.queue.write { db -> (String, String, Int, Int, Int, String) in
                 try db.execute(
                     sql: "UPDATE providerRequest SET phase = 'terminated' WHERE id = ?",
                     arguments: [legacy.request.identity.requestID.uuidString]
@@ -318,12 +318,21 @@ final class ModelConnectionMigrationTests: XCTestCase {
                     sql: "SELECT COUNT(*) FROM toolReceipt WHERE id = ?",
                     arguments: [receiptID.uuidString]
                 ) ?? 0
+                let selfReferenceTable = try String.fetchOne(
+                    db,
+                    sql: """
+                        SELECT "table"
+                        FROM pragma_foreign_key_list('providerRequest')
+                        WHERE "from" = 'previousRequestID'
+                        """
+                ) ?? ""
                 return (
                     tableSQL,
                     triggerSQL,
                     migrationCount,
                     foreignKeyViolations,
-                    receiptCount
+                    receiptCount,
+                    selfReferenceTable
                 )
             }
 
@@ -332,6 +341,7 @@ final class ModelConnectionMigrationTests: XCTestCase {
             XCTAssertEqual(state.2, 1)
             XCTAssertEqual(state.3, 0)
             XCTAssertEqual(state.4, 1)
+            XCTAssertEqual(state.5, "providerRequest")
         }
     }
 

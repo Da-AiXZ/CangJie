@@ -38,7 +38,7 @@ extension AppDatabase {
                     turnSequence BETWEEN 1 AND 8
                 ),
                 previousRequestID TEXT
-                    REFERENCES providerRequest_v4(id) ON DELETE RESTRICT,
+                    REFERENCES providerRequest(id) ON DELETE RESTRICT,
                 connectionID TEXT NOT NULL
                     REFERENCES modelConnection(id) ON DELETE RESTRICT,
                 responseAssetID TEXT NOT NULL UNIQUE
