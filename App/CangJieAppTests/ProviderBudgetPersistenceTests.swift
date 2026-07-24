@@ -666,7 +666,7 @@ final class ProviderBudgetPersistenceTests: XCTestCase {
             try fixture.database.providerBudgetApproval(id: approval.id)?.status,
             .rejected
         )
-        XCTAssertNil(try fixture.database.pendingModelIntent(conversationID: fixture.intent.conversationID))
+        XCTAssertNil(try fixture.database.pendingModelIntent(id: fixture.intent.id))
     }
 
     func testApprovedRequestCanBeRejectedWhileWaitingForConnectionRecovery() throws {
