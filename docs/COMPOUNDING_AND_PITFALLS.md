@@ -130,7 +130,14 @@ A parent observing one `ObservableObject` does not automatically receive a child
 
 ### R-029 Accessibility modality needs structural proof
 
-Covered controls must leave the accessibility tree, especially UIKit-backed editors. Verify actual XCUITest queries and keyboard focus; modifier intent alone is not proof.
+Covered controls must release keyboard focus and become non-interactive to
+assistive input, especially UIKit-backed editors. A persistent SwiftUI or UIKit
+view may remain discoverable through its XCUITest automation identity even when
+it is hidden from assistive focus, so `exists == false` is not a valid proxy for
+VoiceOver isolation. Verify the modal surface, lost keyboard focus, non-hittable
+background controls and a unique selected page in XCUITest, then verify actual
+VoiceOver focus containment on device. Never destroy and recreate the persistent
+center conversation merely to remove its automation identity.
 
 ### R-030 Lifecycle persistence precedes suspension
 

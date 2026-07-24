@@ -588,18 +588,13 @@ struct ContentView: View {
                 .frame(width: conversationWidth, height: size.height)
                 .offset(x: conversationLeading)
                 .allowsHitTesting(selectedActivity == .conversation)
-                .accessibilityElement(
-                    children: selectedActivity == .conversation ? .contain : .ignore
-                )
+                .accessibilityElement(children: .contain)
                 .accessibilityIdentifier("landscape-conversation-region")
                 .accessibilityHidden(selectedActivity != .conversation)
 
             activityBar
                 .frame(width: activityWidth, height: size.height)
                 .allowsHitTesting(selectedActivity == .conversation)
-                .accessibilityElement(
-                    children: selectedActivity == .conversation ? .contain : .ignore
-                )
                 .accessibilityHidden(selectedActivity != .conversation)
 
             Color(uiColor: .separator)
@@ -611,9 +606,7 @@ struct ContentView: View {
                 .frame(width: railWidth, height: size.height)
                 .offset(x: activityWidth + dividerWidth)
                 .allowsHitTesting(selectedActivity == .conversation)
-                .accessibilityElement(
-                    children: selectedActivity == .conversation ? .contain : .ignore
-                )
+                .accessibilityElement(children: .contain)
                 .accessibilityIdentifier("landscape-conversation-rail")
                 .accessibilityHidden(selectedActivity != .conversation)
 
@@ -631,9 +624,7 @@ struct ContentView: View {
                     .frame(width: resultsWidth, height: size.height)
                     .offset(x: size.width - resultsWidth)
                     .allowsHitTesting(selectedActivity == .conversation)
-                    .accessibilityElement(
-                        children: selectedActivity == .conversation ? .contain : .ignore
-                    )
+                    .accessibilityElement(children: .contain)
                     .accessibilityIdentifier("landscape-results-region")
                     .accessibilityHidden(selectedActivity != .conversation)
             }
@@ -672,9 +663,7 @@ struct ContentView: View {
             .frame(width: readerWidth, height: size.height)
             .offset(x: mainLeading)
             .allowsHitTesting(selectedActivity == .conversation)
-            .accessibilityElement(
-                children: selectedActivity == .conversation ? .contain : .ignore
-            )
+            .accessibilityElement(children: .contain)
             .accessibilityIdentifier("landscape-reader-region")
             .accessibilityHidden(selectedActivity != .conversation)
 
@@ -687,17 +676,11 @@ struct ContentView: View {
                 .frame(width: companionWidth, height: size.height)
                 .offset(x: mainLeading + readerWidth + dividerWidth)
                 .allowsHitTesting(selectedActivity == .conversation)
-                .accessibilityElement(
-                    children: selectedActivity == .conversation ? .contain : .ignore
-                )
                 .accessibilityHidden(selectedActivity != .conversation)
 
             activityBar
                 .frame(width: activityWidth, height: size.height)
                 .allowsHitTesting(selectedActivity == .conversation)
-                .accessibilityElement(
-                    children: selectedActivity == .conversation ? .contain : .ignore
-                )
                 .accessibilityHidden(selectedActivity != .conversation)
 
             Color(uiColor: .separator)
@@ -709,9 +692,7 @@ struct ContentView: View {
                 .frame(width: railWidth, height: size.height)
                 .offset(x: activityWidth + dividerWidth)
                 .allowsHitTesting(selectedActivity == .conversation)
-                .accessibilityElement(
-                    children: selectedActivity == .conversation ? .contain : .ignore
-                )
+                .accessibilityElement(children: .contain)
                 .accessibilityIdentifier("landscape-conversation-rail")
                 .accessibilityHidden(selectedActivity != .conversation)
 
@@ -746,18 +727,14 @@ struct ContentView: View {
                 conversation
                     .opacity(model.isArtifactDrawerPresented ? 0 : 1)
                     .allowsHitTesting(!model.isArtifactDrawerPresented)
-                    .accessibilityElement(
-                        children: model.isArtifactDrawerPresented ? .ignore : .contain
-                    )
+                    .accessibilityElement(children: .contain)
                     .accessibilityIdentifier("reader-companion-conversation")
                     .accessibilityHidden(model.isArtifactDrawerPresented)
 
                 artifacts
                     .opacity(model.isArtifactDrawerPresented ? 1 : 0)
                     .allowsHitTesting(model.isArtifactDrawerPresented)
-                    .accessibilityElement(
-                        children: model.isArtifactDrawerPresented ? .contain : .ignore
-                    )
+                    .accessibilityElement(children: .contain)
                     .accessibilityIdentifier("reader-companion-results")
                     .accessibilityHidden(!model.isArtifactDrawerPresented)
             }
@@ -843,9 +820,7 @@ struct ContentView: View {
                 .offset(y: topBarHeight)
                 .opacity(showingConversation && !showingNavigation ? 1 : 0)
                 .allowsHitTesting(showingConversation && !showingNavigation)
-                .accessibilityElement(
-                    children: showingConversation && !showingNavigation ? .contain : .ignore
-                )
+                .accessibilityElement(children: .contain)
                 .accessibilityIdentifier("portrait-conversation-region")
                 .accessibilityHidden(!showingConversation || showingNavigation)
 
