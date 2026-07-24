@@ -389,6 +389,14 @@ struct ProviderGenerationNetworkClient: Sendable {
               prompt.isInitial == (request.identity.turnSequence == 1) else {
             throw ProviderGenerationError.invalidPreparedRequest
         }
+        guard let toolCatalogVersion = ProviderToolCatalogVersion.resolve(
+            manifestHash: request.toolCatalogManifestHash
+        ), let requestPolicyVersion = ProviderRequestPolicyVersion.resolve(
+            manifestHash: request.requestPolicyHash,
+            identity: request.identity
+        ) else {
+            throw ProviderGenerationError.invalidPreparedRequest
+        }
         do {
             try ModelCredentialSecretValidator.validate(secret)
         } catch {
@@ -397,14 +405,21 @@ struct ProviderGenerationNetworkClient: Sendable {
         let endpoint = try Self.endpoint(
             for: verifiedConnection.connection
         )
-        let body: [String: Any] = [
+        var body: [String: Any] = [
             "messages": try Self.messages(for: prompt),
             "model": verifiedConnection.connection.selectedModel,
             "stream": true,
-            "stream_options": ["include_usage": true],
-            "tool_choice": "auto",
-            "tools": Self.makeToolCatalog()
+            "stream_options": ["include_usage": true]
         ]
+        if prompt.allowsToolCalls {
+            body["tool_choice"] = "auto"
+            body["tools"] = Self.makeToolCatalog(version: toolCatalogVersion)
+        } else {
+            body["tool_choice"] = "none"
+        }
+        if let maximumOutputTokens = requestPolicyVersion.maximumOutputTokens {
+            body["max_tokens"] = maximumOutputTokens
+        }
         guard JSONSerialization.isValidJSONObject(body) else {
             throw ProviderGenerationError.invalidPreparedRequest
         }
@@ -713,8 +728,10 @@ struct ProviderGenerationNetworkClient: Sendable {
             && identity.setupAuthorizationHash == evidence.setupAuthorizationHash
     }
 
-    private static func makeToolCatalog() -> [[String: Any]] {
-        [[
+    private static func makeToolCatalog(
+        version: ProviderToolCatalogVersion
+    ) -> [[String: Any]] {
+        let tools: [[String: Any]] = [[
             "type": "function",
             "function": [
                 "name": "project_create",
@@ -724,8 +741,14 @@ struct ProviderGenerationNetworkClient: Sendable {
                     "additionalProperties": false,
                     "required": ["title", "premise"],
                     "properties": [
-                        "title": ["type": "string"],
-                        "premise": ["type": "string"]
+                        "title": [
+                            "type": "string",
+                            "description": "Copy the exact title authorized in the user's request; do not rewrite it."
+                        ],
+                        "premise": [
+                            "type": "string",
+                            "description": "Copy the exact premise authorized in the user's request; do not infer, expand, summarize, or rewrite it."
+                        ]
                     ]
                 ]
             ]
@@ -785,6 +808,13 @@ struct ProviderGenerationNetworkClient: Sendable {
                 ]
             ]
         ]]
+        return tools.filter { tool in
+            guard let function = tool["function"] as? [String: Any],
+                  let name = function["name"] as? String else {
+                return false
+            }
+            return version.allowedProviderFunctionNames.contains(name)
+        }
     }
 
     private static func yield(

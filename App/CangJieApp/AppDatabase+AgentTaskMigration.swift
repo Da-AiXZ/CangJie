@@ -274,6 +274,8 @@ extension AppDatabase {
                 status: .completed,
                 outcome: .natural
             )
+        case .terminated:
+            throw AppDatabaseError.invalidProviderRequest
         case .cancelled, .failed:
             return try AgentTaskControlState(status: .failed)
         }

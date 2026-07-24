@@ -143,6 +143,19 @@ final class ProviderRequestContractTests: XCTestCase {
             ProviderRequestRecovery.nextAction(for: committed),
             .terminal
         )
+
+        let terminated = try ProviderRequestLifecycle.terminateAfterResponse(
+            completed,
+            reason: .outputLimit,
+            now: streamedAt.addingTimeInterval(1)
+        )
+        XCTAssertEqual(terminated.phase, .terminated)
+        XCTAssertEqual(terminated.interruption, .outputLimit)
+        XCTAssertEqual(terminated.usage, completed.usage)
+        XCTAssertEqual(
+            ProviderRequestRecovery.nextAction(for: terminated),
+            .terminal
+        )
     }
 
     func testInterruptedSentRequestBecomesUnknownAndCannotBeSentAgain() throws {
@@ -167,6 +180,70 @@ final class ProviderRequestContractTests: XCTestCase {
                 now: streamedAt.addingTimeInterval(1)
             )
         )
+    }
+
+    func testObservedUsageSurvivesUnknownOutcome() throws {
+        let sending = try ProviderRequestLifecycle.markSending(
+            makePreparedRequest(),
+            now: sentAt
+        )
+        let usage = ProviderUsage(
+            inputTokens: 12,
+            outputTokens: 7,
+            totalTokens: 19
+        )
+        let streaming = try ProviderRequestLifecycle.checkpointStream(
+            sending,
+            cursor: 1,
+            receivedUTF8Bytes: 1,
+            responseHash: hash("d"),
+            observedUsage: usage,
+            now: streamedAt
+        )
+        let unknown = try ProviderRequestLifecycle.markOutcomeUnknown(
+            streaming,
+            reason: .network,
+            now: streamedAt.addingTimeInterval(1)
+        )
+
+        XCTAssertEqual(streaming.usage, usage)
+        XCTAssertEqual(unknown.usage, usage)
+        XCTAssertEqual(unknown.phase, .outcomeUnknown)
+    }
+
+    func testCompletionCannotOverwriteObservedUsage() throws {
+        let sending = try ProviderRequestLifecycle.markSending(
+            makePreparedRequest(),
+            now: sentAt
+        )
+        let observed = ProviderUsage(
+            inputTokens: 12,
+            outputTokens: 7,
+            totalTokens: 19
+        )
+        let streaming = try ProviderRequestLifecycle.checkpointStream(
+            sending,
+            cursor: 1,
+            receivedUTF8Bytes: 1,
+            responseHash: hash("d"),
+            observedUsage: observed,
+            now: streamedAt
+        )
+
+        XCTAssertThrowsError(
+            try ProviderRequestLifecycle.complete(
+                streaming,
+                responseHash: hash("d"),
+                usage: ProviderUsage(
+                    inputTokens: 12,
+                    outputTokens: 8,
+                    totalTokens: 20
+                ),
+                now: streamedAt.addingTimeInterval(1)
+            )
+        ) { error in
+            XCTAssertEqual(error as? ProviderRequestError, .invalidUsage)
+        }
     }
 
     func testOnlyUnsentCancellationAndDefiniteProviderRejectionAreTerminal() throws {

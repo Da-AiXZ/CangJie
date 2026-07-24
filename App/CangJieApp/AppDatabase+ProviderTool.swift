@@ -81,7 +81,9 @@ extension AppDatabase {
                     project.id
                 )
             case .list:
-                let projects = try Self.projects(in: db)
+                let fetched = try Self.projects(in: db)
+                let wasTruncated = fetched.count > 100
+                let projects = Array(fetched.prefix(100))
                 let artifact = try Self.insertProviderProjectListSnapshot(
                     projects: projects,
                     conversationID: exactInvocation.conversationID,
@@ -93,7 +95,7 @@ extension AppDatabase {
                     nil,
                     projects,
                     artifact,
-                    "listed",
+                    wasTruncated ? "listedTruncated" : "listed",
                     artifact.id.uuidString,
                     exactInvocation.projectID
                 )
@@ -548,7 +550,11 @@ extension AppDatabase {
     private static func projects(in db: Database) throws -> [NovelProject] {
         try Row.fetchAll(
             db,
-            sql: "SELECT * FROM novelProject ORDER BY updatedAt DESC, rowid DESC"
+            sql: """
+                SELECT * FROM novelProject
+                ORDER BY updatedAt DESC, rowid DESC
+                LIMIT 101
+                """
         ).map { row in
             guard let id = UUID(uuidString: row["id"]) else {
                 throw AppDatabaseError.invalidProviderToolInvocation

@@ -1,6 +1,7 @@
 import CangJieCore
 import Foundation
 import SwiftUI
+import UIKit
 
 struct ModelConnectionManagementPage: View {
     @ObservedObject var setup: ModelConnectionSetupController
@@ -14,6 +15,7 @@ struct ModelConnectionManagementPage: View {
                         Text("已保存的连接")
                             .font(.headline)
                         ForEach(setup.savedConnections.map(\.connection)) { connection in
+                            let isAvailable = setup.canUseForGeneration(connection)
                             Button {
                                 _ = try? setup.selectCurrentConnection(connection.id)
                             } label: {
@@ -23,17 +25,30 @@ struct ModelConnectionManagementPage: View {
                                         Text(connection.selectedModel)
                                             .font(.caption)
                                             .foregroundStyle(.secondary)
+                                        if !isAvailable {
+                                            Text("当前版本暂不支持真实任务")
+                                                .font(.caption)
+                                                .foregroundStyle(.secondary)
+                                        }
                                     }
                                     Spacer()
                                     if setup.currentConnection?.id == connection.id {
                                         Text("当前")
                                             .font(.caption.weight(.semibold))
+                                    } else if !isAvailable {
+                                        Image(systemName: "lock.fill")
+                                            .foregroundStyle(.secondary)
                                     }
                                 }
                             }
                             .buttonStyle(.bordered)
+                            .disabled(!isAvailable)
                             .accessibilityValue(
-                                setup.currentConnection?.id == connection.id ? "当前连接" : "未选择"
+                                !isAvailable
+                                    ? "当前版本暂不支持真实任务"
+                                    : setup.currentConnection?.id == connection.id
+                                        ? "当前连接"
+                                        : "未选择"
                             )
                             .accessibilityIdentifier("saved-model-connection-\(connection.id.uuidString)")
                         }
@@ -107,6 +122,17 @@ struct ModelConnectionSetupCard: View {
         .padding(.horizontal)
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("model-connection-setup-card")
+        .onChange(of: setup.errorMessage) { message in
+            guard UIAccessibility.isVoiceOverRunning,
+                  let message,
+                  !message.isEmpty else {
+                return
+            }
+            UIAccessibility.post(
+                notification: .announcement,
+                argument: message
+            )
+        }
     }
 
     private var providerChoices: some View {
@@ -121,18 +147,28 @@ struct ModelConnectionSetupCard: View {
     }
 
     private func providerButton(_ connector: ProviderConnector) -> some View {
+        let isAvailable = setup.canUseForGeneration(connector.provider)
         Button {
             setup.selectProvider(connector.provider)
         } label: {
             HStack {
-                Text(connector.displayName)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(connector.displayName)
+                    if !isAvailable {
+                        Text("当前版本暂不支持真实任务")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
                 Spacer()
-                Image(systemName: "chevron.forward")
+                Image(systemName: isAvailable ? "chevron.forward" : "lock.fill")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
         }
         .buttonStyle(.bordered)
+        .disabled(!isAvailable)
+        .accessibilityValue(isAvailable ? "可用" : "当前版本暂不支持真实任务")
         .accessibilityIdentifier("model-provider-\(connector.provider.rawValue)")
     }
 
@@ -234,7 +270,7 @@ struct ModelConnectionSetupCard: View {
                 _ = try? setup.saveCurrentConnection()
             }
             .buttonStyle(.borderedProminent)
-            .disabled(setup.step == .saving)
+            .disabled(!setup.canSaveCurrentConnection)
             .accessibilityIdentifier("model-connection-save-current")
         }
     }

@@ -31,7 +31,15 @@ if ([string]::IsNullOrWhiteSpace($env:SDKROOT)) {
    throw 'SDKROOT is not set.'
 }
 $actualSdkRoot = [IO.Path]::GetFullPath($env:SDKROOT)
-if (-not $actualSdkRoot.Equals($expectedSdkRoot, [StringComparison]::OrdinalIgnoreCase)) {
+$normalizedActualSdkRoot = $actualSdkRoot.TrimEnd(
+   [IO.Path]::DirectorySeparatorChar,
+   [IO.Path]::AltDirectorySeparatorChar
+)
+$normalizedExpectedSdkRoot = $expectedSdkRoot.TrimEnd(
+   [IO.Path]::DirectorySeparatorChar,
+   [IO.Path]::AltDirectorySeparatorChar
+)
+if (-not $normalizedActualSdkRoot.Equals($normalizedExpectedSdkRoot, [StringComparison]::OrdinalIgnoreCase)) {
    throw "Unexpected SDKROOT: $actualSdkRoot"
 }
 if (-not (Test-Path -LiteralPath (Join-Path $actualSdkRoot 'SDKSettings.json') -PathType Leaf)) {

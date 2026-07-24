@@ -235,6 +235,106 @@ final class ModelConnectionMigrationTests: XCTestCase {
         }
     }
 
+    func testProviderRequestTerminationMigrationPreservesBindingsAndTransition() throws {
+        try withTemporaryDatabasePath { path in
+            let legacy = try makePublishedV1ProviderRequestDatabase(at: path)
+            let receiptID = UUID()
+            do {
+                var configuration = Configuration()
+                configuration.foreignKeysEnabled = true
+                let queue = try DatabaseQueue(
+                    path: path,
+                    configuration: configuration
+                )
+                try AppDatabase.migrator.migrate(
+                    queue,
+                    upTo: "s2-pending-model-intent-admission-v3"
+                )
+                try queue.write { db in
+                    for phase in ["sending", "streaming", "responseComplete"] {
+                        try db.execute(
+                            sql: "UPDATE providerRequest SET phase = ? WHERE id = ?",
+                            arguments: [
+                                phase,
+                                legacy.request.identity.requestID.uuidString
+                            ]
+                        )
+                    }
+                    try db.execute(
+                        sql: """
+                            INSERT INTO toolReceipt (
+                                id, toolID, toolVersion, inputSummary, inputHash,
+                                outcome, conversationID, projectID, originRunID,
+                                idempotencyKey, providerRequestID,
+                                providerCallID, providerCallIndex, createdAt
+                            ) VALUES (?, 'project.status', '1', 'project.status', ?,
+                                      'completed', ?, NULL, ?, ?, ?, 'call-1', 0, ?)
+                            """,
+                        arguments: [
+                            receiptID.uuidString,
+                            String(repeating: "a", count: 64),
+                            legacy.request.identity.conversationID.uuidString,
+                            legacy.request.identity.runID.uuidString,
+                            "provider.tool.migration-fixture",
+                            legacy.request.identity.requestID.uuidString,
+                            legacy.request.createdAt.timeIntervalSince1970
+                        ]
+                    )
+                }
+            }
+            let database = try AppDatabase(path: path)
+
+            let state = try database.queue.write { db -> (String, String, Int, Int, Int) in
+                try db.execute(
+                    sql: "UPDATE providerRequest SET phase = 'terminated' WHERE id = ?",
+                    arguments: [legacy.request.identity.requestID.uuidString]
+                )
+                let tableSQL = try String.fetchOne(
+                    db,
+                    sql: """
+                        SELECT sql FROM sqlite_master
+                        WHERE type = 'table' AND name = 'providerRequest'
+                        """
+                ) ?? ""
+                let triggerSQL = try String.fetchOne(
+                    db,
+                    sql: """
+                        SELECT sql FROM sqlite_master
+                        WHERE type = 'trigger'
+                          AND name = 'providerRequest_phase_transition_guard'
+                        """
+                ) ?? ""
+                let migrationCount = try Int.fetchOne(
+                    db,
+                    sql: "SELECT COUNT(*) FROM grdb_migrations WHERE identifier = ?",
+                    arguments: ["s2-provider-request-termination-v4"]
+                ) ?? 0
+                let foreignKeyViolations = try Int.fetchOne(
+                    db,
+                    sql: "SELECT COUNT(*) FROM pragma_foreign_key_check"
+                ) ?? 0
+                let receiptCount = try Int.fetchOne(
+                    db,
+                    sql: "SELECT COUNT(*) FROM toolReceipt WHERE id = ?",
+                    arguments: [receiptID.uuidString]
+                ) ?? 0
+                return (
+                    tableSQL,
+                    triggerSQL,
+                    migrationCount,
+                    foreignKeyViolations,
+                    receiptCount
+                )
+            }
+
+            XCTAssertTrue(state.0.contains("'terminated'"))
+            XCTAssertTrue(state.1.contains("'continuationCommitted', 'terminated'"))
+            XCTAssertEqual(state.2, 1)
+            XCTAssertEqual(state.3, 0)
+            XCTAssertEqual(state.4, 1)
+        }
+    }
+
     func testProviderRequestLinearMigrationPreservesPublishedV1Payload() throws {
         try withTemporaryDatabasePath { path in
             let legacy = try makePublishedV1ProviderRequestDatabase(at: path)

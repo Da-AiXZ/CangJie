@@ -252,7 +252,18 @@ final class ModelConnectionSetupFlowTests: XCTestCase, ModelConnectionSetupServi
         XCTAssertEqual(controller.availableModelIDs, ["gpt-test", "gpt-other"])
         XCTAssertNil(controller.selectedModelID)
         controller.selectModel("gpt-test")
+        controller.connectionNameInput = "  \n  "
+        XCTAssertFalse(controller.canSaveCurrentConnection)
+        XCTAssertThrowsError(try controller.saveCurrentConnection()) { error in
+            XCTAssertEqual(
+                error as? ModelConnectionSetupFlowError,
+                .connectionNameRequired
+            )
+        }
+        XCTAssertEqual(controller.step, .nameConnection)
+        XCTAssertEqual(controller.errorMessage, "请给这个连接起个名字")
         controller.connectionNameInput = "我的 GPT"
+        XCTAssertTrue(controller.canSaveCurrentConnection)
         try controller.saveCurrentConnection()
 
         let stored = try XCTUnwrap(database.currentModelConnection())
@@ -296,7 +307,39 @@ final class ModelConnectionSetupFlowTests: XCTestCase, ModelConnectionSetupServi
         )
     }
 
-    func testShippingCustomSetupFailsClosedBeforeSendingOrPersistingCredential() async throws {
+    func testUnsupportedProvidersCannotEnterCredentialSetupForPendingGeneration() throws {
+        try withTemporaryDatabase { database in
+            let append = try database.appendPendingModelIntentTurn(
+                selectedConversationID: nil,
+                rawRequest: "使用当前版本尚未接入生成的服务",
+                intentID: UUID(),
+                now: Date(timeIntervalSince1970: 2_050)
+            )
+            let controller = ModelConnectionSetupController(
+                database: database,
+                credentials: RecordingCredentialRepository(),
+                discoveryClient: ModelDiscoveryNetworkClient(
+                    transport: RecordingTransport(responses: [])
+                )
+            )
+            controller.begin(pendingIntent: append.pendingIntent)
+
+            for provider in [ModelProvider.anthropic, .gemini, .custom] {
+                XCTAssertFalse(controller.canUseForGeneration(provider))
+                controller.selectProvider(provider)
+
+                XCTAssertNil(controller.selectedProvider)
+                XCTAssertEqual(controller.step, .chooseProvider)
+                XCTAssertEqual(
+                    controller.errorMessage,
+                    ProviderGenerationCapability.unavailableMessage
+                )
+                XCTAssertNil(controller.resumeDecision)
+            }
+        }
+    }
+
+    func testUnsupportedStoredCurrentConnectionCannotResumeOrBeSelectedForGeneration() throws {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
@@ -305,32 +348,57 @@ final class ModelConnectionSetupFlowTests: XCTestCase, ModelConnectionSetupServi
         let database = try AppDatabase(
             path: directory.appendingPathComponent("test.sqlite").path
         )
-        let transport = RecordingTransport(responses: [])
         let credentials = RecordingCredentialRepository()
+        let candidate = try ModelConnectionTestFixture.makeSetupCandidate(
+            name: "旧 Anthropic 连接",
+            provider: .anthropic,
+            baseURL: URL(string: "https://api.anthropic.com/v1")!,
+            selectedModel: "claude-fixture",
+            secret: "unsupported-provider-secret"
+        )
+        let stored = try ModelConnectionSetupService(
+            database: database,
+            credentials: credentials
+        ).persist(
+            candidate,
+            expectedCredentialBinding: candidate.credentialBinding,
+            makeCurrent: true
+        )
+        let append = try database.appendPendingModelIntentTurn(
+            selectedConversationID: nil,
+            rawRequest: "不能用旧 Anthropic 连接静默恢复",
+            intentID: UUID(),
+            now: Date(timeIntervalSince1970: 2_100)
+        )
         let controller = ModelConnectionSetupController(
             database: database,
             credentials: credentials,
-            discoveryClient: ModelDiscoveryNetworkClient(transport: transport)
+            discoveryClient: ModelDiscoveryNetworkClient(
+                transport: RecordingTransport(responses: [])
+            )
         )
-        controller.openManagement()
-        controller.selectProvider(.custom)
-        controller.customBaseURLInput = "https://models.example/v1"
-        controller.secretInput = "custom-test-secret"
 
-        do {
-            try await controller.discoverModels()
-            XCTFail("Shipping Custom setup must remain unavailable without pinned transport")
-        } catch ModelDiscoveryNetworkError.customDestinationPinningUnavailable {
+        XCTAssertEqual(controller.savedConnections.map(\.connection.id), [stored.connection.id])
+        XCTAssertNil(controller.currentMetadata)
+        XCTAssertNil(controller.currentConnection)
+        XCTAssertFalse(controller.canUseForGeneration(stored.connection))
+
+        controller.prepareForPendingIntent(append.pendingIntent)
+
+        XCTAssertEqual(controller.step, .chooseProvider)
+        XCTAssertNil(controller.resumeDecision)
+        XCTAssertThrowsError(try controller.selectCurrentConnection(stored.connection.id)) { error in
             XCTAssertEqual(
-                controller.errorMessage,
-                "当前版本还不能安全连接自定义服务，请先使用官方服务"
+                error as? ModelConnectionSetupFlowError,
+                .unsupportedProvider
             )
         }
-
-        let requests = await transport.requests()
-        XCTAssertTrue(requests.isEmpty)
-        XCTAssertTrue(credentials.events.isEmpty)
-        XCTAssertTrue(try database.listModelConnections().isEmpty)
+        XCTAssertEqual(controller.step, .chooseProvider)
+        XCTAssertNil(controller.resumeDecision)
+        XCTAssertEqual(
+            controller.errorMessage,
+            ProviderGenerationCapability.unavailableMessage
+        )
     }
 
     func testExplicitManagementNeverResumesAnotherConversationsPendingIntent() throws {
@@ -470,8 +538,7 @@ final class ModelConnectionSetupFlowTests: XCTestCase, ModelConnectionSetupServi
             viewModel.draft = "切去密码管理器前保存这条请求"
             viewModel.sendModelDependentMessage()
             let pending = try XCTUnwrap(viewModel.modelConnectionSetup.pendingIntent)
-            viewModel.modelConnectionSetup.selectProvider(.custom)
-            viewModel.modelConnectionSetup.customBaseURLInput = "https://models.example/v1"
+            viewModel.modelConnectionSetup.selectProvider(.openAI)
             viewModel.modelConnectionSetup.secretInput = "transient-password-manager-key"
             viewModel.modelConnectionSetup.connectionNameInput = "仍在填写"
 
@@ -479,11 +546,7 @@ final class ModelConnectionSetupFlowTests: XCTestCase, ModelConnectionSetupServi
             viewModel.handleScenePhase(.active)
 
             XCTAssertEqual(viewModel.modelConnectionSetup.pendingIntent, pending)
-            XCTAssertEqual(viewModel.modelConnectionSetup.selectedProvider, .custom)
-            XCTAssertEqual(
-                viewModel.modelConnectionSetup.customBaseURLInput,
-                "https://models.example/v1"
-            )
+            XCTAssertEqual(viewModel.modelConnectionSetup.selectedProvider, .openAI)
             XCTAssertEqual(
                 viewModel.modelConnectionSetup.secretInput,
                 "transient-password-manager-key"
@@ -509,8 +572,7 @@ final class ModelConnectionSetupFlowTests: XCTestCase, ModelConnectionSetupServi
             let pending = try XCTUnwrap(viewModel.modelConnectionSetup.pendingIntent)
 
             viewModel.modelConnectionSetup.openManagement()
-            viewModel.modelConnectionSetup.selectProvider(.custom)
-            viewModel.modelConnectionSetup.customBaseURLInput = "https://management.example/v1"
+            viewModel.modelConnectionSetup.selectProvider(.openAI)
             viewModel.modelConnectionSetup.secretInput = "management-password-manager-key"
             viewModel.modelConnectionSetup.connectionNameInput = "管理页正在填写"
 
@@ -519,11 +581,7 @@ final class ModelConnectionSetupFlowTests: XCTestCase, ModelConnectionSetupServi
 
             XCTAssertTrue(viewModel.modelConnectionSetup.isExplicitManagement)
             XCTAssertNil(viewModel.modelConnectionSetup.pendingIntent)
-            XCTAssertEqual(viewModel.modelConnectionSetup.selectedProvider, .custom)
-            XCTAssertEqual(
-                viewModel.modelConnectionSetup.customBaseURLInput,
-                "https://management.example/v1"
-            )
+            XCTAssertEqual(viewModel.modelConnectionSetup.selectedProvider, .openAI)
             XCTAssertEqual(
                 viewModel.modelConnectionSetup.secretInput,
                 "management-password-manager-key"

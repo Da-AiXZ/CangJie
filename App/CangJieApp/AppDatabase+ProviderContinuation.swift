@@ -56,6 +56,10 @@ extension AppDatabase {
                 request,
                 now: now
             )
+            try Self.restoreTaskForLocalProviderContinuation(
+                committed,
+                in: db
+            )
             try Self.updateProviderRequestRow(
                 committed,
                 expectedPayloadHash: Self.payloadHash(
@@ -105,6 +109,30 @@ extension AppDatabase {
                 receipt: nil
             )
         }
+    }
+
+    private static func restoreTaskForLocalProviderContinuation(
+        _ request: ProviderRequestSnapshot,
+        in db: Database
+    ) throws {
+        guard let task = try agentTask(
+            intentID: request.identity.intentID,
+            in: db
+        ), task.activeRunID == request.identity.runID,
+              task.conversationID == request.identity.conversationID,
+              task.projectID == request.identity.projectID,
+              task.branchID == request.identity.branchID else {
+            throw AppDatabaseError.invalidAgentTask
+        }
+        guard task.status == .waitingUser else { return }
+        _ = try transitionAgentTask(
+            id: task.id,
+            expectedRevision: task.revision,
+            commandID: UUID(),
+            to: .running,
+            now: request.updatedAt,
+            in: db
+        )
     }
 
     private static func replayCommittedContinuation(

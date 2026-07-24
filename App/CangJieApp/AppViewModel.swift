@@ -69,7 +69,7 @@ final class AppViewModel: ObservableObject {
     @Published private(set) var projects: [NovelProject] = []
     @Published private(set) var novelProgressByProjectID: [UUID: String] = [:]
     @Published var isArtifactDrawerPresented = false
-    @Published var conversationMessages: [String] = []
+    @Published private(set) var conversationMessageItems: [AgentMessage] = []
     @Published private(set) var hasEarlierConversationMessages = false
     @Published private(set) var conversations: [AgentConversation] = []
     @Published private(set) var selectedConversationID: UUID?
@@ -89,6 +89,8 @@ final class AppViewModel: ObservableObject {
     @Published private(set) var canCancelProviderRun = false
     @Published private(set) var providerTaskProjection: S2ProviderTaskProjection?
     @Published private(set) var taskSurfaceProviderTaskProjection: S2ProviderTaskProjection?
+    @Published private(set) var taskSurfaceQueuedProviderTaskProjections:
+        [S2ProviderTaskProjection] = []
     @Published private(set) var networkAvailabilityState: NetworkAvailabilityState
     @Published var isAgentNotificationConsentPresented = false
     private(set) var providerRunStartBlocker: ProviderRunStartBlocker?
@@ -103,8 +105,12 @@ final class AppViewModel: ObservableObject {
     }
 
     private var errorMessagesByDomain: [ErrorDomain: String] = [:]
+    private var fullyLoadedConversationID: UUID?
 
     var status: String { errorMessage ?? businessStatus }
+    var conversationMessages: [String] {
+        conversationMessageItems.map(\.displayText)
+    }
     private var idleConversationStatus: String {
         modelConnectionSetup.currentConnection == nil
             ? "可以先聊想法，需要模型时再连接"
@@ -266,7 +272,9 @@ final class AppViewModel: ObservableObject {
     private func canDiscardProviderTask(
         _ projection: S2ProviderTaskProjection?
     ) -> Bool {
-        projection?.task.status == .paused && projection?.receipt == nil
+        guard let projection, projection.receipt == nil else { return false }
+        return projection.task.status == .paused
+            || projection.task.status == .failed
     }
 
     private func canRetryProviderRun(
@@ -285,11 +293,18 @@ final class AppViewModel: ObservableObject {
               let database,
               let request = try? database.providerRequest(
                 intentID: task.intentID
-              ),
-              ProviderRequestRecovery.nextAction(for: request) == .terminal else {
+              ) else {
             return false
         }
-        return request.phase == .failed || request.phase == .cancelled
+        let recovery = ProviderRequestRecovery.nextAction(for: request)
+        guard recovery == .terminal
+                || recovery == .continueFromDurableResponse else {
+            return false
+        }
+        return request.phase == .failed
+            || request.phase == .cancelled
+            || request.phase == .terminated
+            || request.phase == .responseComplete
     }
 
     init(
@@ -461,8 +476,11 @@ final class AppViewModel: ObservableObject {
         selectedConversationID = databaseState.workspace.selectedConversation?.id
         conversations = databaseState.workspace.conversations
         draft = databaseState.workspace.draft
-        conversationMessages = databaseState.workspace.messageWindow.messages.map(\.displayText)
+        conversationMessageItems = databaseState.workspace.messageWindow.messages
         hasEarlierConversationMessages = databaseState.workspace.messageWindow.hasEarlierMessages
+        if !hasEarlierConversationMessages {
+            fullyLoadedConversationID = selectedConversationID
+        }
         modelConnectionSetup.restorePendingIntent(for: selectedConversationID)
         projects = databaseState.projects
         novelProgressByProjectID = databaseState.novelProgressByProjectID
@@ -925,6 +943,12 @@ final class AppViewModel: ObservableObject {
                 intent: intent,
                 verifiedConnection: verifiedConnection
             )
+            if try finishDurableProviderContinuationIfPossible(
+                intent: intent,
+                exitedTaskID: task.id
+            ) {
+                return
+            }
             if task.status == .queued {
                 refreshProviderTaskProjection(publishFailure: true)
                 setProviderBusinessStatus(
@@ -1142,6 +1166,7 @@ final class AppViewModel: ObservableObject {
               providerRunGeneration == generation else {
             return
         }
+        let previousDurablePhase = providerTaskProjection?.request.phase
         providerStreamText = projection.text
         canCancelProviderRun = projection.phase == .sending
             || projection.phase == .streaming
@@ -1153,7 +1178,9 @@ final class AppViewModel: ObservableObject {
                 conversationID: providerStreamConversationID
             )
         }
-        refreshProviderTaskProjection(publishFailure: false)
+        if previousDurablePhase != projection.phase {
+            refreshProviderTaskProjection(publishFailure: false)
+        }
     }
 
     private func finishProviderRun(
@@ -1259,6 +1286,8 @@ final class AppViewModel: ObservableObject {
                 status = "当前模型连接已失效，原请求仍然保留"
             case .unsupportedProvider:
                 status = "当前模型服务暂不支持真实生成，原请求仍然保留"
+            case .toolTurnLimitReached:
+                status = "这次处理已达到安全轮次上限；已有结果已保留，没有结果的请求已释放"
             default:
                 status = "这次模型处理没有完成，原请求仍然保留"
             }
@@ -1290,6 +1319,12 @@ final class AppViewModel: ObservableObject {
                   let request = try database.providerRequest(
                     intentID: task.intentID
                   ) else {
+                return
+            }
+            if try finishDurableProviderContinuationIfPossible(
+                intent: intent,
+                exitedTaskID: task.id
+            ) {
                 return
             }
             if task.status == .waitingUser && !permitsWaitingUserResume {
@@ -1355,6 +1390,39 @@ final class AppViewModel: ObservableObject {
         } catch {
             publishError("排队任务暂时无法安全继续（S2-TASK-DISPATCH）")
         }
+    }
+
+    private func finishDurableProviderContinuationIfPossible(
+        intent: PendingModelIntent,
+        exitedTaskID: UUID
+    ) throws -> Bool {
+        guard let database,
+              let completion = try providerRunCoordinator?
+                .commitDurableResponseIfPossible(intent: intent) else {
+            return false
+        }
+        lastToolReceipt = completion.receipts.last
+        projects = completion.projects
+        latestAgentRun = try database.agentRun(
+            id: completion.request.identity.runID,
+            conversationID: completion.request.identity.conversationID
+        )
+        applyS1ConversationWorkspace(
+            try database.restoreS1ConversationWorkspace(),
+            preservingCurrentDraft: true
+        )
+        clearErrors(in: .composer)
+        setProviderBusinessStatus(
+            "这件事已经处理完成",
+            conversationID: completion.request.identity.conversationID
+        )
+        refreshProviderTaskProjection(publishFailure: true)
+        scheduleAgentTaskNotification(.completed, intentID: intent.id)
+        let activeTaskID = try database.activeAgentTask()?.id
+        if activeTaskID != exitedTaskID {
+            dispatchActiveProviderTaskIfPossible()
+        }
+        return true
     }
 
     private func handleNetworkAvailabilityChange(
@@ -1591,7 +1659,7 @@ final class AppViewModel: ObservableObject {
 
     private func discardProviderTask(_ task: AgentTaskSnapshot) {
         guard let database,
-              task.status == .paused else {
+              task.status == .paused || task.status == .failed else {
             return
         }
         do {
@@ -1632,16 +1700,49 @@ final class AppViewModel: ObservableObject {
     }
 
     private func retryProviderRun(_ task: AgentTaskSnapshot) {
-        guard canRetryProviderRun(task), let database else { return }
+        guard canRetryProviderRun(task),
+              let database,
+              let providerRunCoordinator else { return }
         do {
-            let retried = try database.retryFailedAgentTask(
-                id: task.id,
-                expectedRevision: task.revision,
-                commandID: UUID()
+            if let request = try database.providerRequest(
+                intentID: task.intentID
+            ), request.phase == .responseComplete {
+                let rebound = try database.retryFailedAgentTask(
+                    id: task.id,
+                    expectedRevision: task.revision,
+                    commandID: UUID()
+                )
+                cancelPendingAgentTaskNotification(for: rebound)
+                refreshProviderTaskProjection(publishFailure: true)
+                guard rebound.status == .running else {
+                    setProviderBusinessStatus(
+                        "这件事已经排队，等待前一件主要任务结束",
+                        conversationID: task.conversationID
+                    )
+                    return
+                }
+                dispatchActiveProviderTaskIfPossible()
+                return
+            }
+            guard let currentConnection = modelConnectionSetup.currentConnection else {
+                openModelConnectionSetup()
+                return
+            }
+            guard let verifiedConnection = try modelCredentials
+                .verifiedConnection(for: currentConnection),
+                  let intent = try database.pendingModelIntent(
+                    id: task.intentID
+                  ) else {
+                openModelConnectionSetup()
+                return
+            }
+            let rebound = try providerRunCoordinator.prepareExplicitRetry(
+                intent: intent,
+                verifiedConnection: verifiedConnection
             )
-            cancelPendingAgentTaskNotification(for: retried)
+            cancelPendingAgentTaskNotification(for: rebound)
             refreshProviderTaskProjection(publishFailure: true)
-            guard retried.status == .running else {
+            guard rebound.status == .running else {
                 setProviderBusinessStatus(
                     "这件事已经排队，等待前一件主要任务结束",
                     conversationID: task.conversationID
@@ -1703,16 +1804,53 @@ final class AppViewModel: ObservableObject {
         }
     }
 
+    func loadEarlierConversationMessages() {
+        guard let database,
+              let conversationID = selectedConversationID ?? runtime?.conversation.id,
+              let oldestMessageID = conversationMessageItems.first?.id,
+              hasEarlierConversationMessages else {
+            return
+        }
+        do {
+            let earlierWindow = try database.s1PreviewMessageWindow(
+                conversationID: conversationID,
+                beforeMessageID: oldestMessageID
+            )
+            let visibleIDs = Set(conversationMessageItems.map(\.id))
+            let earlierMessages = earlierWindow.messages.filter { !visibleIDs.contains($0.id) }
+            conversationMessageItems = earlierMessages + conversationMessageItems
+            hasEarlierConversationMessages = earlierWindow.hasEarlierMessages
+            if !earlierWindow.hasEarlierMessages {
+                fullyLoadedConversationID = conversationID
+            }
+        } catch {
+            publishError("Conversation history loading failed (S1-HISTORY)")
+        }
+    }
+
     private func applyS1ConversationWorkspace(
         _ workspace: S1ConversationWorkspaceSnapshot,
         preservingCurrentDraft: Bool = false
     ) {
         let preservesDraft = preservingCurrentDraft
             && workspace.selectedConversation?.id == selectedConversationID
-        selectedConversationID = workspace.selectedConversation?.id
+        let previousConversationID = selectedConversationID
+        let nextConversationID = workspace.selectedConversation?.id
+        selectedConversationID = nextConversationID
         conversations = workspace.conversations
-        conversationMessages = workspace.messageWindow.messages.map(\.displayText)
+        if previousConversationID == nextConversationID, nextConversationID != nil {
+            let visibleIDs = Set(conversationMessageItems.map(\.id))
+            conversationMessageItems += workspace.messageWindow.messages.filter {
+                !visibleIDs.contains($0.id)
+            }
+        } else {
+            conversationMessageItems = workspace.messageWindow.messages
+            fullyLoadedConversationID = workspace.messageWindow.hasEarlierMessages
+                ? nil
+                : nextConversationID
+        }
         hasEarlierConversationMessages = workspace.messageWindow.hasEarlierMessages
+            && fullyLoadedConversationID != nextConversationID
         if !preservesDraft {
             setDraftWithoutAutosave(workspace.draft)
         }
@@ -1740,6 +1878,7 @@ final class AppViewModel: ObservableObject {
         guard let database else {
             providerTaskProjection = nil
             taskSurfaceProviderTaskProjection = nil
+            taskSurfaceQueuedProviderTaskProjections = []
             if runtime == nil {
                 latestAgentRun = nil
                 lastToolReceipt = nil
@@ -1754,8 +1893,8 @@ final class AppViewModel: ObservableObject {
             if let taskSurfaceTask = try database.activeAgentTask()
                 ?? database.latestAgentTask() {
                 guard let resolved = try database.s2ProviderTaskProjection(
-                    conversationID: taskSurfaceTask.conversationID
-                ), resolved.task.id == taskSurfaceTask.id else {
+                    taskID: taskSurfaceTask.id
+                ) else {
                     throw AppDatabaseError.invalidAgentTask
                 }
                 taskSurfaceProjection = resolved
@@ -1764,6 +1903,8 @@ final class AppViewModel: ObservableObject {
             }
             providerTaskProjection = projection
             taskSurfaceProviderTaskProjection = taskSurfaceProjection
+            taskSurfaceQueuedProviderTaskProjections = try database
+                .queuedS2ProviderTaskProjections()
             if let projection {
                 latestAgentRun = projection.run
                 lastToolReceipt = projection.receipt
@@ -1774,6 +1915,7 @@ final class AppViewModel: ObservableObject {
         } catch {
             providerTaskProjection = nil
             taskSurfaceProviderTaskProjection = nil
+            taskSurfaceQueuedProviderTaskProjections = []
             if runtime == nil {
                 latestAgentRun = nil
                 lastToolReceipt = nil
@@ -1954,7 +2096,17 @@ final class AppViewModel: ObservableObject {
     }
 
     private func apply(runtimeSnapshot snapshot: AgentRuntimeSnapshot) {
-        conversationMessages = snapshot.messages.map(\.displayText)
+        if selectedConversationID == snapshot.conversation.id {
+            let visibleIDs = Set(conversationMessageItems.map(\.id))
+            conversationMessageItems += snapshot.messages.filter { !visibleIDs.contains($0.id) }
+        } else {
+            conversationMessageItems = snapshot.messages
+            fullyLoadedConversationID = snapshot.hasEarlierMessages
+                ? nil
+                : snapshot.conversation.id
+        }
+        hasEarlierConversationMessages = snapshot.hasEarlierMessages
+            && fullyLoadedConversationID != snapshot.conversation.id
         projects = snapshot.projects
         refreshS1NovelProgress()
         interviewQuestion = snapshot.session.currentQuestion.isEmpty

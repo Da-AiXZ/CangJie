@@ -59,7 +59,14 @@ struct ProviderResponsePayload: Codable, Equatable {
             throw AppDatabaseError.invalidProviderResponseAsset
         }
         if !allowIncompleteToolCalls {
-            guard finishReason != nil,
+            let expectedFinishReason = toolCalls.isEmpty
+                ? "stop"
+                : "tool_calls"
+            guard finishReason == expectedFinishReason,
+                  !toolCalls.isEmpty
+                    || !text.trimmingCharacters(
+                        in: .whitespacesAndNewlines
+                    ).isEmpty,
                   toolCalls.allSatisfy({ call in
                       guard let id = call.id,
                             let name = call.name,
@@ -120,7 +127,22 @@ extension AppDatabase {
         }
 
         return try queue.write { db in
-            guard let intentRow = try Row.fetchOne(
+            try Self.persistPreparedProviderRequest(
+                validated,
+                expectedIntent: expectedIntent,
+                verifiedConnection: verifiedConnection,
+                in: db
+            )
+        }
+    }
+
+    private static func persistPreparedProviderRequest(
+        _ validated: ProviderRequestSnapshot,
+        expectedIntent: PendingModelIntent?,
+        verifiedConnection: VerifiedModelConnection,
+        in db: Database
+    ) throws -> ProviderRequestSnapshot {
+        guard let intentRow = try Row.fetchOne(
                 db,
                 sql: "SELECT * FROM pendingModelIntent WHERE id = ? AND consumedAt IS NULL",
                 arguments: [validated.identity.intentID.uuidString]
@@ -250,7 +272,67 @@ extension AppDatabase {
                 ]
             )
             try Self.insertProviderRequest(validated, in: db)
-            return validated
+        return validated
+    }
+
+    func persistExplicitProviderRetry(
+        _ request: ProviderRequestSnapshot,
+        intent expectedIntent: PendingModelIntent,
+        verifiedConnection: VerifiedModelConnection,
+        failedTaskID: UUID,
+        expectedTaskRevision: Int,
+        commandID: UUID,
+        now: Date
+    ) throws -> AgentTaskSnapshot {
+        let validated = try Self.validatedProviderRequest(request)
+        let timestamp = try Self.canonicalAgentTaskTimestamp(now)
+        guard validated.phase == .prepared,
+              validated.createdAt == timestamp,
+              Self.requestIdentity(
+                validated.identity,
+                matches: verifiedConnection
+              ) else {
+            throw AppDatabaseError.invalidProviderRequest
+        }
+
+        return try queue.write { db in
+            let transition = try Self.transitionAgentTask(
+                id: failedTaskID,
+                expectedRevision: expectedTaskRevision,
+                commandID: commandID,
+                to: .queued,
+                now: timestamp,
+                in: db
+            )
+            let primaryCount = try Int.fetchOne(
+                db,
+                sql: "SELECT COUNT(*) FROM agentTask WHERE primarySlot = 1"
+            ) ?? 0
+            guard primaryCount == 0 || primaryCount == 1 else {
+                throw AppDatabaseError.invalidAgentTask
+            }
+            var retriedTask = transition.task
+            if primaryCount == 0,
+               let promoted = try Self.promoteNextAgentTask(
+                    now: timestamp,
+                    in: db
+               ), promoted.id == failedTaskID {
+                retriedTask = promoted
+            }
+            _ = try Self.persistPreparedProviderRequest(
+                validated,
+                expectedIntent: expectedIntent,
+                verifiedConnection: verifiedConnection,
+                in: db
+            )
+            guard let rebound = try Self.agentTask(
+                intentID: expectedIntent.id,
+                in: db
+            ), rebound.id == retriedTask.id,
+              rebound.activeRunID == validated.identity.runID else {
+                throw AppDatabaseError.invalidProviderRequest
+            }
+            return rebound
         }
     }
 
@@ -601,6 +683,8 @@ extension AppDatabase {
             projection = (.running, "provider.responseComplete", request.updatedAt)
         case .continuationCommitted:
             projection = (.completed, "provider.continuationCommitted", request.updatedAt)
+        case .terminated:
+            projection = (.failed, "provider.terminated", request.updatedAt)
         case .cancelled:
             projection = (.cancelled, "provider.cancelled", request.updatedAt)
         case .failed:
@@ -695,6 +779,11 @@ extension AppDatabase {
             } else {
                 target = (.completed, .natural)
             }
+        case .terminated:
+            guard task.status == .completed || task.status == .discarded else {
+                throw AppDatabaseError.invalidAgentTask
+            }
+            target = nil
         }
         guard let target else { return }
         _ = try transitionAgentTask(
@@ -767,7 +856,9 @@ extension AppDatabase {
         } else {
             guard identity.attemptNumber == previous.identity.attemptNumber + 1,
                   identity.runID != previous.identity.runID,
-                  previous.phase == .failed || previous.phase == .cancelled else {
+                  previous.phase == .failed
+                    || previous.phase == .cancelled
+                    || previous.phase == .terminated else {
                 throw AppDatabaseError.invalidProviderRequest
             }
         }
@@ -792,14 +883,53 @@ extension AppDatabase {
             return
         }
         let request = try decodeProviderRequest(requestRow)
-        guard request.phase == .prepared else { return }
         guard request.identity.runID == activeRunID else {
             throw AppDatabaseError.invalidAgentRun
         }
-        try updateProviderBackedRun(request, in: db)
+        switch request.phase {
+        case .prepared:
+            try updateProviderBackedRun(request, in: db)
+        case .responseComplete where task.status == .running:
+            guard let runRow = try Row.fetchOne(
+                db,
+                sql: "SELECT * FROM agentRun WHERE id = ? AND conversationID = ?",
+                arguments: [
+                    activeRunID.uuidString,
+                    request.identity.conversationID.uuidString
+                ]
+            ) else {
+                throw AppDatabaseError.invalidAgentRun
+            }
+            let run = try decodeAgentRun(runRow)
+            guard run.kind == "providerTurn",
+                  run.status == .waitingUser,
+                  try providerContinuationRunScopeMatches(
+                    run,
+                    request: request,
+                    in: db
+                  ) else {
+                throw AppDatabaseError.invalidAgentRun
+            }
+            try upsertAgentRun(
+                AgentRunSnapshot(
+                    id: run.id,
+                    projectID: run.projectID,
+                    kind: run.kind,
+                    status: .running,
+                    idempotencyKey: run.idempotencyKey,
+                    currentStage: "provider.responseCompleteRecovery",
+                    startedAt: run.startedAt,
+                    updatedAt: task.updatedAt
+                ),
+                conversationID: request.identity.conversationID,
+                in: db
+            )
+        default:
+            return
+        }
     }
 
-    private static func providerContinuationRunScopeMatches(
+    static func providerContinuationRunScopeMatches(
         _ run: AgentRunSnapshot,
         request: ProviderRequestSnapshot,
         in db: Database
@@ -807,12 +937,13 @@ extension AppDatabase {
         if run.projectID == request.identity.projectID {
             return true
         }
-        guard request.identity.turnSequence > 1,
-              request.identity.projectID == nil,
+        guard request.identity.projectID == nil,
               let projectID = run.projectID,
-              let previousRequestID = request.identity.previousRequestID else {
+              request.identity.runID == run.id else {
             return false
         }
+        let scopeGrantRequestID = request.identity.previousRequestID
+            ?? request.identity.requestID
         let receiptCount = try Int.fetchOne(
             db,
             sql: """
@@ -827,7 +958,7 @@ extension AppDatabase {
                   AND outputReference = ?
                 """,
             arguments: [
-                previousRequestID.uuidString,
+                scopeGrantRequestID.uuidString,
                 request.identity.conversationID.uuidString,
                 run.id.uuidString,
                 projectID.uuidString,

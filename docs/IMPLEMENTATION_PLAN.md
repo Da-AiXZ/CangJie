@@ -6,7 +6,7 @@
 - 产品口号：**你只管有念头，仓颉负责把它写成小说。**
 - 本文取代 2026-07-16 版本中所有“专业写作工作台优先”“固定表单访谈”“用户先解释专业原因”的产品解释。
 - 旧版中已经验证的运行时治理、持久化、版本、审批、恢复、安全和 CI 能力继续保留，但降到后台，不再决定普通用户的默认体验。
-- Agent Harness 工程基线：`docs/AGENT_HARNESS_ARCHITECTURE.md`。该文档定义 Context、Prompt、Loop、Typed Tools、任务恢复、多 Agent、治理和可观测性的宿主级边界。
+- 宿主控制与模型信任边界：`docs/adr/0004-host-control-and-model-trust-boundary.md`；`docs/AGENT_HARNESS_ARCHITECTURE.md` 仅为 Context、Prompt、Loop、Typed Tools、任务恢复、多 Agent、治理和可观测性的非权威设计参考。
 - 架构来源登记：`docs/ARCHITECTURE_SOURCE_REGISTER.md`；实现只依据官方公开来源、仓颉原创需求和独立 ADR。
 - 状态边界：**工程架构基线已建立，具体 Swift 接口随 TDD 细化；H0–H5 未验收前不得写成已实现。**
 
@@ -321,12 +321,12 @@ ambiguousRejection
 查询执行前必须解析 `EvidenceIsolationScope`，同时校验项目、资料类型、使用目的、确认状态、Agent/工具权限和 `MaterialAnalysisAuthorization`。参考资料不得自动成为本书设定；参考小说只能作为 `PreferenceIndex` 的抽象写法证据或 `NarrativeIndex` 的结构分析对象，不能进入 `ResearchIndex` 充当历史、制度、神话等事实来源。跨索引查询必须显式声明用途、保留命中来源和证据回链，并在权限或授权不足时缩小范围或拒绝。
 ### 2.21 仓颉宿主是 Agent，模型只是可替换驾驶员
 
-- 决策：`CJ-AH-001`
+- 决策：`ADR-0004`；`CJ-AH-001` 保留为设计参考标识
 - 状态：`FROZEN`
 - 确认日期：2026-07-18
-- 实现边界：架构决定已冻结，H0–H5 尚未完成实现与验收。
+- 实现边界：宿主控制与模型信任边界由 ADR-0004 冻结，H0–H5 尚未完成实现与验收。
 
-仓颉不采用“聊天记录 + 巨型 Prompt + 若干工具”的脆弱结构。正式工程边界以 `docs/AGENT_HARNESS_ARCHITECTURE.md` 为准：主循环、真实状态、权限、预算、事务、幂等、恢复和完成判定由 App 内的 Harness 掌握；模型只能读取被允许的最小上下文、提出下一步或请求 Typed Tool，再依据真实 `ToolReceipt` 继续判断。
+仓颉不采用“聊天记录 + 巨型 Prompt + 若干工具”的脆弱结构。正式工程边界以 `docs/adr/0004-host-control-and-model-trust-boundary.md` 为准；`docs/AGENT_HARNESS_ARCHITECTURE.md` 只提供非权威设计分解。主循环、真实状态、权限、预算、事务、幂等、恢复和完成判定由 App 内的 Harness 掌握；模型只能读取被允许的最小上下文、提出下一步或请求 Typed Tool，再依据真实 `ToolReceipt` 继续判断。
 
 因此，即使切换 OpenAI、Anthropic、Gemini、DeepSeek 或自定义兼容 Provider，以下能力也不能随模型变化而失效：
 
@@ -1245,42 +1245,3 @@ H0–H5 是贯穿 S1–S6 的底层验收门，不是额外页面，也不能被
 ```
 
 最终判断标准：**用户感受到的是一个懂他、会主动推进、能真正操作软件的小说创作伙伴；系统内部运行的是一个受治理、可恢复、可审计的生产级长篇小说工程。**
-## Supplementary confirmed implementation contracts
-
-The following implementation requirements are copied from the approved history in 1.md and must be implemented behind tests, not inferred from model text.
-
-- Compile a minimal Driver Cockpit Snapshot per model turn; it must include identity, current UI location, project/branch/chapter version, confirmed and unconfirmed state, TaskRun/checkpoint, approvals, allowed tools, forbidden actions, budget, disclosure scope, provider capability snapshot and relevant evidence.
-- Probe streaming, standard Tool Call and multi-turn result return, structured JSON, cancellation, usage, system prompts, context/output limits, search, image, embedding, error classification and request reconciliation before assigning a driving mode.
-- Expose three honest modes: complete driving, restricted driving and writing-only. Unsupported capabilities constrain or reject tools; they never trigger hidden model substitution.
-- Enforce five tool permission levels in the host/tool registry, including an always-denied Level 5. Prompt wording is explanatory only and is never the security boundary.
-- Preserve the approved semantic tool surface: project, conversation, material, research, story memory, artifact, chapter, generation, branch, export, budget and task tools. Concrete Swift names may be grouped differently, but typed inputs, state gates, idempotency and receipts are mandatory.
-- If `generation.start` is requested before the first three chapters pass calibration, return a structured prerequisite rejection and prove `projectMutated=false`: no TaskRun, chapter version, story memory, Writer Lease or fee settlement is created.
-
-### Historical acceptance example
-
-例如模型错误调用：
-
-```text
-generation.start
-```
-
-但当前还没有通过前三章，工具层应直接返回：
-
-```text
-拒绝执行
-原因：前三章校准尚未完成
-当前状态：第一章等待用户确认
-可以执行：打开第一章、继续讨论、创建新版本
-```
-
-模型再向用户解释：
-
-> 现在还不能开始连续创作，因为第一章还在等你确认。我可以先把第一章打开，或者根据你刚才的意见再调整一次。
-
-因此：
-
-> **模型可以提出行动，但最终执行权属于仓颉工具和状态机。**
-
-驾驶员即使操作失误，高达自身的安全系统也会阻止它撞墙。
-
----

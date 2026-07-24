@@ -5,6 +5,70 @@ import XCTest
 @testable import CangJie
 
 final class ProviderRequestPersistenceTests: XCTestCase {
+    func testCompletedResponseRequiresFinishReasonMatchingToolShape() throws {
+        let call = ProviderToolCallPayload(
+            index: 0,
+            id: "call-1",
+            name: "project_status",
+            argumentsJSON: "{}"
+        )
+        let valid = [
+            ProviderResponsePayload(
+                text: "完成",
+                toolCalls: [],
+                finishReason: "stop"
+            ),
+            ProviderResponsePayload(
+                text: "",
+                toolCalls: [call],
+                finishReason: "tool_calls"
+            )
+        ]
+        for payload in valid {
+            XCTAssertNoThrow(
+                try payload.validate(allowIncompleteToolCalls: false)
+            )
+        }
+
+        let invalid = [
+            ProviderResponsePayload(
+                text: "截断",
+                toolCalls: [],
+                finishReason: "length"
+            ),
+            ProviderResponsePayload(
+                text: "过滤",
+                toolCalls: [],
+                finishReason: "content_filter"
+            ),
+            ProviderResponsePayload(
+                text: "未知",
+                toolCalls: [],
+                finishReason: "vendor_specific"
+            ),
+            ProviderResponsePayload(
+                text: "",
+                toolCalls: [call],
+                finishReason: "stop"
+            ),
+            ProviderResponsePayload(
+                text: "完成",
+                toolCalls: [],
+                finishReason: "tool_calls"
+            ),
+            ProviderResponsePayload(
+                text: "   ",
+                toolCalls: [],
+                finishReason: "stop"
+            )
+        ]
+        for payload in invalid {
+            XCTAssertThrowsError(
+                try payload.validate(allowIncompleteToolCalls: false)
+            )
+        }
+    }
+
     func testPreparedRequestAndProviderBackedRunCommitTogether() throws {
         let fixture = try makeFixture()
 
@@ -487,6 +551,166 @@ final class ProviderRequestPersistenceTests: XCTestCase {
         ) { error in
             XCTAssertEqual(error as? AppDatabaseError, .invalidProviderRequest)
         }
+    }
+
+    func testProviderExitFailsRunningTaskAfterDurableResponse() throws {
+        let fixture = try makeFixture()
+        let prepared = try fixture.database.persistPreparedProviderRequest(
+            fixture.request,
+            verifiedConnection: fixture.verifiedConnection
+        )
+        let sending = try ProviderRequestLifecycle.markSending(
+            prepared,
+            now: fixture.now.addingTimeInterval(1)
+        )
+        try fixture.database.updateProviderRequest(sending)
+        let payloadJSON = #"{"finishReason":"stop","text":"完成","toolCalls":[]}"#
+        let streaming = try ProviderRequestLifecycle.checkpointStream(
+            sending,
+            cursor: 1,
+            receivedUTF8Bytes: payloadJSON.utf8.count,
+            responseHash: AppDatabase.payloadHash(payloadJSON),
+            now: fixture.now.addingTimeInterval(2)
+        )
+        try fixture.database.checkpointProviderResponse(
+            streaming,
+            responsePayloadJSON: payloadJSON
+        )
+        let completed = try ProviderRequestLifecycle.complete(
+            streaming,
+            responseHash: AppDatabase.payloadHash(payloadJSON),
+            usage: ProviderUsage(
+                inputTokens: 10,
+                outputTokens: 2,
+                totalTokens: 12
+            ),
+            now: fixture.now.addingTimeInterval(3)
+        )
+        try fixture.database.completeProviderResponse(completed)
+
+        let settled = try XCTUnwrap(
+            fixture.database.settleAgentTaskControlAfterProviderExit(
+                intentID: fixture.intent.id,
+                now: fixture.now.addingTimeInterval(4)
+            )
+        )
+
+        XCTAssertEqual(settled.status, .failed)
+        XCTAssertNil(settled.outcome)
+        XCTAssertEqual(
+            try fixture.database.providerRequest(id: completed.identity.requestID),
+            completed
+        )
+        XCTAssertEqual(
+            try fixture.database.agentRun(
+                id: completed.identity.runID,
+                conversationID: completed.identity.conversationID
+            )?.status,
+            .waitingUser
+        )
+
+        let rebound = try fixture.database.retryFailedAgentTask(
+            id: settled.id,
+            expectedRevision: settled.revision,
+            commandID: UUID(),
+            now: fixture.now.addingTimeInterval(5)
+        )
+        XCTAssertEqual(rebound.status, .running)
+        XCTAssertEqual(
+            try fixture.database.agentRun(
+                id: completed.identity.runID,
+                conversationID: completed.identity.conversationID
+            )?.currentStage,
+            "provider.responseCompleteRecovery"
+        )
+    }
+
+    func testProviderExitPreservesCreatedProjectForLocalContinuationRetry() throws {
+        let fixture = try makeFixture()
+        let prepared = try fixture.database.persistPreparedProviderRequest(
+            fixture.request,
+            verifiedConnection: fixture.verifiedConnection
+        )
+        let sending = try ProviderRequestLifecycle.markSending(
+            prepared,
+            now: fixture.now.addingTimeInterval(1)
+        )
+        try fixture.database.updateProviderRequest(sending)
+        let payloadJSON = #"{"finishReason":"tool_calls","text":"","toolCalls":[{"index":0,"id":"call-1","name":"project_create","argumentsJSON":"{\"premise\":\"悬疑小说\",\"title\":\"星河\"}"}]}"#
+        let streaming = try ProviderRequestLifecycle.checkpointStream(
+            sending,
+            cursor: 1,
+            receivedUTF8Bytes: payloadJSON.utf8.count,
+            responseHash: AppDatabase.payloadHash(payloadJSON),
+            now: fixture.now.addingTimeInterval(2)
+        )
+        try fixture.database.checkpointProviderResponse(
+            streaming,
+            responsePayloadJSON: payloadJSON
+        )
+        let completed = try ProviderRequestLifecycle.complete(
+            streaming,
+            responseHash: AppDatabase.payloadHash(payloadJSON),
+            usage: ProviderUsage(
+                inputTokens: 10,
+                outputTokens: 2,
+                totalTokens: 12
+            ),
+            now: fixture.now.addingTimeInterval(3)
+        )
+        try fixture.database.completeProviderResponse(completed)
+        let invocation = try ProjectToolInvocation.parse(
+            providerFunctionName: "project_create",
+            argumentsJSON: #"{"premise":"悬疑小说","title":"星河"}"#,
+            providerCallID: "call-1",
+            providerCallIndex: 0,
+            providerRequestID: completed.identity.requestID,
+            runID: completed.identity.runID,
+            conversationID: completed.identity.conversationID,
+            projectID: nil
+        )
+        _ = try fixture.database.executeProviderTool(
+            invocation,
+            now: fixture.now.addingTimeInterval(4)
+        )
+
+        let settled = try XCTUnwrap(
+            fixture.database.settleAgentTaskControlAfterProviderExit(
+                intentID: fixture.intent.id,
+                now: fixture.now.addingTimeInterval(5)
+            )
+        )
+        let storedRequest = try XCTUnwrap(
+            fixture.database.providerRequest(id: completed.identity.requestID)
+        )
+        let run = try XCTUnwrap(
+            fixture.database.agentRun(
+                id: completed.identity.runID,
+                conversationID: completed.identity.conversationID
+            )
+        )
+
+        XCTAssertEqual(settled.status, .failed)
+        XCTAssertNil(settled.outcome)
+        XCTAssertEqual(storedRequest, completed)
+        XCTAssertEqual(run.status, .waitingUser)
+        XCTAssertEqual(run.currentStage, "provider.hostContinuationFailed")
+        XCTAssertEqual(try fixture.database.listProjects().map(\.title), ["星河"])
+
+        let rebound = try fixture.database.retryFailedAgentTask(
+            id: settled.id,
+            expectedRevision: settled.revision,
+            commandID: UUID(),
+            now: fixture.now.addingTimeInterval(6)
+        )
+        XCTAssertEqual(rebound.status, .running)
+        XCTAssertEqual(
+            try fixture.database.agentRun(
+                id: completed.identity.runID,
+                conversationID: completed.identity.conversationID
+            )?.currentStage,
+            "provider.responseCompleteRecovery"
+        )
     }
 
     func testDefiniteFailureAllowsANewAttemptButUnknownOutcomeDoesNot() throws {

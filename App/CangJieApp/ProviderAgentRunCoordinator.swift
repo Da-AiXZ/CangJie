@@ -2,13 +2,157 @@ import CangJieCore
 import CryptoKit
 import Foundation
 
+enum ProviderToolCatalogVersion: CaseIterable {
+    case v1
+    case v2
+    case v3
+
+    static let current = ProviderToolCatalogVersion.v3
+
+    var manifestHash: String {
+        Self.digest(manifestFields)
+    }
+
+    var allowedProviderFunctionNames: Set<String> {
+        switch self {
+        case .v1:
+            return ["project_create", "project_status"]
+        case .v2:
+            return [
+                "project_create",
+                "project_list",
+                "project_status",
+                "project_switch",
+                "project_save_discussion"
+            ]
+        case .v3:
+            return ["project_create", "project_list", "project_status"]
+        }
+    }
+
+    static func resolve(manifestHash: String) -> ProviderToolCatalogVersion? {
+        allCases.first { $0.manifestHash == manifestHash }
+    }
+
+    private var manifestFields: [String] {
+        switch self {
+        case .v1:
+            return [
+                "provider-tool-catalog-v1",
+                "project.create@1",
+                "project.status@1"
+            ]
+        case .v2:
+            return [
+                "provider-tool-catalog-v2",
+                "project.create@1",
+                "project.list@1",
+                "project.status@1",
+                "project.switch@1",
+                "conversation.save_discussion@1"
+            ]
+        case .v3:
+            return [
+                "provider-tool-catalog-v3",
+                "project.create@1",
+                "project.list@1",
+                "project.status@1"
+            ]
+        }
+    }
+
+    private static func digest(_ fields: [String]) -> String {
+        var data = Data()
+        for field in fields {
+            let bytes = Data(field.utf8)
+            data.append(Data(String(bytes.count).utf8))
+            data.append(0x3A)
+            data.append(bytes)
+            data.append(0x7C)
+        }
+        return SHA256.hash(data: data).map { String(format: "%02x", $0) }
+            .joined()
+    }
+}
+
+enum ProviderRequestPolicyVersion: CaseIterable {
+    case v1
+    case v2
+
+    static let current = ProviderRequestPolicyVersion.v2
+
+    var maximumOutputTokens: Int? {
+        switch self {
+        case .v1:
+            return nil
+        case .v2:
+            return 4_096
+        }
+    }
+
+    func manifestHash(
+        provider: ModelProvider,
+        baseURL: URL,
+        modelID: String
+    ) -> String {
+        let manifestName: String
+        switch self {
+        case .v1:
+            manifestName = "provider-policy-v1"
+        case .v2:
+            manifestName = "provider-policy-v2"
+        }
+        var fields = [
+            manifestName,
+            provider.rawValue,
+            baseURL.absoluteString,
+            modelID,
+            "stream=true",
+            "usage=required",
+            "max-response-bytes=262144"
+        ]
+        if let maximumOutputTokens {
+            fields.append("max-output-tokens=\(maximumOutputTokens)")
+        }
+        return Self.digest(fields)
+    }
+
+    static func resolve(
+        manifestHash: String,
+        identity: ProviderRequestIdentity
+    ) -> ProviderRequestPolicyVersion? {
+        allCases.first {
+            $0.manifestHash(
+                provider: identity.provider,
+                baseURL: identity.baseURL,
+                modelID: identity.modelID
+            ) == manifestHash
+        }
+    }
+
+    private static func digest(_ fields: [String]) -> String {
+        var data = Data()
+        for field in fields {
+            let bytes = Data(field.utf8)
+            data.append(Data(String(bytes.count).utf8))
+            data.append(0x3A)
+            data.append(bytes)
+            data.append(0x7C)
+        }
+        return SHA256.hash(data: data).map { String(format: "%02x", $0) }
+            .joined()
+    }
+}
+
 @MainActor
 final class ProviderAgentRunCoordinator {
     static let systemPrompt = """
     You are CangJie, the control plane for a local novel-writing application.
     This S2 milestone does not write formal prose. Respond briefly and truthfully.
     Use project_create only when the user explicitly asks to create or preserve a novel project.
-    Use project_status to read real project state. Never claim a tool succeeded before its result is returned.
+    For project_create, copy the title and premise exactly from the user's request. Do not infer, expand, summarize, or rewrite either value.
+    Use project_list or project_status only when the user explicitly asks for that exact read.
+    Never claim a tool succeeded before its result is returned.
     """
 
     private let database: AppDatabase
@@ -64,6 +208,66 @@ final class ProviderAgentRunCoordinator {
             throw ProviderAgentRunError.persistenceFailed
         }
         return task
+    }
+
+    func commitDurableResponseIfPossible(
+        intent: PendingModelIntent
+    ) throws -> ProviderAgentLoopCompletion? {
+        guard let request = try database.providerRequest(intentID: intent.id),
+              ProviderRequestRecovery.nextAction(for: request)
+                == .continueFromDurableResponse else {
+            return nil
+        }
+        try Self.validateIntentScope(request, intent: intent)
+        let durableResponse = try response(for: request)
+        guard durableResponse.toolCalls.isEmpty else {
+            return nil
+        }
+        let committed = try database.commitProviderContinuation(
+            request,
+            now: now()
+        )
+        return ProviderAgentLoopCompletion(
+            request: committed.request,
+            message: committed.message,
+            receipts: committed.receipt.map { [$0] } ?? [],
+            projects: try database.listProjects()
+        )
+    }
+
+    func prepareExplicitRetry(
+        intent: PendingModelIntent,
+        verifiedConnection: VerifiedModelConnection
+    ) throws -> AgentTaskSnapshot {
+        guard let previous = try database.providerRequest(intentID: intent.id),
+              previous.phase == .failed
+                || previous.phase == .cancelled
+                || previous.phase == .terminated else {
+            throw ProviderAgentRunError.terminalRequest
+        }
+        try Self.validateIntentScope(previous, intent: intent)
+        guard let task = try database.agentTask(intentID: intent.id),
+              task.status == .failed else {
+            throw ProviderAgentRunError.terminalRequest
+        }
+        let retryAt = now()
+        let retry = try Self.makePreparedRequest(
+            intent: intent,
+            verifiedConnection: verifiedConnection,
+            attemptNumber: previous.identity.attemptNumber + 1,
+            turnSequence: 1,
+            previousRequestID: previous.identity.requestID,
+            now: retryAt
+        )
+        return try database.persistExplicitProviderRetry(
+            retry,
+            intent: intent,
+            verifiedConnection: verifiedConnection,
+            failedTaskID: task.id,
+            expectedTaskRevision: task.revision,
+            commandID: retry.identity.requestID,
+            now: retryAt
+        )
     }
 
     func run(
@@ -224,6 +428,8 @@ final class ProviderAgentRunCoordinator {
 
         var response = ProviderResponsePayload.empty
         var usage: ProviderUsage?
+        var eventsSinceCheckpoint = 0
+        var lastCheckpointAt = request.updatedAt
         do {
             let stream = generation.stream(
                 request: request,
@@ -233,18 +439,29 @@ final class ProviderAgentRunCoordinator {
             )
             for try await event in stream {
                 try Self.apply(event, response: &response, usage: &usage)
-                let responseJSON = try Self.encode(response)
-                request = try ProviderRequestLifecycle.checkpointStream(
-                    request,
-                    cursor: request.streamCursor + 1,
-                    receivedUTF8Bytes: responseJSON.utf8.count,
-                    responseHash: AppDatabase.payloadHash(responseJSON),
-                    now: now()
-                )
-                try database.checkpointProviderResponse(
-                    request,
-                    responsePayloadJSON: responseJSON
-                )
+                eventsSinceCheckpoint += 1
+                let eventTime = now()
+                let shouldCheckpoint = request.phase == .sending
+                    || eventsSinceCheckpoint >= 16
+                    || eventTime.timeIntervalSince(lastCheckpointAt) >= 0.1
+                    || Self.requiresImmediateCheckpoint(event)
+                if shouldCheckpoint {
+                    let responseJSON = try Self.encode(response)
+                    request = try ProviderRequestLifecycle.checkpointStream(
+                        request,
+                        cursor: request.streamCursor + 1,
+                        receivedUTF8Bytes: responseJSON.utf8.count,
+                        responseHash: AppDatabase.payloadHash(responseJSON),
+                        observedUsage: usage,
+                        now: eventTime
+                    )
+                    try database.checkpointProviderResponse(
+                        request,
+                        responsePayloadJSON: responseJSON
+                    )
+                    eventsSinceCheckpoint = 0
+                    lastCheckpointAt = eventTime
+                }
                 onUpdate(
                     Self.projection(
                         request: request,
@@ -259,6 +476,9 @@ final class ProviderAgentRunCoordinator {
             }
             do {
                 try response.validate(allowIncompleteToolCalls: false)
+                guard prompt.allowsToolCalls || response.toolCalls.isEmpty else {
+                    throw ProviderAgentRunError.invalidStream
+                }
             } catch {
                 throw ProviderAgentRunError.invalidStream
             }
@@ -279,6 +499,11 @@ final class ProviderAgentRunCoordinator {
             )
             return ProviderRunCompletion(request: request, response: response)
         } catch let error as ProviderGenerationError {
+            try flushBufferedResponse(
+                response,
+                usage: usage,
+                request: &request
+            )
             try settle(error, request: request)
             switch error {
             case let .outcomeUnknown(reason):
@@ -289,15 +514,30 @@ final class ProviderAgentRunCoordinator {
                 throw ProviderAgentRunError.unsupportedProvider
             }
         } catch let error as ProviderAgentRunError {
+            try flushBufferedResponse(
+                response,
+                usage: usage,
+                request: &request
+            )
             if error == .invalidStream {
                 try persistUnknown(request, reason: .invalidResponse)
             }
             throw error
         } catch is CancellationError {
+            try flushBufferedResponse(
+                response,
+                usage: usage,
+                request: &request
+            )
             try persistUnknown(request, reason: .cancelled)
             throw ProviderAgentRunError.outcomeUnknown(.cancelled)
         } catch {
             do {
+                try flushBufferedResponse(
+                    response,
+                    usage: usage,
+                    request: &request
+                )
                 try persistUnknown(request, reason: .network)
             } catch {
                 throw ProviderAgentRunError.persistenceFailed
@@ -340,10 +580,17 @@ final class ProviderAgentRunCoordinator {
             }
             guard completion.request.identity.turnSequence
                     < ProviderRequestLifecycle.maximumTurnsPerAttempt else {
-                throw ProviderAgentRunError.terminalRequest
+                _ = try database.settleAgentTaskAtProviderTurnLimit(
+                    intentID: intent.id,
+                    now: now()
+                )
+                throw ProviderAgentRunError.toolTurnLimitReached
             }
-            let executions = try executeTools(for: completion)
-            receipts.append(contentsOf: executions.map(\.receipt))
+            let executions = try executeTools(
+                for: completion,
+                userRequest: intent.userRequest
+            )
+            receipts.append(contentsOf: executions.compactMap(\.receipt))
             let prompt = try continuationPrompt(
                 response: completion.response,
                 executions: executions,
@@ -445,27 +692,16 @@ final class ProviderAgentRunCoordinator {
                 intent.branchID?.uuidString ?? "",
                 intent.userRequest
             ]),
-            toolCatalogManifestHash: digest([
-                "provider-tool-catalog-v2",
-                "project.create@1",
-                "project.list@1",
-                "project.status@1",
-                "project.switch@1",
-                "conversation.save_discussion@1"
-            ]),
+            toolCatalogManifestHash: ProviderToolCatalogVersion.current.manifestHash,
             disclosureScopeHash: digest([
                 "provider-disclosure-v1",
                 intent.userRequest
             ]),
-            requestPolicyHash: digest([
-                "provider-policy-v1",
-                connection.provider.rawValue,
-                connection.baseURL.absoluteString,
-                connection.selectedModel,
-                "stream=true",
-                "usage=required",
-                "max-response-bytes=262144"
-            ]),
+            requestPolicyHash: ProviderRequestPolicyVersion.current.manifestHash(
+                provider: connection.provider,
+                baseURL: connection.baseURL,
+                modelID: connection.selectedModel
+            ),
             now: now
         )
     }
@@ -497,7 +733,11 @@ final class ProviderAgentRunCoordinator {
                 expected: expected.toolCatalogManifestHash
               ),
               request.disclosureScopeHash == expected.disclosureScopeHash,
-              request.requestPolicyHash == expected.requestPolicyHash,
+              Self.acceptedRequestPolicyManifestHash(
+                request.requestPolicyHash,
+                expected: expected.requestPolicyHash,
+                identity: request.identity
+              ),
               request.createdAt == expected.createdAt else {
             throw ProviderAgentRunError.connectionInvalid
         }
@@ -555,21 +795,30 @@ final class ProviderAgentRunCoordinator {
         )
         return try continuationPrompt(
             response: previousCompletion.response,
-            executions: executeTools(for: previousCompletion),
+            executions: executeTools(
+                for: previousCompletion,
+                userRequest: intent.userRequest
+            ),
             userRequest: intent.userRequest
         )
     }
 
     private func executeTools(
-        for completion: ProviderRunCompletion
-    ) throws -> [ProviderToolExecutionResult] {
-        try completion.response.toolCalls.map { call in
+        for completion: ProviderRunCompletion,
+        userRequest: String
+    ) throws -> [ProviderToolResolution] {
+        guard let catalog = ProviderToolCatalogVersion.resolve(
+            manifestHash: completion.request.toolCatalogManifestHash
+        ) else {
+            throw ProviderAgentRunError.invalidStream
+        }
+        var prepared: [PreparedProviderTool] = []
+        for call in completion.response.toolCalls {
             guard let callID = call.id, let name = call.name else {
                 throw ProviderAgentRunError.invalidStream
             }
-            let invocation: ProjectToolInvocation
             do {
-                invocation = try ProjectToolInvocation.parse(
+                let invocation = try ProjectToolInvocation.parse(
                     providerFunctionName: name,
                     argumentsJSON: call.argumentsJSON,
                     providerCallID: callID,
@@ -579,24 +828,117 @@ final class ProviderAgentRunCoordinator {
                     conversationID: completion.request.identity.conversationID,
                     projectID: completion.request.identity.projectID
                 )
+                prepared.append(
+                    PreparedProviderTool(call: call, invocation: invocation)
+                )
             } catch {
-                throw ProviderAgentRunError.invalidStream
+                return try deniedToolResults(
+                    for: completion.response.toolCalls,
+                    reason: .invalidToolCall
+                )
             }
-            return try database.executeProviderTool(invocation, now: now())
+        }
+
+        guard prepared.allSatisfy({ item in
+            guard let name = item.call.name else { return false }
+            return catalog.allowedProviderFunctionNames.contains(name)
+        }) else {
+            return try deniedToolResults(
+                for: completion.response.toolCalls,
+                reason: .toolNotInCatalog
+            )
+        }
+
+        guard prepared.filter(\.isMutating).count <= 1 else {
+            return try deniedToolResults(
+                for: completion.response.toolCalls,
+                reason: .multipleMutatingTools
+            )
+        }
+
+        guard prepared.allSatisfy({ $0.isAuthorized(by: userRequest) }) else {
+            return try deniedToolResults(
+                for: completion.response.toolCalls,
+                reason: .missingUserAuthorization
+            )
+        }
+
+        // Read-only calls run first so a read failure cannot follow a committed
+        // business mutation. Results are restored to provider call order.
+        let executionOrder = prepared.sorted {
+            !$0.isMutating && $1.isMutating
+        }
+        var resolutionsByIndex: [Int: ProviderToolResolution] = [:]
+        for item in executionOrder {
+            let result = try database.executeProviderTool(
+                item.invocation,
+                now: now()
+            )
+            resolutionsByIndex[item.call.index] = .executed(result)
+        }
+        return try completion.response.toolCalls.map { call in
+            guard let resolution = resolutionsByIndex[call.index] else {
+                throw ProviderAgentRunError.persistenceFailed
+            }
+            return resolution
         }
     }
 
     private func continuationPrompt(
         response: ProviderResponsePayload,
-        executions: [ProviderToolExecutionResult],
+        executions: [ProviderToolResolution],
         userRequest: String
     ) throws -> ProviderGenerationPrompt {
         try ProviderGenerationPrompt.continuation(
             systemPrompt: Self.systemPrompt,
             userPrompt: userRequest,
             assistantResponse: response,
-            toolResults: try executions.map(Self.generationToolResult)
+            toolResults: try executions.map(Self.generationToolResult),
+            allowsToolCalls: executions.isEmpty
         )
+    }
+
+    private func deniedToolResults(
+        for calls: [ProviderToolCallPayload],
+        reason: ProviderToolBatchRejectionReason
+    ) throws -> [ProviderToolResolution] {
+        try calls.map { call in
+            guard let callID = call.id else {
+                throw ProviderAgentRunError.invalidStream
+            }
+            let object: [String: Any] = [
+                "error": [
+                    "code": "tool_batch_rejected",
+                    "reason": reason.rawValue
+                ],
+                "status": "denied"
+            ]
+            let data = try JSONSerialization.data(
+                withJSONObject: object,
+                options: [.sortedKeys, .withoutEscapingSlashes]
+            )
+            guard let json = String(data: data, encoding: .utf8) else {
+                throw ProviderAgentRunError.persistenceFailed
+            }
+            return .denied(
+                ProviderGenerationToolResult(
+                    callID: callID,
+                    callIndex: call.index,
+                    contentJSON: json
+                )
+            )
+        }
+    }
+
+    private static func generationToolResult(
+        _ resolution: ProviderToolResolution
+    ) throws -> ProviderGenerationToolResult {
+        switch resolution {
+        case let .executed(execution):
+            return try generationToolResult(execution)
+        case let .denied(result):
+            return result
+        }
     }
 
     private static func generationToolResult(
@@ -633,8 +975,7 @@ final class ProviderAgentRunCoordinator {
             object["projects"] = execution.projects.map { project in
                 [
                     "id": project.id.uuidString.lowercased(),
-                    "title": project.title,
-                    "premise": project.premise
+                    "title": project.title
                 ]
             }
         }
@@ -671,7 +1012,9 @@ final class ProviderAgentRunCoordinator {
         }
         return digest(
             [
-                "provider-prompt-v2",
+                prompt.allowsToolCalls
+                    ? "provider-prompt-v2"
+                    : "provider-prompt-v3-tools-disabled",
                 prompt.systemPrompt,
                 prompt.userPrompt,
                 try encode(response)
@@ -813,6 +1156,43 @@ final class ProviderAgentRunCoordinator {
         try response.validate()
     }
 
+    private static func requiresImmediateCheckpoint(
+        _ event: ProviderGenerationEvent
+    ) -> Bool {
+        switch event {
+        case .finished, .usage:
+            return true
+        case .textDelta, .toolCallDelta:
+            return false
+        }
+    }
+
+    private func flushBufferedResponse(
+        _ response: ProviderResponsePayload,
+        usage: ProviderUsage?,
+        request: inout ProviderRequestSnapshot
+    ) throws {
+        guard request.phase == .sending || request.phase == .streaming,
+              response != .empty || usage != nil else {
+            return
+        }
+        let responseJSON = try Self.encode(response)
+        let responseHash = AppDatabase.payloadHash(responseJSON)
+        guard responseHash != request.responseHash else { return }
+        request = try ProviderRequestLifecycle.checkpointStream(
+            request,
+            cursor: request.streamCursor + 1,
+            receivedUTF8Bytes: responseJSON.utf8.count,
+            responseHash: responseHash,
+            observedUsage: usage,
+            now: now()
+        )
+        try database.checkpointProviderResponse(
+            request,
+            responsePayloadJSON: responseJSON
+        )
+    }
+
     private static func projection(
         request: ProviderRequestSnapshot,
         response: ProviderResponsePayload,
@@ -839,7 +1219,7 @@ final class ProviderAgentRunCoordinator {
     }
 
     private static func supports(_ provider: ModelProvider) -> Bool {
-        provider == .deepSeek || provider == .openAI || provider == .openRouter
+        ProviderGenerationCapability.supports(provider)
     }
 
     private static func acceptedToolCatalogManifestHash(
@@ -847,11 +1227,19 @@ final class ProviderAgentRunCoordinator {
         expected: String
     ) -> Bool {
         actual == expected
-            || actual == digest([
-                "provider-tool-catalog-v1",
-                "project.create@1",
-                "project.status@1"
-            ])
+            || ProviderToolCatalogVersion.resolve(manifestHash: actual) != nil
+    }
+
+    private static func acceptedRequestPolicyManifestHash(
+        _ actual: String,
+        expected: String,
+        identity: ProviderRequestIdentity
+    ) -> Bool {
+        actual == expected
+            || ProviderRequestPolicyVersion.resolve(
+                manifestHash: actual,
+                identity: identity
+            ) != nil
     }
 
     private static func matches(
@@ -883,6 +1271,112 @@ final class ProviderAgentRunCoordinator {
         return SHA256.hash(data: data)
             .map { String(format: "%02x", $0) }
             .joined()
+    }
+}
+
+private enum ProviderToolBatchRejectionReason: String {
+    case invalidToolCall = "invalid_tool_call"
+    case toolNotInCatalog = "tool_not_in_catalog"
+    case multipleMutatingTools = "multiple_mutating_tools"
+    case missingUserAuthorization = "missing_user_authorization"
+}
+
+private struct PreparedProviderTool {
+    let call: ProviderToolCallPayload
+    let invocation: ProjectToolInvocation
+
+    var isMutating: Bool {
+        switch invocation.arguments {
+        case .create, .switchProject, .saveDiscussion:
+            return true
+        case .list, .status:
+            return false
+        }
+    }
+
+    func isAuthorized(by userRequest: String) -> Bool {
+        let admission = ProviderToolAdmission.resolve(userRequest)
+        switch invocation.arguments {
+        case let .create(title, premise):
+            return admission == .createProject(
+                title: ProviderToolAdmission.normalize(title),
+                premise: ProviderToolAdmission.normalize(premise)
+            )
+        case .switchProject:
+            // The natural-language intent does not carry an exact target ID.
+            // Keep this fail-closed until a UI-bound target capability exists.
+            return false
+        case .saveDiscussion:
+            // Discussion content is model-authored and cannot be parameter-bound
+            // to the user's click yet, so it requires a future approval flow.
+            return false
+        case .list:
+            return admission == .listProjects
+        case .status:
+            return admission == .projectStatus
+        }
+    }
+}
+
+private enum ProviderToolAdmission: Equatable {
+    case createProject(title: String, premise: String)
+    case listProjects
+    case projectStatus
+
+    static func resolve(_ userRequest: String) -> ProviderToolAdmission? {
+        let request = userRequest.trimmingCharacters(
+            in: .whitespacesAndNewlines
+        ).lowercased()
+        let blockers = [
+            "不要", "先别", "暂不", "别执行", "只讨论", "不要写入",
+            "do not", "don't", "never", "discuss only"
+        ]
+        guard !blockers.contains(where: request.contains) else { return nil }
+
+        if [
+            "列出我的小说项目", "查看我的小说项目", "我有哪些小说项目",
+            "list my novel projects"
+        ].contains(request) {
+            return .listProjects
+        }
+        if [
+            "查看当前小说项目状态", "当前小说项目状态", "当前项目状态",
+            "show current novel project status"
+        ].contains(request) {
+            return .projectStatus
+        }
+
+        let namedProjectPrefixes = [
+            "创建一本叫", "请创建一本叫", "帮我创建一本叫",
+            "新建一本叫", "请新建一本叫", "帮我新建一本叫",
+            "建立一本叫", "请建立一本叫", "帮我建立一本叫"
+        ]
+        for prefix in namedProjectPrefixes where request.hasPrefix(prefix) {
+            let remainder = request.dropFirst(prefix.count)
+            guard let end = remainder.firstIndex(of: "的") else { return nil }
+            let title = normalize(String(remainder[..<end]))
+            let premiseStart = remainder.index(after: end)
+            let premise = normalize(String(remainder[premiseStart...]))
+            return title.isEmpty || premise.isEmpty
+                ? nil
+                : .createProject(title: title, premise: premise)
+        }
+        return nil
+    }
+
+    static func normalize(_ value: String) -> String {
+        value.trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+    }
+}
+
+private enum ProviderToolResolution {
+    case executed(ProviderToolExecutionResult)
+    case denied(ProviderGenerationToolResult)
+
+    var receipt: ToolReceipt? {
+        guard case let .executed(result) = self else { return nil }
+        return result.receipt
     }
 }
 

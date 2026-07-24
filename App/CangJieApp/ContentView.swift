@@ -1,6 +1,7 @@
 import CangJieCore
 import Foundation
 import SwiftUI
+import UIKit
 
 private struct OpeningPlanApprovalReview: Identifiable {
     let approval: ApprovalRequest
@@ -246,6 +247,15 @@ private struct S1TasksPage: View {
         NavigationStack {
             List {
                 if let projection = model.taskSurfaceProviderTaskProjection {
+                    Section("任务来源") {
+                        Text(conversationTitle(for: projection))
+                            .font(.headline)
+                            .accessibilityIdentifier("ai-task-conversation")
+                        Text(projection.userRequest)
+                            .font(.callout)
+                            .lineLimit(3)
+                            .accessibilityIdentifier("ai-task-request")
+                    }
                     Section("正在做") {
                         Text(projection.doingText)
                             .accessibilityIdentifier("ai-task-doing")
@@ -316,7 +326,36 @@ private struct S1TasksPage: View {
                             }
                         }
                     }
-                } else {
+                }
+                if !model.taskSurfaceQueuedProviderTaskProjections.isEmpty {
+                    Section("等待队列") {
+                        ForEach(
+                            Array(
+                                model.taskSurfaceQueuedProviderTaskProjections
+                                    .enumerated()
+                            ),
+                            id: \.element.task.id
+                        ) { index, projection in
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text("等待第 \(index + 1) 项")
+                                    .font(.headline)
+                                Text(
+                                    conversationTitle(for: projection)
+                                )
+                                .font(.callout)
+                                .foregroundStyle(.secondary)
+                                Text(projection.userRequest)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(2)
+                            }
+                            .accessibilityElement(children: .combine)
+                            .accessibilityIdentifier("ai-task-queued-\(index)")
+                        }
+                    }
+                }
+                if model.taskSurfaceProviderTaskProjection == nil
+                    && model.taskSurfaceQueuedProviderTaskProjections.isEmpty {
                     Section("当前状态") {
                         Text("当前没有需要处理的 AI 任务。你在对话里交给仓颉的真实工作会显示在这里。")
                             .font(.callout)
@@ -329,7 +368,7 @@ private struct S1TasksPage: View {
             .navigationBarTitleDisplayMode(.inline)
             .navigationBarBackButtonHidden(true)
             .confirmationDialog(
-                "只放弃尚未采用的临时内容？真实工具回执和审计记录不会删除。",
+                discardConfirmationTitle,
                 isPresented: $confirmingDiscard,
                 titleVisibility: .visible
             ) {
@@ -349,6 +388,21 @@ private struct S1TasksPage: View {
         }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("ai-tasks-page")
+    }
+
+    private func conversationTitle(
+        for projection: S2ProviderTaskProjection
+    ) -> String {
+        model.conversations.first(where: {
+            $0.id == projection.conversationID
+        })?.title ?? "已保存的对话任务"
+    }
+
+    private var discardConfirmationTitle: String {
+        guard let projection = model.taskSurfaceProviderTaskProjection else {
+            return "只放弃尚未采用的临时内容？真实工具回执和审计记录不会删除。"
+        }
+        return "放弃“\(conversationTitle(for: projection))”中的“\(projection.userRequest.prefix(48))”？真实工具回执和审计记录不会删除。"
     }
 }
 
@@ -414,6 +468,14 @@ private struct S1SettingsPage: View {
     }
 }
 
+private struct ConversationBottomYPreferenceKey: PreferenceKey {
+    static let defaultValue: CGFloat = .greatestFiniteMagnitude
+
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = nextValue()
+    }
+}
+
 struct ContentView: View {
     @ObservedObject var model: AppViewModel
     @ObservedObject private var setup: ModelConnectionSetupController
@@ -422,6 +484,8 @@ struct ContentView: View {
     @State private var selectedActivity: S1ActivityDestination = .conversation
     @State private var selectedPrimaryFocus: S1WorkspacePrimaryFocus = .conversation
     @State private var isPortraitNavigationPresented = false
+    @State private var isConversationNearBottom = true
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @AppStorage("s1.showsConversationTimestamps") private var showsConversationTimestamps = true
     @FocusState private var isComposerFocused: Bool
 
@@ -475,6 +539,15 @@ struct ContentView: View {
             }
         } message: {
             Text("长任务完成、暂停或需要你确认时，仓颉可以在你离开 App 后提醒你。")
+        }
+        .onChange(of: model.errorMessage) { message in
+            announceForVoiceOver(message)
+        }
+        .onChange(of: model.transientNotice?.message) { message in
+            announceForVoiceOver(message)
+        }
+        .onChange(of: model.displayedBusinessStatus) { status in
+            announceForVoiceOver(status)
         }
     }
 
@@ -650,14 +723,20 @@ struct ContentView: View {
             .background(Color(uiColor: .secondarySystemGroupedBackground))
             Divider()
 
-            if model.isArtifactDrawerPresented {
-                artifacts
-                    .accessibilityElement(children: .contain)
-                    .accessibilityIdentifier("reader-companion-results")
-            } else {
+            ZStack {
                 conversation
+                    .opacity(model.isArtifactDrawerPresented ? 0 : 1)
+                    .allowsHitTesting(!model.isArtifactDrawerPresented)
+                    .accessibilityHidden(model.isArtifactDrawerPresented)
                     .accessibilityElement(children: .contain)
                     .accessibilityIdentifier("reader-companion-conversation")
+
+                artifacts
+                    .opacity(model.isArtifactDrawerPresented ? 1 : 0)
+                    .allowsHitTesting(model.isArtifactDrawerPresented)
+                    .accessibilityHidden(!model.isArtifactDrawerPresented)
+                    .accessibilityElement(children: .contain)
+                    .accessibilityIdentifier("reader-companion-results")
             }
         }
         .background(Color(uiColor: .systemGroupedBackground))
@@ -682,6 +761,8 @@ struct ContentView: View {
                 )
         }
         .buttonStyle(.plain)
+        .frame(minHeight: 44)
+        .contentShape(Rectangle())
         .accessibilityIdentifier(
             showsResults ? "reader-companion-results-tab" : "reader-companion-conversation-tab"
         )
@@ -720,7 +801,7 @@ struct ContentView: View {
     }
 
     private func portraitWorkspace(size: CGSize) -> some View {
-        let topBarHeight: CGFloat = 54
+        let topBarHeight: CGFloat = dynamicTypeSize.isAccessibilitySize ? 104 : 54
         let contentHeight = max(0, size.height - topBarHeight)
         let focus = S1WorkspaceLayoutContract.normalizedFocus(
             selectedPrimaryFocus,
@@ -734,6 +815,15 @@ struct ContentView: View {
         return ZStack(alignment: .topLeading) {
             Color(uiColor: .systemGroupedBackground)
 
+            conversation
+                .frame(width: size.width, height: contentHeight)
+                .offset(y: topBarHeight)
+                .opacity(showingConversation && !showingNavigation ? 1 : 0)
+                .allowsHitTesting(showingConversation && !showingNavigation)
+                .accessibilityHidden(!showingConversation || showingNavigation)
+                .accessibilityElement(children: .contain)
+                .accessibilityIdentifier("portrait-conversation-region")
+
             if model.hasReadableContent && showingReader && !showingNavigation {
                 VStack(spacing: 0) {
                     reader
@@ -742,14 +832,6 @@ struct ContentView: View {
                 .offset(y: topBarHeight)
                 .accessibilityElement(children: .contain)
                 .accessibilityIdentifier("portrait-reader-region")
-            }
-
-            if showingConversation && !showingNavigation {
-                conversation
-                    .frame(width: size.width, height: contentHeight)
-                    .offset(y: topBarHeight)
-                    .accessibilityElement(children: .contain)
-                    .accessibilityIdentifier("portrait-conversation-region")
             }
 
             if showingResults && !showingNavigation {
@@ -787,7 +869,7 @@ struct ContentView: View {
                 isPortraitNavigationPresented = true
             } label: {
                 Image(systemName: "line.3.horizontal")
-                    .frame(width: 40, height: 40)
+                    .frame(width: 44, height: 44)
             }
             .buttonStyle(.plain)
             .accessibilityLabel("打开导航")
@@ -813,6 +895,8 @@ struct ContentView: View {
                         )
                 }
                 .buttonStyle(.plain)
+                .frame(minHeight: 44)
+                .contentShape(Rectangle())
                 .accessibilityIdentifier("portrait-focus-\(focus.rawValue)")
                 .accessibilityValue(isPortraitFocusSelected(focus) ? "当前页面" : "未选择")
             }
@@ -850,6 +934,8 @@ struct ContentView: View {
                             .font(.title2)
                     }
                     .buttonStyle(.plain)
+                    .frame(width: 44, height: 44)
+                    .contentShape(Rectangle())
                     .accessibilityLabel("关闭导航")
                     .accessibilityIdentifier("portrait-navigation-close")
                 }
@@ -873,6 +959,8 @@ struct ContentView: View {
                                     )
                             }
                             .buttonStyle(.plain)
+                            .frame(minHeight: 44)
+                            .contentShape(Rectangle())
                             .accessibilityIdentifier("portrait-activity-\(item.destination.rawValue)")
                             .accessibilityValue(
                                 selectedActivity == item.destination ? "当前页面" : "未选择"
@@ -967,7 +1055,7 @@ struct ContentView: View {
                 } label: {
                     Image(systemName: systemImageName(for: item.iconRole))
                         .font(.system(size: 19, weight: .semibold))
-                        .frame(width: 42, height: 42)
+                        .frame(width: 44, height: 44)
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
@@ -1003,12 +1091,12 @@ struct ContentView: View {
         case .novels:
             NavigationStack {
                 NovelProjectsPage(model: model) {
-                    selectedActivity = .conversation
+                    dismissIndependentLeftSurface()
                 }
             }
         case .tasks:
             S1TasksPage(model: model) {
-                selectedActivity = .conversation
+                dismissIndependentLeftSurface()
             }
         case .settings:
             S1SettingsPage(
@@ -1016,7 +1104,7 @@ struct ContentView: View {
                 setup: setup,
                 showsConversationTimestamps: $showsConversationTimestamps
             ) {
-                selectedActivity = .conversation
+                dismissIndependentLeftSurface()
             }
         }
     }
@@ -1155,10 +1243,8 @@ struct ContentView: View {
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("reader-region")
     }
-    @ViewBuilder
     private var conversation: some View {
-        if selectedActivity == .conversation && !isPortraitNavigationPresented {
-            VStack(spacing: 0) {
+        VStack(spacing: 0) {
             HStack {
                 VStack(alignment: .leading) {
                     Text("仓颉")
@@ -1194,6 +1280,8 @@ struct ContentView: View {
                 } label: {
                     Image(systemName: "link")
                 }
+                .frame(width: 44, height: 44)
+                .contentShape(Rectangle())
                 .accessibilityLabel("连接模型")
                 .accessibilityIdentifier("model-connection-open")
                 Button {
@@ -1201,6 +1289,8 @@ struct ContentView: View {
                 } label: {
                     Image(systemName: "sidebar.right")
                 }
+                .frame(width: 44, height: 44)
+                .contentShape(Rectangle())
                 .accessibilityLabel(
                     model.isArtifactDrawerPresented ? "收起这次结果" : "显示这次结果"
                 )
@@ -1225,41 +1315,95 @@ struct ContentView: View {
                 .padding(.top, 8)
                 .accessibilityIdentifier("build-activation-blocker")
             }
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 14) {
-                    if model.hasEarlierConversationMessages {
-                        Label(
-                            "已显示最近的对话，更早内容会在后续滚动加载。",
-                            systemImage: "clock.arrow.circlepath"
-                        )
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .accessibilityIdentifier("conversation-history-window-notice")
+            GeometryReader { conversationViewport in
+                ScrollViewReader { proxy in
+                    ScrollView {
+                        LazyVStack(alignment: .leading, spacing: 14) {
+                            if model.hasEarlierConversationMessages {
+                                Button {
+                                    guard let anchorID = model.conversationMessageItems.first?.id else {
+                                        return
+                                    }
+                                    model.loadEarlierConversationMessages()
+                                    DispatchQueue.main.async {
+                                        proxy.scrollTo(anchorID, anchor: .top)
+                                    }
+                                } label: {
+                                    Label("加载更早对话", systemImage: "clock.arrow.circlepath")
+                                        .font(.caption)
+                                }
+                                .buttonStyle(.borderless)
+                                .frame(minHeight: 44)
+                                .contentShape(Rectangle())
+                                .accessibilityHint("加载当前对话中更早保存的消息")
+                                .accessibilityIdentifier("conversation-load-earlier")
+                            }
+                            if shouldShowWelcomePage {
+                                welcomePage
+                            }
+                            ForEach(
+                                Array(model.conversationMessageItems.enumerated()),
+                                id: \.element.id
+                            ) { index, message in
+                                Text(message.displayText)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .padding(12)
+                                    .background(.background, in: RoundedRectangle(cornerRadius: 12))
+                                    .id(message.id)
+                                    .accessibilityIdentifier("conversation-message-\(index)")
+                            }
+                            if let providerStreamText = model.displayedProviderStreamText {
+                                Text("仓颉：\(providerStreamText)")
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .padding(12)
+                                    .background(.background, in: RoundedRectangle(cornerRadius: 12))
+                                    .accessibilityIdentifier("provider-streaming-message")
+                            }
+                            GeometryReader { geometry in
+                                Color.clear.preference(
+                                    key: ConversationBottomYPreferenceKey.self,
+                                    value: geometry.frame(in: .named("conversation-scroll")).maxY
+                                )
+                            }
+                            .frame(height: 1)
+                            .id("conversation-scroll-bottom")
+                            .accessibilityHidden(true)
+                        }
+                        .padding()
                     }
-                    if shouldShowWelcomePage {
-                        welcomePage
+                    .coordinateSpace(name: "conversation-scroll")
+                    .onPreferenceChange(ConversationBottomYPreferenceKey.self) { bottomY in
+                        isConversationNearBottom = bottomY <= conversationViewport.size.height + 160
                     }
-                    ForEach(Array(model.conversationMessages.enumerated()), id: \.offset) { index, message in
-                        Text(message)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(12)
-                            .background(.background, in: RoundedRectangle(cornerRadius: 12))
-                            .accessibilityIdentifier("conversation-message-\(index)")
+                    .onAppear {
+                        scrollConversationToLatest(using: proxy, animated: false)
                     }
-                    if let providerStreamText = model.displayedProviderStreamText {
-                        Text("仓颉：\(providerStreamText)")
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(12)
-                            .background(.background, in: RoundedRectangle(cornerRadius: 12))
-                            .accessibilityIdentifier("provider-streaming-message")
+                    .onChange(of: model.selectedConversationID) { _ in
+                        scrollConversationToLatest(using: proxy, animated: false)
+                    }
+                    .onChange(of: model.conversationMessageItems.last?.id) { _ in
+                        guard isConversationNearBottom else { return }
+                        scrollConversationToLatest(using: proxy, animated: true)
+                    }
+                    .onChange(of: model.displayedProviderStreamText) { _ in
+                        guard isConversationNearBottom else { return }
+                        scrollConversationToLatest(using: proxy, animated: false)
                     }
                 }
-                .padding()
             }
             if setup.isPresented(for: model.selectedConversationID)
                 && !model.isProviderRunVisible {
-                ModelConnectionSetupCard(setup: setup) {
-                    setup.cancel()
+                if dynamicTypeSize.isAccessibilitySize {
+                    ScrollView {
+                        ModelConnectionSetupCard(setup: setup) {
+                            setup.cancel()
+                        }
+                    }
+                    .frame(maxHeight: 360)
+                } else {
+                    ModelConnectionSetupCard(setup: setup) {
+                        setup.cancel()
+                    }
                 }
             }
             if let approval = pendingOpeningPlanApproval {
@@ -1284,6 +1428,8 @@ struct ContentView: View {
                         } label: {
                             Image(systemName: "pause.circle.fill")
                         }
+                        .frame(width: 44, height: 44)
+                        .contentShape(Rectangle())
                         .accessibilityLabel("现在暂停")
                         .accessibilityIdentifier("provider-run-pause")
                     }
@@ -1353,6 +1499,8 @@ struct ContentView: View {
                         }
                         TextEditor(text: $model.draft)
                             .focused($isComposerFocused)
+                            .accessibilityLabel("给仓颉的消息")
+                            .accessibilityHint("输入要交给仓颉处理的内容")
                             .accessibilityIdentifier("agent-composer")
                             .disabled(!model.isComposerAvailable)
                     }
@@ -1365,19 +1513,30 @@ struct ContentView: View {
                     } label: {
                         Image(systemName: "arrow.up.circle.fill").font(.system(size: 32))
                     }
+                    .frame(width: 44, height: 44)
                     .disabled(
                         model.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                             || !model.canSubmitModelDependentMessage
                     )
+                    .accessibilityLabel("发送")
+                    .accessibilityHint("发送当前消息")
                     .accessibilityIdentifier("agent-send-button")
                 }
                 .padding()
-            }
         }
     }
 
+    private func announceForVoiceOver(_ message: String?) {
+        guard UIAccessibility.isVoiceOverRunning,
+              let message,
+              !message.isEmpty else {
+            return
+        }
+        UIAccessibility.post(notification: .announcement, argument: message)
+    }
+
     private var shouldShowWelcomePage: Bool {
-        model.conversationMessages.isEmpty
+        model.conversationMessageItems.isEmpty
             && !model.hasEarlierConversationMessages
             && model.projects.isEmpty
             && !setup.isPresented(for: model.selectedConversationID)
@@ -1385,6 +1544,21 @@ struct ContentView: View {
             && model.lastToolReceipt == nil
             && model.latestAgentRun == nil
             && model.chapter == nil
+    }
+
+    private func scrollConversationToLatest(
+        using proxy: ScrollViewProxy,
+        animated: Bool
+    ) {
+        DispatchQueue.main.async {
+            if animated {
+                withAnimation(.easeOut(duration: 0.2)) {
+                    proxy.scrollTo("conversation-scroll-bottom", anchor: .bottom)
+                }
+            } else {
+                proxy.scrollTo("conversation-scroll-bottom", anchor: .bottom)
+            }
+        }
     }
 
     private var welcomePage: some View {

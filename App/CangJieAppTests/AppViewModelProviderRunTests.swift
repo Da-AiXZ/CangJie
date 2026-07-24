@@ -979,11 +979,13 @@ final class AppViewModelProviderRunTests: XCTestCase {
         )
         try database.completeProviderResponse(complete)
         let generation = AppViewModelProviderGenerationService(events: [])
+        let network = TestNetworkAvailabilityObserver(state: .unavailable)
 
         let viewModel = AppViewModel(
             database: database,
             modelCredentialRepository: credentials,
             providerGenerationService: generation,
+            networkAvailabilityObserver: network,
             taskID: UUID(),
             draftAutosaveDelayNanoseconds: UInt64.max
         )
@@ -1002,6 +1004,17 @@ final class AppViewModelProviderRunTests: XCTestCase {
         XCTAssertEqual(
             viewModel.conversationMessages.last,
             "仓颉：恢复后直接显示这条完成回复。"
+        )
+        let completedTask = try XCTUnwrap(
+            database.agentTask(intentID: intent.id)
+        )
+        XCTAssertEqual(completedTask.status, .completed)
+        XCTAssertEqual(completedTask.outcome, .natural)
+        XCTAssertNil(completedTask.waitingReason)
+        XCTAssertNil(
+            try database.latestPendingModelIntent(
+                conversationID: conversation.id
+            )
         )
     }
 

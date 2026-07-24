@@ -6,6 +6,7 @@ public enum ProviderRequestPhase: String, Codable, Equatable, Sendable {
     case streaming
     case responseComplete
     case continuationCommitted
+    case terminated
     case cancelled
     case failed
     case outcomeUnknown
@@ -342,7 +343,6 @@ public struct ProviderRequestSnapshot: Codable, Equatable, Sendable {
             }
         case .streaming:
             guard hasStream,
-                  usage == nil,
                   failure == nil,
                   interruption == nil else {
                 throw ProviderRequestError.invalidSnapshot
@@ -352,6 +352,13 @@ public struct ProviderRequestSnapshot: Codable, Equatable, Sendable {
                   usage != nil,
                   failure == nil,
                   interruption == nil else {
+                throw ProviderRequestError.invalidSnapshot
+            }
+        case .terminated:
+            guard hasStream,
+                  usage != nil,
+                  failure == nil,
+                  interruption != nil else {
                 throw ProviderRequestError.invalidSnapshot
             }
         case .failed:
@@ -364,8 +371,7 @@ public struct ProviderRequestSnapshot: Codable, Equatable, Sendable {
                 throw ProviderRequestError.invalidSnapshot
             }
         case .outcomeUnknown:
-            guard usage == nil,
-                  failure == nil,
+            guard failure == nil,
                   interruption != nil else {
                 throw ProviderRequestError.invalidSnapshot
             }
@@ -391,7 +397,7 @@ public enum ProviderRequestRecovery {
             return .reconcileUnknownOutcome
         case .responseComplete:
             return .continueFromDurableResponse
-        case .continuationCommitted, .cancelled, .failed:
+        case .continuationCommitted, .terminated, .cancelled, .failed:
             return .terminal
         }
     }
@@ -429,6 +435,7 @@ public enum ProviderRequestLifecycle {
                 cursor: next.streamCursor,
                 receivedUTF8Bytes: next.receivedUTF8Bytes,
                 responseHash: responseHash,
+                observedUsage: next.usage,
                 now: next.updatedAt
             )
         case (.sending, .failed):
@@ -463,6 +470,15 @@ public enum ProviderRequestLifecycle {
         case (.responseComplete, .continuationCommitted):
             expected = try commitContinuation(
                 current,
+                now: next.updatedAt
+            )
+        case (.responseComplete, .terminated):
+            guard let interruption = next.interruption else {
+                throw ProviderRequestError.invalidSnapshot
+            }
+            expected = try terminateAfterResponse(
+                current,
+                reason: interruption,
                 now: next.updatedAt
             )
         default:
@@ -591,6 +607,7 @@ public enum ProviderRequestLifecycle {
         cursor: Int,
         receivedUTF8Bytes: Int,
         responseHash: String,
+        observedUsage: ProviderUsage? = nil,
         now: Date
     ) throws -> ProviderRequestSnapshot {
         guard request.phase == .sending || request.phase == .streaming else {
@@ -606,12 +623,17 @@ public enum ProviderRequestLifecycle {
         guard isCanonicalSHA256(responseHash) else {
             throw ProviderRequestError.invalidHash
         }
+        guard observedUsage.map(validUsage) ?? true,
+              request.usage == nil || request.usage == observedUsage else {
+            throw ProviderRequestError.invalidUsage
+        }
         return try transition(
             request,
             phase: .streaming,
             streamCursor: cursor,
             receivedUTF8Bytes: receivedUTF8Bytes,
             responseHash: responseHash,
+            usage: observedUsage,
             now: now
         )
     }
@@ -632,6 +654,9 @@ public enum ProviderRequestLifecycle {
             throw ProviderRequestError.invalidHash
         }
         guard validUsage(usage) else {
+            throw ProviderRequestError.invalidUsage
+        }
+        guard request.usage == nil || request.usage == usage else {
             throw ProviderRequestError.invalidUsage
         }
         return try transition(
@@ -656,6 +681,25 @@ public enum ProviderRequestLifecycle {
         return try transition(
             request,
             phase: .continuationCommitted,
+            now: now
+        )
+    }
+
+    public static func terminateAfterResponse(
+        _ request: ProviderRequestSnapshot,
+        reason: ProviderRequestInterruption,
+        now: Date
+    ) throws -> ProviderRequestSnapshot {
+        guard request.phase == .responseComplete else {
+            throw ProviderRequestError.invalidTransition(
+                from: request.phase,
+                to: .terminated
+            )
+        }
+        return try transition(
+            request,
+            phase: .terminated,
+            interruption: reason,
             now: now
         )
     }

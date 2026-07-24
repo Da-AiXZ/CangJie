@@ -9,8 +9,18 @@ enum ProviderAgentRunError: Error, Equatable {
     case invalidStream
     case requiresReconciliation
     case terminalRequest
+    case toolTurnLimitReached
     case outcomeUnknown(ProviderRequestInterruption)
     case persistenceFailed
+}
+
+enum ProviderGenerationCapability {
+    static func supports(_ provider: ModelProvider) -> Bool {
+        provider == .deepSeek || provider == .openAI || provider == .openRouter
+    }
+
+    static let unavailableMessage =
+        "当前版本暂不支持用这个服务执行真实模型任务"
 }
 
 struct ProviderRunProjection: Equatable {
@@ -43,6 +53,7 @@ struct ProviderGenerationPrompt: Equatable {
     let userPrompt: String
     let assistantResponse: ProviderResponsePayload?
     let toolResults: [ProviderGenerationToolResult]
+    let allowsToolCalls: Bool
 
     static func initial(
         systemPrompt: String,
@@ -52,7 +63,8 @@ struct ProviderGenerationPrompt: Equatable {
             systemPrompt: systemPrompt,
             userPrompt: userPrompt,
             assistantResponse: nil,
-            toolResults: []
+            toolResults: [],
+            allowsToolCalls: true
         )
     }
 
@@ -60,13 +72,15 @@ struct ProviderGenerationPrompt: Equatable {
         systemPrompt: String,
         userPrompt: String,
         assistantResponse: ProviderResponsePayload,
-        toolResults: [ProviderGenerationToolResult]
+        toolResults: [ProviderGenerationToolResult],
+        allowsToolCalls: Bool = true
     ) throws -> ProviderGenerationPrompt {
         let prompt = ProviderGenerationPrompt(
             systemPrompt: systemPrompt,
             userPrompt: userPrompt,
             assistantResponse: assistantResponse,
-            toolResults: toolResults
+            toolResults: toolResults,
+            allowsToolCalls: allowsToolCalls
         )
         try prompt.validate()
         return prompt
@@ -81,6 +95,9 @@ struct ProviderGenerationPrompt: Equatable {
             throw ProviderGenerationError.invalidPreparedRequest
         }
         if isInitial {
+            guard allowsToolCalls else {
+                throw ProviderGenerationError.invalidPreparedRequest
+            }
             return
         }
         guard let assistantResponse,

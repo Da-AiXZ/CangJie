@@ -49,9 +49,13 @@ final class AgentRuntime {
             lastReceipt = latestReceipt
         }
 
+        let messageWindow = try database.s1PreviewMessageWindow(
+            conversationID: conversation.id
+        )
         return AgentRuntimeSnapshot(
             conversation: conversation,
-            messages: try database.listAgentMessages(conversationID: conversation.id),
+            messages: messageWindow.messages,
+            hasEarlierMessages: messageWindow.hasEarlierMessages,
             projects: try database.listProjects(),
             session: session,
             openingPlan: approvalState?.artifact,

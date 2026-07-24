@@ -164,12 +164,13 @@ final class CangJieSmokeUITests: XCTestCase {
         XCTAssertTrue(app.descendants(matching: .any)["novel-projects-page"].exists)
 
         app.buttons["novel-projects-back-button"].tap()
-        XCTAssertEqual(
-            app.buttons["portrait-activity-conversation"].value as? String,
-            "当前页面"
+        XCTAssertTrue(
+            app.textViews["agent-composer"].waitForExistence(timeout: 5)
         )
-        app.buttons["portrait-navigation-close"].tap()
-        app.buttons["portrait-focus-conversation"].tap()
+        XCTAssertFalse(
+            app.descendants(matching: .any)["portrait-left-page-overlay"]
+                .exists
+        )
         let restoredPortraitComposer = app.textViews["agent-composer"]
         XCTAssertTrue(restoredPortraitComposer.waitForExistence(timeout: 5))
         XCTAssertEqual(restoredPortraitComposer.value as? String, "旋转后仍然保留的念头")
@@ -595,6 +596,12 @@ final class CangJieSmokeUITests: XCTestCase {
         let userMessage = app.staticTexts["你：" + userText]
         XCTAssertTrue(userMessage.waitForExistence(timeout: 5))
         XCTAssertTrue(app.descendants(matching: .any)["model-connection-setup-card"].waitForExistence(timeout: 5))
+        for providerID in ["anthropic", "gemini", "custom"] {
+            let providerButton = app.buttons["model-provider-\(providerID)"]
+            XCTAssertTrue(providerButton.exists)
+            XCTAssertFalse(providerButton.isEnabled)
+            XCTAssertEqual(providerButton.value as? String, "当前版本暂不支持真实任务")
+        }
         XCTAssertTrue(app.buttons["model-provider-openAI"].exists)
         app.buttons["model-provider-openAI"].tap()
 
@@ -616,8 +623,10 @@ final class CangJieSmokeUITests: XCTestCase {
         tailModel.tap()
         let nameField = app.textFields["model-connection-name"]
         XCTAssertTrue(nameField.waitForExistence(timeout: 5))
+        XCTAssertFalse(app.buttons["model-connection-save-current"].isEnabled)
         nameField.tap()
         nameField.typeText("我的测试连接")
+        XCTAssertTrue(app.buttons["model-connection-save-current"].isEnabled)
         app.buttons["model-connection-save-current"].tap()
 
         let currentHeader = app.staticTexts["current-model-connection-header"]
@@ -809,7 +818,8 @@ final class CangJieSmokeUITests: XCTestCase {
         )
         assertScaleConversationProjection(
             in: app,
-            expectedDraft: expectedDraft
+            expectedDraft: expectedDraft,
+            loadsEarlierMessages: true
         )
 
         let projectsButton = app.buttons["activity-bar-novels"]
@@ -1284,6 +1294,7 @@ final class CangJieSmokeUITests: XCTestCase {
     private func assertScaleConversationProjection(
         in app: XCUIApplication,
         expectedDraft: String,
+        loadsEarlierMessages: Bool = false,
         file: StaticString = #filePath,
         line: UInt = #line
     ) {
@@ -1293,14 +1304,28 @@ final class CangJieSmokeUITests: XCTestCase {
             file: file,
             line: line
         )
-        let historyNotice = app.staticTexts["conversation-history-window-notice"]
-        XCTAssertTrue(historyNotice.waitForExistence(timeout: 5), file: file, line: line)
-        XCTAssertEqual(
-            historyNotice.label,
-            "已显示最近的对话，更早内容会在后续滚动加载。",
+        let conversationRegion = app.descendants(matching: .any)["reader-companion-conversation"]
+        XCTAssertTrue(conversationRegion.waitForExistence(timeout: 5), file: file, line: line)
+        let messageScroll = conversationRegion.scrollViews.firstMatch
+        XCTAssertTrue(messageScroll.exists, file: file, line: line)
+        let newestMessage = app.staticTexts["conversation-message-199"]
+        XCTAssertTrue(newestMessage.waitForExistence(timeout: 5), file: file, line: line)
+        XCTAssertTrue(
+            newestMessage.isHittable,
+            "Restoring a conversation should initially locate its newest message",
             file: file,
             line: line
         )
+        let loadEarlier = app.buttons["conversation-load-earlier"]
+        reveal(
+            loadEarlier,
+            in: messageScroll,
+            swiping: .down,
+            maxSwipes: 40,
+            file: file,
+            line: line
+        )
+        XCTAssertEqual(loadEarlier.label, "加载更早对话", file: file, line: line)
         let firstMessage = app.staticTexts["conversation-message-0"]
         XCTAssertTrue(firstMessage.waitForExistence(timeout: 5), file: file, line: line)
         XCTAssertEqual(
@@ -1309,6 +1334,34 @@ final class CangJieSmokeUITests: XCTestCase {
             file: file,
             line: line
         )
+        if loadsEarlierMessages {
+            loadEarlier.tap()
+            let preservedAnchor = app.staticTexts["conversation-message-40"]
+            XCTAssertTrue(preservedAnchor.waitForExistence(timeout: 5), file: file, line: line)
+            XCTAssertEqual(
+                preservedAnchor.label,
+                "你：长对话消息 041",
+                file: file,
+                line: line
+            )
+            XCTAssertTrue(
+                preservedAnchor.isHittable,
+                "Loading earlier messages must preserve the prior first-message viewport anchor",
+                file: file,
+                line: line
+            )
+            let oldestMessage = app.staticTexts["conversation-message-0"]
+            reveal(
+                oldestMessage,
+                in: messageScroll,
+                swiping: .down,
+                maxSwipes: 12,
+                file: file,
+                line: line
+            )
+            XCTAssertEqual(oldestMessage.label, "你：长对话消息 001", file: file, line: line)
+            XCTAssertFalse(app.buttons["conversation-load-earlier"].exists)
+        }
     }
 
     private func assertScaleConversationWindowEnd(

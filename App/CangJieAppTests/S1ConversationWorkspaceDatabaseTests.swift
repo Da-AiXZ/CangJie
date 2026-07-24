@@ -3,6 +3,51 @@ import XCTest
 @testable import CangJie
 
 final class S1ConversationWorkspaceDatabaseTests: XCTestCase {
+    func testMessageWindowPagesBackwardWithoutSkippingEqualTimestamps() throws {
+        try withDatabase { database in
+            let conversation = try database.ensureDefaultConversation(
+                now: Date(timeIntervalSince1970: 1_000)
+            )
+            let timestamp = Date(timeIntervalSince1970: 1_001)
+            var messages: [AgentMessage] = []
+            for index in 0..<7 {
+                messages.append(
+                    try database.appendAgentMessage(
+                        conversationID: conversation.id,
+                        role: .user,
+                        content: "message-\(index)",
+                        now: timestamp
+                    )
+                )
+            }
+
+            let newest = try database.s1PreviewMessageWindow(
+                conversationID: conversation.id,
+                maximumMessageCount: 3,
+                maximumUTF8Bytes: 1_024
+            )
+            let middle = try database.s1PreviewMessageWindow(
+                conversationID: conversation.id,
+                beforeMessageID: try XCTUnwrap(newest.messages.first?.id),
+                maximumMessageCount: 3,
+                maximumUTF8Bytes: 1_024
+            )
+            let oldest = try database.s1PreviewMessageWindow(
+                conversationID: conversation.id,
+                beforeMessageID: try XCTUnwrap(middle.messages.first?.id),
+                maximumMessageCount: 3,
+                maximumUTF8Bytes: 1_024
+            )
+
+            XCTAssertEqual(newest.messages.map(\.id), Array(messages[4...6]).map(\.id))
+            XCTAssertTrue(newest.hasEarlierMessages)
+            XCTAssertEqual(middle.messages.map(\.id), Array(messages[1...3]).map(\.id))
+            XCTAssertTrue(middle.hasEarlierMessages)
+            XCTAssertEqual(oldest.messages.map(\.id), [messages[0].id])
+            XCTAssertFalse(oldest.hasEarlierMessages)
+        }
+    }
+
     func testFreshWorkspaceHasNoConversationAndDoesNotCreateProject() throws {
         try withDatabase { database in
             let workspace = try database.restoreS1ConversationWorkspace()

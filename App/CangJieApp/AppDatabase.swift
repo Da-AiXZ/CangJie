@@ -1739,6 +1739,9 @@ final class AppDatabase {
                 END
                 """)
         }
+        migrator.registerMigration("s2-provider-request-termination-v4") { db in
+            try Self.migrateProviderRequestTermination(db)
+        }
         return migrator
     }
 }

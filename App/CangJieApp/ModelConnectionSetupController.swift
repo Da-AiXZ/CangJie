@@ -44,6 +44,7 @@ enum ModelConnectionSetupStep: Equatable {
 enum ModelConnectionSetupFlowError: Error, Equatable {
     case databaseUnavailable
     case providerRequired
+    case unsupportedProvider
     case invalidCustomBaseURL
     case secretRequired
     case discoveryRequired
@@ -109,6 +110,20 @@ final class ModelConnectionSetupController: ObservableObject {
     var blocksComposer: Bool { step != .idle || pendingIntent != nil }
     var hasSensitiveDiscoveryState: Bool {
         attempt != nil || networkResult != nil || !secretInput.isEmpty
+    }
+
+    var canSaveCurrentConnection: Bool {
+        step == .nameConnection
+            && selectedProvider.map { ProviderGenerationCapability.supports($0) } == true
+            && !connectionNameInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    func canUseForGeneration(_ provider: ModelProvider) -> Bool {
+        ProviderGenerationCapability.supports(provider)
+    }
+
+    func canUseForGeneration(_ connection: ModelConnection) -> Bool {
+        canUseForGeneration(connection.provider)
     }
 
     func isPresented(for conversationID: UUID?) -> Bool {
@@ -225,6 +240,7 @@ final class ModelConnectionSetupController: ObservableObject {
         }
 
         if let currentMetadata,
+           canUseForGeneration(currentMetadata.connection),
            let verified = try? credentials.verifiedConnection(for: currentMetadata.connection) {
             currentConnection = verified.connection
             clearSensitiveDiscoveryState()
@@ -280,6 +296,10 @@ final class ModelConnectionSetupController: ObservableObject {
     }
 
     func selectProvider(_ provider: ModelProvider) {
+        guard canUseForGeneration(provider) else {
+            recordUnsupportedProviderSelection()
+            return
+        }
         generation = UUID()
         discoveryTask?.cancel()
         discoveryTask = nil
@@ -300,6 +320,10 @@ final class ModelConnectionSetupController: ObservableObject {
     func discoverModels() async throws {
         guard let provider = selectedProvider else {
             return try fail(.providerRequired, message: "请先选一个模型服务")
+        }
+        guard canUseForGeneration(provider) else {
+            recordUnsupportedProviderSelection()
+            throw ModelConnectionSetupFlowError.unsupportedProvider
         }
         guard !secretInput.isEmpty else {
             return try fail(.secretRequired, message: "请先输入 API Key")
@@ -411,6 +435,10 @@ final class ModelConnectionSetupController: ObservableObject {
         guard let attempt else {
             return try fail(.discoveryRequired, message: "请先测试连接并获取模型列表")
         }
+        guard canUseForGeneration(attempt.credentialBinding.provider) else {
+            recordUnsupportedProviderSelection()
+            throw ModelConnectionSetupFlowError.unsupportedProvider
+        }
         guard let result = networkResult else {
             return try fail(.discoveryRequired, message: "请先测试连接并获取模型列表")
         }
@@ -419,7 +447,9 @@ final class ModelConnectionSetupController: ObservableObject {
         }
         let name = connectionNameInput.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !name.isEmpty else {
-            return try fail(.connectionNameRequired, message: "请给这个连接起个名字")
+            errorMessage = "请给这个连接起个名字"
+            step = .nameConnection
+            throw ModelConnectionSetupFlowError.connectionNameRequired
         }
 
         step = .saving
@@ -488,10 +518,17 @@ final class ModelConnectionSetupController: ObservableObject {
                 message: "模型连接仍在安全恢复中，请稍后再试"
             )
         }
-        clearSensitiveDiscoveryState()
         guard let database,
-              let stored = try database.listModelConnections().first(where: { $0.connection.id == id }),
-              let verified = try credentials.verifiedConnection(for: stored.connection) else {
+              let stored = try database.listModelConnections().first(where: { $0.connection.id == id }) else {
+            errorMessage = "这个连接还没有通过凭证验证，暂时不能启用"
+            throw ModelConnectionSetupFlowError.credentialUnavailable
+        }
+        guard canUseForGeneration(stored.connection) else {
+            recordUnsupportedProviderSelection()
+            throw ModelConnectionSetupFlowError.unsupportedProvider
+        }
+        clearSensitiveDiscoveryState()
+        guard let verified = try credentials.verifiedConnection(for: stored.connection) else {
             errorMessage = "这个连接还没有通过凭证验证，暂时不能启用"
             throw ModelConnectionSetupFlowError.credentialUnavailable
         }
@@ -533,7 +570,16 @@ final class ModelConnectionSetupController: ObservableObject {
             return
         }
 
-        guard allowsPendingResume, let currentMetadata else {
+        guard let currentMetadata else {
+            currentConnection = nil
+            return
+        }
+        guard canUseForGeneration(currentMetadata.connection) else {
+            self.currentMetadata = nil
+            currentConnection = nil
+            return
+        }
+        guard allowsPendingResume else {
             currentConnection = nil
             return
         }
@@ -565,6 +611,13 @@ final class ModelConnectionSetupController: ObservableObject {
         secretInput = ""
         customBaseURLInput = ""
         connectionNameInput = ""
+    }
+
+    private func recordUnsupportedProviderSelection() {
+        clearSensitiveDiscoveryState()
+        resumeDecision = nil
+        errorMessage = ProviderGenerationCapability.unavailableMessage
+        step = .chooseProvider
     }
 
     private func invalidateDiscoveryAfterInputChange(from oldValue: String, to newValue: String) {

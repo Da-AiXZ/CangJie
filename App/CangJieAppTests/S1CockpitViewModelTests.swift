@@ -334,6 +334,60 @@ final class S1CockpitViewModelTests: XCTestCase {
         )
         XCTAssertTrue(reopenedWindow.hasEarlierMessages)
     }
+
+    @MainActor
+    func testLoadingEarlierConversationMessagesPrependsStableMessagesUntilHistoryStart() throws {
+        try withDatabase { database in
+            let conversation = try database.ensureDefaultConversation(
+                now: Date(timeIntervalSince1970: 1_000)
+            )
+            var storedMessages: [AgentMessage] = []
+            for index in 1...240 {
+                storedMessages.append(
+                    try database.appendAgentMessage(
+                        conversationID: conversation.id,
+                        role: .user,
+                        content: String(format: "message-%03d", index),
+                        now: Date(timeIntervalSince1970: TimeInterval(1_000 + index))
+                    )
+                )
+            }
+            let viewModel = makeViewModel(database: database)
+            let initiallyVisibleIDs = viewModel.conversationMessageItems.map(\.id)
+
+            XCTAssertEqual(viewModel.conversationMessageItems.count, 200)
+            XCTAssertEqual(viewModel.conversationMessageItems.first?.content, "message-041")
+            XCTAssertTrue(viewModel.hasEarlierConversationMessages)
+
+            viewModel.loadEarlierConversationMessages()
+
+            XCTAssertEqual(viewModel.conversationMessageItems.map(\.id), storedMessages.map(\.id))
+            XCTAssertEqual(
+                Array(viewModel.conversationMessageItems.suffix(200)).map(\.id),
+                initiallyVisibleIDs
+            )
+            XCTAssertEqual(Set(viewModel.conversationMessageItems.map(\.id)).count, 240)
+            XCTAssertFalse(viewModel.hasEarlierConversationMessages)
+
+            viewModel.loadEarlierConversationMessages()
+            XCTAssertEqual(viewModel.conversationMessageItems.map(\.id), storedMessages.map(\.id))
+
+            viewModel.draft = "message-241"
+            viewModel.sendS1PreviewMessage()
+
+            XCTAssertEqual(
+                Array(viewModel.conversationMessageItems.prefix(240)).map(\.id),
+                storedMessages.map(\.id)
+            )
+            XCTAssertEqual(viewModel.conversationMessageItems.count, 242)
+            XCTAssertEqual(viewModel.conversationMessageItems.suffix(2).map(\.content), [
+                "message-241",
+                S1ConversationPreview.systemReceipt
+            ])
+            XCTAssertFalse(viewModel.hasEarlierConversationMessages)
+        }
+    }
+
     @MainActor
     func testS1PreviewRestoreStopsAtUTF8ByteBudget() throws {
         try withDatabase { database in

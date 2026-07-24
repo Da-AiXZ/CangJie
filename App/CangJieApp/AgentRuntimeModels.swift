@@ -171,6 +171,7 @@ struct ChapterRuntimeSnapshot: Equatable {
 struct AgentRuntimeSnapshot {
     let conversation: AgentConversation
     let messages: [AgentMessage]
+    let hasEarlierMessages: Bool
     let projects: [NovelProject]
     let session: AgentSessionState
     let openingPlan: AgentArtifact?

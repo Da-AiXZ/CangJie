@@ -9,6 +9,7 @@ struct S2ProviderTaskProjection: Equatable {
     let task: AgentTaskSnapshot
     let run: AgentRunSnapshot
     let request: ProviderRequestSnapshot
+    let userRequest: String
     let usage: ProviderUsage?
     let receipt: ToolReceipt?
     let projectTitle: String?
@@ -30,6 +31,8 @@ struct S2ProviderTaskProjection: Equatable {
             return "模型回复已经收到，正在安全保存"
         case .continuationCommitted:
             return "这件事已经处理完成"
+        case .terminated:
+            return "这次处理已达到安全轮次上限"
         case .outcomeUnknown:
             return "本地安全对账已完成，这次请求的结果仍不能确认"
         case .failed:
@@ -75,6 +78,8 @@ struct S2ProviderTaskProjection: Equatable {
             return "正在把已收到的回复安全保存"
         case .continuationCommitted:
             return completedResultText
+        case .terminated:
+            return "这次处理已达到安全轮次上限"
         case .outcomeUnknown:
             return "正在核对上次模型请求的真实结果"
         case .failed:
@@ -97,12 +102,14 @@ struct S2ProviderTaskProjection: Equatable {
         case .waitingUser:
             return task.waitingReason == .networkConfirmation
                 ? "网络恢复后由你确认发送"
-                : "修复原模型连接后再继续"
+                : "重新建立连接或选择其他已保存连接后再继续"
         case .completed where task.outcome == .kept
             && request.phase == .outcomeUnknown:
             return "原请求不会重发，可以回到对话安排下一件事"
-        case .discarded, .failed:
+        case .discarded:
             return "可以回到对话安排下一件事"
+        case .failed:
+            return "可以回到当前对话明确重试"
         case .running, .completed:
             break
         }
@@ -111,6 +118,8 @@ struct S2ProviderTaskProjection: Equatable {
             return "完成后把真实结果保存到当前对话"
         case .continuationCommitted:
             return "可以回到当前对话继续安排下一步"
+        case .terminated:
+            return "已有结果已保留，没有结果的请求已释放"
         case .outcomeUnknown:
             return "先完成安全对账，再决定是否重试"
         case .failed, .cancelled:
@@ -131,7 +140,7 @@ struct S2ProviderTaskProjection: Equatable {
         case .waitingUser:
             return task.waitingReason == .networkConfirmation
                 ? "需要你确认是否发送"
-                : "需要你修复或重新选择原模型连接"
+                : "需要你重新建立连接或选择其他已保存连接"
         case .completed, .discarded:
             return "目前不需要你操作"
         case .failed:
@@ -144,6 +153,8 @@ struct S2ProviderTaskProjection: Equatable {
             return "结果仍未确认，请不要重复发送"
         case .failed, .cancelled:
             return "如果要继续，请明确重试"
+        case .terminated:
+            return "目前不需要你操作"
         case .prepared, .sending, .streaming, .responseComplete,
              .continuationCommitted:
             return "目前不需要你操作"
@@ -152,7 +163,11 @@ struct S2ProviderTaskProjection: Equatable {
 
     var usageText: String? {
         guard let usage else { return nil }
-        return "实际用量：输入 \(usage.inputTokens) · 输出 \(usage.outputTokens) · 合计 \(usage.totalTokens) tokens"
+        let value = "实际用量：输入 \(usage.inputTokens) · 输出 \(usage.outputTokens) · 合计 \(usage.totalTokens) tokens"
+        if request.phase == .outcomeUnknown {
+            return value + "；最终账单待服务商确认"
+        }
+        return value
     }
 
     var resultTitle: String? {
@@ -247,7 +262,7 @@ struct S2ProviderTaskProjection: Equatable {
         case .outcomeUnknown:
             return "结果未知：正在按原请求身份安全对账"
         case .connectionInvalid:
-            return "连接失效：原请求已保留，等待你修复连接"
+            return "连接失效：原请求已保留，等待你重新建立或选择连接"
         case nil:
             return nil
         }
@@ -327,21 +342,98 @@ extension AppDatabase {
         conversationID: UUID
     ) throws -> S2ProviderTaskProjection? {
         try queue.read { db in
-            guard let latestRequestRow = try Row.fetchOne(
+            guard let taskRow = try Row.fetchOne(
                 db,
                 sql: """
-                    SELECT * FROM providerRequest
+                    SELECT * FROM agentTask
                     WHERE conversationID = ?
-                    ORDER BY attemptNumber DESC, turnSequence DESC,
-                             updatedAt DESC, rowid DESC
+                    ORDER BY queueOrdinal DESC, updatedAt DESC, rowid DESC
                     LIMIT 1
                     """,
                 arguments: [conversationID.uuidString]
             ) else {
                 return nil
             }
+            let task = try Self.decodeAgentTask(taskRow)
+            guard task.conversationID == conversationID else {
+                throw AppDatabaseError.invalidAgentTask
+            }
+            return try Self.s2ProviderTaskProjection(task: task, in: db)
+        }
+    }
+
+    func s2ProviderTaskProjection(
+        taskID: UUID
+    ) throws -> S2ProviderTaskProjection? {
+        try queue.read { db in
+            guard let taskRow = try Row.fetchOne(
+                db,
+                sql: "SELECT * FROM agentTask WHERE id = ? LIMIT 1",
+                arguments: [taskID.uuidString]
+            ) else {
+                return nil
+            }
+            return try Self.s2ProviderTaskProjection(
+                task: Self.decodeAgentTask(taskRow),
+                in: db
+            )
+        }
+    }
+
+    func queuedS2ProviderTaskProjections() throws -> [S2ProviderTaskProjection] {
+        try queue.read { db in
+            let rows = try Row.fetchAll(
+                db,
+                sql: """
+                    SELECT * FROM agentTask
+                    WHERE status = 'queued'
+                    ORDER BY queueOrdinal ASC, rowid ASC
+                    """
+            )
+            return try rows.map { row in
+                try Self.s2ProviderTaskProjection(
+                    task: Self.decodeAgentTask(row),
+                    in: db
+                )
+            }
+        }
+    }
+
+    private static func s2ProviderTaskProjection(
+        task: AgentTaskSnapshot,
+        in db: Database
+    ) throws -> S2ProviderTaskProjection {
+        guard let intentRow = try Row.fetchOne(
+            db,
+            sql: "SELECT * FROM pendingModelIntent WHERE id = ? LIMIT 1",
+            arguments: [task.intentID.uuidString]
+        ) else {
+            throw AppDatabaseError.invalidPendingModelIntent
+        }
+        let intent = try Self.decodePendingModelIntent(intentRow)
+        guard intent.id == task.intentID,
+              intent.conversationID == task.conversationID,
+              intent.projectID == task.projectID,
+              intent.branchID == task.branchID else {
+            throw AppDatabaseError.invalidPendingModelIntent
+        }
+        guard let latestRequestRow = try Row.fetchOne(
+                db,
+                sql: """
+                    SELECT * FROM providerRequest
+                    WHERE intentID = ?
+                    ORDER BY attemptNumber DESC, turnSequence DESC,
+                             updatedAt DESC, rowid DESC
+                    LIMIT 1
+                    """,
+                arguments: [task.intentID.uuidString]
+            ) else {
+                throw AppDatabaseError.invalidProviderRequest
+            }
             let request = try Self.decodeProviderRequest(latestRequestRow)
-            guard request.identity.conversationID == conversationID else {
+            let conversationID = task.conversationID
+            guard request.identity.intentID == task.intentID,
+                  request.identity.conversationID == conversationID else {
                 throw AppDatabaseError.invalidProviderRequest
             }
 
@@ -363,10 +455,7 @@ extension AppDatabase {
             guard run.id == request.identity.runID else {
                 throw AppDatabaseError.invalidAgentRun
             }
-            guard let task = try Self.agentTask(
-                intentID: request.identity.intentID,
-                in: db
-            ), task.activeRunID == run.id,
+            guard task.activeRunID == run.id,
                   task.conversationID == conversationID,
                   task.projectID == request.identity.projectID,
                   task.branchID == request.identity.branchID else {
@@ -484,11 +573,12 @@ extension AppDatabase {
                 artifactTitle = nil
             }
 
-            return S2ProviderTaskProjection(
+        return S2ProviderTaskProjection(
                 conversationID: conversationID,
                 task: task,
                 run: run,
                 request: request,
+                userRequest: intent.userRequest,
                 usage: usage,
                 receipt: receipt,
                 projectTitle: projectTitle,
@@ -497,8 +587,7 @@ extension AppDatabase {
                     max(max(request.updatedAt, run.updatedAt), task.updatedAt),
                     receipt?.createdAt ?? request.updatedAt
                 )
-            )
-        }
+        )
     }
 
     private static func aggregateProviderUsage(

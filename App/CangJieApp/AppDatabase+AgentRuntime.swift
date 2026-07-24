@@ -405,12 +405,14 @@ extension AppDatabase {
 
     func s1PreviewMessageWindow(
         conversationID: UUID,
+        beforeMessageID: UUID? = nil,
         maximumMessageCount: Int = 200,
         maximumUTF8Bytes: Int = 512 * 1_024
     ) throws -> S1PreviewMessageWindow {
         try queue.read { db in
             try Self.s1PreviewMessageWindow(
                 conversationID: conversationID,
+                beforeMessageID: beforeMessageID,
                 maximumMessageCount: maximumMessageCount,
                 maximumUTF8Bytes: maximumUTF8Bytes,
                 in: db
@@ -736,6 +738,7 @@ extension AppDatabase {
             ) ?? ""
             messageWindow = try s1PreviewMessageWindow(
                 conversationID: selectedConversation.id,
+                beforeMessageID: nil,
                 maximumMessageCount: 200,
                 maximumUTF8Bytes: 512 * 1_024,
                 in: db
@@ -758,6 +761,7 @@ extension AppDatabase {
 
     private static func s1PreviewMessageWindow(
         conversationID: UUID,
+        beforeMessageID: UUID?,
         maximumMessageCount: Int,
         maximumUTF8Bytes: Int,
         in db: Database
@@ -768,16 +772,50 @@ extension AppDatabase {
         let fetchLimit = maximumMessageCount == Int.max
             ? maximumMessageCount
             : maximumMessageCount + 1
-        let newestRows = try Row.fetchAll(
-            db,
-            sql: """
-                SELECT * FROM agentMessage
-                WHERE conversationID = ?
-                ORDER BY createdAt DESC, rowid DESC
-                LIMIT ?
-                """,
-            arguments: [conversationID.uuidString, fetchLimit]
-        )
+        let newestRows: [Row]
+        if let beforeMessageID {
+            guard let cursor = try Row.fetchOne(
+                db,
+                sql: """
+                    SELECT createdAt, rowid AS messageRowID
+                    FROM agentMessage
+                    WHERE id = ? AND conversationID = ?
+                    """,
+                arguments: [beforeMessageID.uuidString, conversationID.uuidString]
+            ) else {
+                throw AppDatabaseError.invalidAgentSession
+            }
+            let cursorCreatedAt: Double = cursor["createdAt"]
+            let cursorRowID: Int64 = cursor["messageRowID"]
+            newestRows = try Row.fetchAll(
+                db,
+                sql: """
+                    SELECT * FROM agentMessage
+                    WHERE conversationID = ?
+                      AND (createdAt < ? OR (createdAt = ? AND rowid < ?))
+                    ORDER BY createdAt DESC, rowid DESC
+                    LIMIT ?
+                    """,
+                arguments: [
+                    conversationID.uuidString,
+                    cursorCreatedAt,
+                    cursorCreatedAt,
+                    cursorRowID,
+                    fetchLimit
+                ]
+            )
+        } else {
+            newestRows = try Row.fetchAll(
+                db,
+                sql: """
+                    SELECT * FROM agentMessage
+                    WHERE conversationID = ?
+                    ORDER BY createdAt DESC, rowid DESC
+                    LIMIT ?
+                    """,
+                arguments: [conversationID.uuidString, fetchLimit]
+            )
+        }
         let boundedRows = newestRows.prefix(maximumMessageCount)
         var newestMessages: [AgentMessage] = []
         newestMessages.reserveCapacity(boundedRows.count)

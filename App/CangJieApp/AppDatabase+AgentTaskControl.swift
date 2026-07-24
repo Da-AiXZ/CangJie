@@ -330,7 +330,8 @@ extension AppDatabase {
         let timestamp = try Self.canonicalAgentTaskTimestamp(now)
         return try queue.write { db in
             guard let task = try Self.agentTask(intentID: intentID, in: db),
-                  task.status == .pauseRequested
+                  task.status == .running
+                    || task.status == .pauseRequested
                     || task.status == .stopRequested
                     || (task.status == .reconciling
                         && task.requestedControl != nil) else {
@@ -378,12 +379,35 @@ extension AppDatabase {
                 )
                 try Self.updateProviderBackedRun(unknown, in: db)
             case .responseComplete:
-                let target: AgentTaskStatus = task.status == .pauseRequested
-                    ? .paused
-                    : .completed
-                let outcome: AgentTaskOutcome? = task.status == .stopRequested
-                    ? .kept
-                    : nil
+                if task.status == .running {
+                    _ = try Self.transitionAgentTask(
+                        id: task.id,
+                        expectedRevision: task.revision,
+                        commandID: UUID(),
+                        to: .failed,
+                        now: timestamp,
+                        in: db
+                    )
+                    try Self.finishProviderRun(
+                        request,
+                        status: .waitingUser,
+                        stage: "provider.hostContinuationFailed",
+                        in: db
+                    )
+                    break
+                }
+                let target: AgentTaskStatus
+                let outcome: AgentTaskOutcome?
+                switch task.status {
+                case .pauseRequested:
+                    target = .paused
+                    outcome = nil
+                case .stopRequested:
+                    target = .completed
+                    outcome = .kept
+                default:
+                    throw AppDatabaseError.invalidAgentTask
+                }
                 _ = try Self.transitionAgentTask(
                     id: task.id,
                     expectedRevision: task.revision,
@@ -404,7 +428,7 @@ extension AppDatabase {
                     now: timestamp,
                     in: db
                 )
-            case .cancelled, .failed, .outcomeUnknown,
+            case .cancelled, .failed, .terminated, .outcomeUnknown,
                  .continuationCommitted:
                 try Self.synchronizeAgentTask(for: request, in: db)
             }
@@ -455,7 +479,7 @@ extension AppDatabase {
                 return request
             case .prepared, .responseComplete:
                 return request
-            case .cancelled, .failed, .continuationCommitted:
+            case .cancelled, .failed, .terminated, .continuationCommitted:
                 throw AppDatabaseError.invalidProviderRequest
             }
         }
@@ -557,6 +581,151 @@ extension AppDatabase {
             }
             return transition.task
         }
+    }
+
+    func settleAgentTaskAtProviderTurnLimit(
+        intentID: UUID,
+        now: Date = Date()
+    ) throws -> AgentTaskSnapshot {
+        let timestamp = try Self.canonicalAgentTaskTimestamp(now)
+        return try queue.write { db in
+            guard let task = try Self.agentTask(intentID: intentID, in: db),
+                  task.status == .running,
+                  let requestRow = try Row.fetchOne(
+                    db,
+                    sql: """
+                        SELECT * FROM providerRequest
+                        WHERE intentID = ?
+                        ORDER BY attemptNumber DESC, turnSequence DESC, rowid DESC
+                        LIMIT 1
+                        """,
+                    arguments: [intentID.uuidString]
+                  ) else {
+                throw AppDatabaseError.invalidAgentTask
+            }
+            let request = try Self.decodeProviderRequest(requestRow)
+            guard request.phase == .responseComplete,
+                  request.identity.runID == task.activeRunID else {
+                throw AppDatabaseError.invalidProviderRequest
+            }
+            let receiptCount = try Int.fetchOne(
+                db,
+                sql: """
+                    SELECT COUNT(*)
+                    FROM toolReceipt AS receipt
+                    JOIN agentRun AS run ON run.id = receipt.originRunID
+                    WHERE run.taskID = ? AND receipt.outcome = 'completed'
+                    """,
+                arguments: [task.id.uuidString]
+            ) ?? 0
+            let terminated = try ProviderRequestLifecycle.terminateAfterResponse(
+                request,
+                reason: .outputLimit,
+                now: timestamp
+            )
+            try Self.updateProviderRequestRow(
+                terminated,
+                expectedPayloadHash: Self.payloadHash(
+                    try Self.encodeProviderRequest(request)
+                ),
+                in: db
+            )
+            if receiptCount > 0 {
+                let stopping = try Self.transitionAgentTask(
+                    id: task.id,
+                    expectedRevision: task.revision,
+                    commandID: UUID(),
+                    to: .stopRequested,
+                    hasAdoptedOutput: true,
+                    now: timestamp,
+                    in: db
+                ).task
+                let completed = try Self.transitionAgentTask(
+                    id: task.id,
+                    expectedRevision: stopping.revision,
+                    commandID: UUID(),
+                    to: .completed,
+                    outcome: .kept,
+                    hasAdoptedOutput: true,
+                    now: timestamp,
+                    in: db
+                ).task
+                try Self.finishProviderRun(
+                    terminated,
+                    status: .completed,
+                    stage: "provider.turnLimitKept",
+                    in: db
+                )
+                return completed
+            }
+            let failed = try Self.transitionAgentTask(
+                id: task.id,
+                expectedRevision: task.revision,
+                commandID: UUID(),
+                to: .failed,
+                now: timestamp,
+                in: db
+            ).task
+            let discarded = try Self.transitionAgentTask(
+                id: task.id,
+                expectedRevision: failed.revision,
+                commandID: UUID(),
+                to: .discarded,
+                outcome: .discarded,
+                now: timestamp,
+                in: db
+            ).task
+            try Self.finishProviderRun(
+                terminated,
+                status: .failed,
+                stage: "provider.turnLimitDiscarded",
+                in: db
+            )
+            return discarded
+        }
+    }
+
+    private static func finishProviderRun(
+        _ request: ProviderRequestSnapshot,
+        status: AgentRunStatus,
+        stage: String,
+        in db: Database
+    ) throws {
+        guard let row = try Row.fetchOne(
+            db,
+            sql: "SELECT * FROM agentRun WHERE id = ? AND conversationID = ?",
+            arguments: [
+                request.identity.runID.uuidString,
+                request.identity.conversationID.uuidString
+            ]
+        ) else {
+            throw AppDatabaseError.invalidAgentRun
+        }
+        let run = try decodeAgentRun(row)
+        let scopeMatches = try providerContinuationRunScopeMatches(
+            run,
+            request: request,
+            in: db
+        )
+        guard run.id == request.identity.runID,
+              scopeMatches,
+              run.kind == "providerTurn" else {
+            throw AppDatabaseError.invalidAgentRun
+        }
+        try upsertAgentRun(
+            AgentRunSnapshot(
+                id: run.id,
+                projectID: run.projectID,
+                kind: run.kind,
+                status: status,
+                idempotencyKey: run.idempotencyKey,
+                currentStage: stage,
+                startedAt: run.startedAt,
+                updatedAt: request.updatedAt
+            ),
+            conversationID: request.identity.conversationID,
+            in: db
+        )
     }
 
     static func transitionAgentTask(

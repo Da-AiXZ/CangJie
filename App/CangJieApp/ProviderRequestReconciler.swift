@@ -34,7 +34,7 @@ struct ProviderRequestReconciler {
         case .outcomeUnknown:
             return current
         case .prepared, .responseComplete, .continuationCommitted,
-             .cancelled, .failed:
+             .terminated, .cancelled, .failed:
             throw AppDatabaseError.invalidProviderRequest
         }
     }

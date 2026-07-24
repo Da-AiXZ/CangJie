@@ -100,12 +100,152 @@ final class ProviderGenerationNetworkClientTests: XCTestCase {
             JSONSerialization.jsonObject(with: body) as? [String: Any]
         )
         XCTAssertEqual(json["model"] as? String, "deepseek-chat")
+        XCTAssertEqual(json["max_tokens"] as? Int, 4_096)
         XCTAssertEqual(json["stream"] as? Bool, true)
         XCTAssertEqual((json["tools"] as? [[String: Any]])?.count, 5)
         XCTAssertFalse(
             try XCTUnwrap(String(data: body, encoding: .utf8))
                 .contains("fixture-secret")
         )
+    }
+
+    func testLegacyCatalogManifestSendsOnlyLegacyTools() async throws {
+        let fixture = try makeFixture(
+            provider: .openAI,
+            toolCatalogVersion: .v1,
+            requestPolicyVersion: .v1
+        )
+        let transport = RecordingProviderGenerationTransport(
+            events: [
+                .response(
+                    ProviderGenerationHTTPMetadata(
+                        statusCode: 200,
+                        responseURL: URL(string: "https://api.openai.com/v1/chat/completions")!,
+                        contentType: "text/event-stream"
+                    )
+                ),
+                .event(sse(#"{"choices":[{"delta":{"content":"ok"},"finish_reason":"stop"}]}"#)),
+                .event(sse(#"{"choices":[],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}"#)),
+                .event(sse("[DONE]"))
+            ]
+        )
+
+        _ = try await collect(
+            ProviderGenerationNetworkClient(transport: transport).stream(
+                request: fixture.request,
+                verifiedConnection: fixture.verifiedConnection,
+                secret: "fixture-secret",
+                systemPrompt: "system",
+                userPrompt: fixture.intent.userRequest
+            )
+        )
+
+        let recordedRequests = await transport.requests()
+        let recorded = try XCTUnwrap(recordedRequests.first)
+        let body = try XCTUnwrap(recorded.request.httpBody)
+        let json = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: body) as? [String: Any]
+        )
+        let tools = try XCTUnwrap(json["tools"] as? [[String: Any]])
+        XCTAssertNil(json["max_tokens"])
+        let names = try tools.map { tool in
+            try XCTUnwrap(
+                (tool["function"] as? [String: Any])?["name"] as? String
+            )
+        }
+        XCTAssertEqual(names, ["project_create", "project_status"])
+    }
+
+    func testCurrentCatalogSendsOnlyGovernedProjectTools() async throws {
+        let fixture = try makeFixture(
+            provider: .openAI,
+            toolCatalogVersion: .v3
+        )
+        let transport = RecordingProviderGenerationTransport(
+            events: [
+                .response(
+                    ProviderGenerationHTTPMetadata(
+                        statusCode: 200,
+                        responseURL: URL(string: "https://api.openai.com/v1/chat/completions")!,
+                        contentType: "text/event-stream"
+                    )
+                ),
+                .event(sse(#"{"choices":[{"delta":{"content":"ok"},"finish_reason":"stop"}]}"#)),
+                .event(sse(#"{"choices":[],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}"#)),
+                .event(sse("[DONE]"))
+            ]
+        )
+
+        _ = try await collect(
+            ProviderGenerationNetworkClient(transport: transport).stream(
+                request: fixture.request,
+                verifiedConnection: fixture.verifiedConnection,
+                secret: "fixture-secret",
+                systemPrompt: "system",
+                userPrompt: fixture.intent.userRequest
+            )
+        )
+
+        let recordedRequests = await transport.requests()
+        let recorded = try XCTUnwrap(recordedRequests.first)
+        let body = try XCTUnwrap(recorded.request.httpBody)
+        let json = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: body) as? [String: Any]
+        )
+        let tools = try XCTUnwrap(json["tools"] as? [[String: Any]])
+        let names = try tools.map { tool in
+            try XCTUnwrap(
+                (tool["function"] as? [String: Any])?["name"] as? String
+            )
+        }
+        XCTAssertEqual(
+            names,
+            ["project_create", "project_list", "project_status"]
+        )
+        XCTAssertFalse(names.contains("project_switch"))
+        XCTAssertFalse(names.contains("project_save_discussion"))
+        let createFunction = try XCTUnwrap(
+            (tools.first?["function"] as? [String: Any])
+        )
+        let parameters = try XCTUnwrap(
+            createFunction["parameters"] as? [String: Any]
+        )
+        let properties = try XCTUnwrap(
+            parameters["properties"] as? [String: [String: Any]]
+        )
+        for name in ["title", "premise"] {
+            let description = try XCTUnwrap(
+                properties[name]?["description"] as? String
+            )
+            XCTAssertTrue(description.contains("exact"))
+            XCTAssertTrue(description.contains("do not"))
+        }
+    }
+
+    func testUnknownCatalogManifestFailsBeforeTransport() async throws {
+        let fixture = try makeFixture(
+            provider: .openAI,
+            toolCatalogManifestHash: hash("3")
+        )
+        let transport = RecordingProviderGenerationTransport(events: [])
+        let client = ProviderGenerationNetworkClient(transport: transport)
+
+        XCTAssertThrowsError(
+            try client.validate(
+                request: fixture.preparedRequest,
+                verifiedConnection: fixture.verifiedConnection,
+                secret: "fixture-secret",
+                systemPrompt: "system",
+                userPrompt: fixture.intent.userRequest
+            )
+        ) { error in
+            XCTAssertEqual(
+                error as? ProviderGenerationError,
+                .invalidPreparedRequest
+            )
+        }
+        let recordedRequests = await transport.requests()
+        XCTAssertTrue(recordedRequests.isEmpty)
     }
 
     func testContinuationRequestCarriesExactAssistantCallAndToolResult() async throws {
@@ -148,7 +288,8 @@ final class ProviderGenerationNetworkClientTests: XCTestCase {
                     callIndex: 0,
                     contentJSON: resultJSON
                 )
-            ]
+            ],
+            allowsToolCalls: false
         )
         let preparedContinuation = try ProviderRequestLifecycle.prepare(
             requestID: UUID(),
@@ -162,9 +303,9 @@ final class ProviderGenerationNetworkClientTests: XCTestCase {
             responseAssetID: UUID(),
             promptManifestHash: hash("6"),
             contextManifestHash: hash("2"),
-            toolCatalogManifestHash: hash("3"),
+            toolCatalogManifestHash: fixture.request.toolCatalogManifestHash,
             disclosureScopeHash: hash("4"),
-            requestPolicyHash: hash("5"),
+            requestPolicyHash: fixture.request.requestPolicyHash,
             now: fixture.request.updatedAt
         )
         let continuationRequest = try ProviderRequestLifecycle.markSending(
@@ -202,6 +343,8 @@ final class ProviderGenerationNetworkClientTests: XCTestCase {
         XCTAssertEqual(function["arguments"] as? String, "{}")
         XCTAssertEqual(messages[3]["tool_call_id"] as? String, "call-1")
         XCTAssertEqual(messages[3]["content"] as? String, resultJSON)
+        XCTAssertEqual(json["tool_choice"] as? String, "none")
+        XCTAssertNil(json["tools"])
     }
 
     func testAuthenticationRejectionIsDefiniteButServerFailureIsUnknown() async throws {
@@ -332,7 +475,10 @@ final class ProviderGenerationNetworkClientTests: XCTestCase {
     }
 
     private func makeFixture(
-        provider: ModelProvider
+        provider: ModelProvider,
+        toolCatalogVersion: ProviderToolCatalogVersion = .v2,
+        toolCatalogManifestHash: String? = nil,
+        requestPolicyVersion: ProviderRequestPolicyVersion = .v2
     ) throws -> (
         intent: PendingModelIntent,
         verifiedConnection: VerifiedModelConnection,
@@ -388,9 +534,14 @@ final class ProviderGenerationNetworkClientTests: XCTestCase {
             responseAssetID: UUID(),
             promptManifestHash: hash("1"),
             contextManifestHash: hash("2"),
-            toolCatalogManifestHash: hash("3"),
+            toolCatalogManifestHash: toolCatalogManifestHash
+                ?? toolCatalogVersion.manifestHash,
             disclosureScopeHash: hash("4"),
-            requestPolicyHash: hash("5"),
+            requestPolicyHash: requestPolicyVersion.manifestHash(
+                provider: connection.provider,
+                baseURL: connection.baseURL,
+                modelID: connection.selectedModel
+            ),
             now: now
         )
         let request = try ProviderRequestLifecycle.markSending(

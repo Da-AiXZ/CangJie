@@ -3,7 +3,8 @@
 - 状态：`ACTIVE EVIDENCE REGISTER`
 - 登记日期：2026-07-18
 - 适用范围：Context、Prompt、Agent Loop、Tools、Session、恢复、Subagent、Hooks、权限和治理
-- 关联基线：`docs/AGENT_HARNESS_ARCHITECTURE.md`
+- 权威边界：`docs/adr/0004-host-control-and-model-trust-boundary.md`
+- 设计参考：`docs/AGENT_HARNESS_ARCHITECTURE.md`
 
 本文只登记来源、允许提取的非表达性工程原则和禁止边界，不保存第三方源码、私有 Prompt、Schema、字符串或目录映射。
 
@@ -55,7 +56,7 @@ status: non-official, provenance incomplete, implementation use forbidden
 ## 3. 后续实现隔离规则
 
 1. 实现任务只读取本登记、官方公开来源、仓颉产品文档和 ADR，不再读取 `cc.zip`。
-2. 每个 Harness ADR 写明：官方公开证据、仓颉产品需求、原创决定、替代方案和测试证据。
+2. 新的耐久 Harness 决策必须进入独立 ADR，并写明官方公开证据、仓颉产品需求、原创决定、替代方案和测试证据；设计参考本身不能冻结决策。
 3. Swift 类型名、目录、协议、状态机、Prompt 和测试从仓颉问题域独立命名。
 4. 提交前扫描私有包独特字符串、Prompt、Schema 和目录相似性；发现疑似相似内容即停止并重写。
 5. 该流程是风险控制，不构成法律意见，也不对外宣传为经过第三方认证的 clean-room 实现。
