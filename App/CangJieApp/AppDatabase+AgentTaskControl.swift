@@ -906,7 +906,7 @@ extension AppDatabase {
         }
     }
 
-    private static func promoteNextAgentTask(
+    static func promoteNextAgentTask(
         now: Date,
         in db: Database
     ) throws -> AgentTaskSnapshot? {
