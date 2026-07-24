@@ -537,7 +537,7 @@ extension AppDatabase {
                     }
                 }
             }
-            try Self.transitionAgentTask(
+            return try Self.transitionAgentTask(
                 id: id,
                 expectedRevision: expectedRevision,
                 commandID: commandID,
