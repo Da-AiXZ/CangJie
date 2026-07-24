@@ -66,6 +66,38 @@ final class ProviderRequestPersistenceTests: XCTestCase {
         )
     }
 
+    func testPreparedRequestStillSettlesAnExplicitStopAndKeepsResults() throws {
+        let fixture = try makeFixture()
+        let prepared = try fixture.database.persistPreparedProviderRequest(
+            fixture.request,
+            verifiedConnection: fixture.verifiedConnection
+        )
+        let running = try XCTUnwrap(
+            fixture.database.agentTask(intentID: fixture.intent.id)
+        )
+        let stopRequested = try fixture.database.transitionAgentTask(
+            id: running.id,
+            expectedRevision: running.revision,
+            commandID: UUID(),
+            to: .stopRequested,
+            now: fixture.now.addingTimeInterval(1)
+        ).task
+
+        let settled = try fixture.database.settleAgentTaskControlAfterProviderExit(
+            intentID: fixture.intent.id,
+            preservePreparedIfUnsent: true,
+            now: fixture.now.addingTimeInterval(2)
+        )
+
+        XCTAssertEqual(settled?.status, .completed)
+        XCTAssertEqual(settled?.outcome, .kept)
+        XCTAssertEqual(settled?.revision, stopRequested.revision + 1)
+        XCTAssertEqual(
+            try fixture.database.providerRequest(id: prepared.identity.requestID)?.phase,
+            .cancelled
+        )
+    }
+
     func testCompletedResponseRequiresFinishReasonMatchingToolShape() throws {
         let call = ProviderToolCallPayload(
             index: 0,

@@ -649,28 +649,26 @@ struct ContentView: View {
             conversation
                 .frame(width: conversationWidth, height: size.height)
                 .offset(x: conversationLeading)
-                .allowsHitTesting(selectedActivity == .conversation)
                 .accessibilityElement(children: .contain)
                 .accessibilityIdentifier("landscape-conversation-region")
-                .accessibilityHidden(selectedActivity != .conversation)
 
             activityBar
                 .frame(width: activityWidth, height: size.height)
-                .allowsHitTesting(selectedActivity == .conversation)
-                .accessibilityHidden(selectedActivity != .conversation)
 
             Color(uiColor: .separator)
                 .frame(width: dividerWidth, height: size.height)
                 .accessibilityHidden(true)
                 .offset(x: activityWidth)
 
-            conversationRail
+            leftRegion
                 .frame(width: railWidth, height: size.height)
                 .offset(x: activityWidth + dividerWidth)
-                .allowsHitTesting(selectedActivity == .conversation)
                 .accessibilityElement(children: .contain)
-                .accessibilityIdentifier("landscape-conversation-rail")
-                .accessibilityHidden(selectedActivity != .conversation)
+                .accessibilityIdentifier(
+                    selectedActivity == .conversation
+                        ? "landscape-conversation-rail"
+                        : "landscape-left-region"
+                )
 
             Color(uiColor: .separator)
                 .frame(width: dividerWidth, height: size.height)
@@ -685,17 +683,8 @@ struct ContentView: View {
                 artifacts
                     .frame(width: resultsWidth, height: size.height)
                     .offset(x: size.width - resultsWidth)
-                    .allowsHitTesting(selectedActivity == .conversation)
                     .accessibilityElement(children: .contain)
                     .accessibilityIdentifier("landscape-results-region")
-                    .accessibilityHidden(selectedActivity != .conversation)
-            }
-
-            if selectedActivity != .conversation {
-                landscapeIndependentPageOverlay(
-                    size: size,
-                    leading: activityWidth + dividerWidth
-                )
             }
         }
         .clipped()
@@ -724,10 +713,8 @@ struct ContentView: View {
             }
             .frame(width: readerWidth, height: size.height)
             .offset(x: mainLeading)
-            .allowsHitTesting(selectedActivity == .conversation)
             .accessibilityElement(children: .contain)
             .accessibilityIdentifier("landscape-reader-region")
-            .accessibilityHidden(selectedActivity != .conversation)
 
             Color(uiColor: .separator)
                 .frame(width: dividerWidth, height: size.height)
@@ -737,38 +724,30 @@ struct ContentView: View {
             readerCompanionRegion
                 .frame(width: companionWidth, height: size.height)
                 .offset(x: mainLeading + readerWidth + dividerWidth)
-                .allowsHitTesting(selectedActivity == .conversation)
-                .accessibilityHidden(selectedActivity != .conversation)
 
             activityBar
                 .frame(width: activityWidth, height: size.height)
-                .allowsHitTesting(selectedActivity == .conversation)
-                .accessibilityHidden(selectedActivity != .conversation)
 
             Color(uiColor: .separator)
                 .frame(width: dividerWidth, height: size.height)
                 .accessibilityHidden(true)
                 .offset(x: activityWidth)
 
-            conversationRail
+            leftRegion
                 .frame(width: railWidth, height: size.height)
                 .offset(x: activityWidth + dividerWidth)
-                .allowsHitTesting(selectedActivity == .conversation)
                 .accessibilityElement(children: .contain)
-                .accessibilityIdentifier("landscape-conversation-rail")
-                .accessibilityHidden(selectedActivity != .conversation)
+                .accessibilityIdentifier(
+                    selectedActivity == .conversation
+                        ? "landscape-conversation-rail"
+                        : "landscape-left-region"
+                )
 
             Color(uiColor: .separator)
                 .frame(width: dividerWidth, height: size.height)
                 .accessibilityHidden(true)
                 .offset(x: activityWidth + dividerWidth + railWidth)
 
-            if selectedActivity != .conversation {
-                landscapeIndependentPageOverlay(
-                    size: size,
-                    leading: activityWidth + dividerWidth
-                )
-            }
         }
         .clipped()
         .accessibilityElement(children: .contain)
@@ -830,38 +809,6 @@ struct ContentView: View {
         )
         .accessibilityValue(isSelected ? "当前页面" : "未选择")
     }
-    private func landscapeIndependentPageOverlay(size: CGSize, leading: CGFloat) -> some View {
-        let panelWidth = min(380, max(320, size.width * 0.34))
-
-        return ZStack(alignment: .topLeading) {
-            Button {
-                dismissIndependentLeftSurface()
-            } label: {
-                Color.black.opacity(0.16)
-                    .frame(width: max(0, size.width - leading), height: size.height)
-            }
-            .buttonStyle(.plain)
-            .offset(x: leading)
-            .accessibilityLabel("关闭左侧页面")
-            .accessibilityIdentifier("landscape-left-overlay-dismiss")
-
-            leftRegion
-                .frame(width: panelWidth, height: size.height)
-                .background(Color(uiColor: .secondarySystemGroupedBackground))
-                .overlay(alignment: .trailing) {
-                    Color(uiColor: .separator)
-                        .frame(width: 1)
-                        .accessibilityHidden(true)
-                }
-                .offset(x: leading)
-                .shadow(color: .black.opacity(0.14), radius: 16, x: 5, y: 0)
-                .accessibilityElement(children: .contain)
-                .accessibilityIdentifier("landscape-left-page-overlay")
-        }
-        .accessibilityElement(children: .contain)
-        .accessibilityAddTraits(.isModal)
-    }
-
     private func portraitWorkspace(size: CGSize) -> some View {
         let topBarHeight: CGFloat = dynamicTypeSize.isAccessibilitySize ? 104 : 54
         let contentHeight = max(0, size.height - topBarHeight)
@@ -1102,11 +1049,8 @@ struct ContentView: View {
         }
     }
 
-    @ViewBuilder
     private var activityBar: some View {
-        if selectedActivity == .conversation {
-            activityBarContent
-        }
+        activityBarContent
     }
 
     private var activityBarContent: some View {

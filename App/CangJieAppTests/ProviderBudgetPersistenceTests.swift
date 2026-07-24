@@ -788,6 +788,83 @@ final class ProviderBudgetPersistenceTests: XCTestCase {
         )
     }
 
+    func testApprovedRequestCanBeRejectedAfterACommittedToolReceipt() throws {
+        let fixture = try makeFixture()
+        let task = try XCTUnwrap(
+            fixture.database.agentTask(intentID: fixture.intent.id)
+        )
+        let toolResult = try fixture.database.executeArtifactTool(
+            conversationID: fixture.intent.conversationID,
+            projectID: nil,
+            toolID: "artifact.save",
+            kind: "provider-budget-approved-rejection",
+            title: "已完成成果",
+            body: "批准后的拒绝仍必须保留",
+            status: "completed",
+            idempotencyKey: "provider-budget.approved-receipt.\(task.id.uuidString)",
+            now: fixture.now.addingTimeInterval(0.5)
+        )
+        try fixture.database.queue.write { db in
+            try db.execute(
+                sql: "UPDATE toolReceipt SET originRunID = ? WHERE id = ?",
+                arguments: [
+                    fixture.request.identity.runID.uuidString,
+                    toolResult.receipt.id.uuidString
+                ]
+            )
+        }
+        let estimate = try makeEstimate(
+            taskID: task.id,
+            request: fixture.request,
+            outputTokens: 20_000
+        )
+        let gate = try fixture.database.authorizeAndMarkProviderRequestSending(
+            fixture.request,
+            initialPolicy: try makePolicy(taskID: task.id),
+            estimate: estimate,
+            now: fixture.now.addingTimeInterval(1)
+        )
+        guard case let .requiresApproval(approval) = gate else {
+            return XCTFail("Expected approval")
+        }
+        _ = try fixture.database.approveProviderBudgetApproval(
+            approvalID: approval.id,
+            displayedBindingHash: approval.bindingHash,
+            estimate: estimate,
+            now: fixture.now.addingTimeInterval(2)
+        )
+        let running = try XCTUnwrap(
+            fixture.database.agentTask(intentID: fixture.intent.id)
+        )
+        _ = try fixture.database.transitionAgentTask(
+            id: running.id,
+            expectedRevision: running.revision,
+            commandID: UUID(),
+            to: .waitingUser,
+            waitingReason: .connectionInvalid,
+            now: fixture.now.addingTimeInterval(3)
+        )
+
+        let rejected = try fixture.database.rejectProviderBudgetApproval(
+            approvalID: approval.id,
+            displayedBindingHash: approval.bindingHash,
+            now: fixture.now.addingTimeInterval(4)
+        )
+
+        XCTAssertEqual(rejected.status, .completed)
+        XCTAssertEqual(rejected.outcome, .kept)
+        XCTAssertEqual(
+            try fixture.database.toolReceipt(
+                idempotencyKey: toolResult.receipt.idempotencyKey!
+            )?.id,
+            toolResult.receipt.id
+        )
+        XCTAssertEqual(
+            try fixture.database.providerRequest(id: fixture.request.identity.requestID)?.phase,
+            .cancelled
+        )
+    }
+
     func testCompletedAndUnknownUsageSettlementAreIdempotent() throws {
         let completedFixture = try makeFixture()
         let completedTask = try XCTUnwrap(

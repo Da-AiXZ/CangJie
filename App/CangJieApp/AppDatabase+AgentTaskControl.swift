@@ -368,26 +368,6 @@ extension AppDatabase {
                     in: db
                 )
                 try Self.updateProviderBackedRun(cancelled, in: db)
-                if task.status == .pauseRequested {
-                    _ = try Self.transitionAgentTask(
-                        id: task.id,
-                        expectedRevision: task.revision,
-                        commandID: UUID(),
-                        to: .paused,
-                        now: timestamp,
-                        in: db
-                    )
-                } else if task.status == .stopRequested {
-                    _ = try Self.transitionAgentTask(
-                        id: task.id,
-                        expectedRevision: task.revision,
-                        commandID: UUID(),
-                        to: .completed,
-                        outcome: .kept,
-                        now: timestamp,
-                        in: db
-                    )
-                }
             case .sending, .streaming:
                 let unknown = try ProviderRequestLifecycle.markOutcomeUnknown(
                     request,

@@ -39,7 +39,7 @@ final class CangJieSmokeUITests: XCTestCase {
         XCTAssertFalse(app.staticTexts["Conversation artifacts"].exists)
     }
 
-    func testLandscapeResultDrawerAndNavigationReleaseComposerFocusAndHideBackgroundAccessibility() {
+    func testLandscapeNavigationReplacesOnlyLeftRegionAndKeepsCenterInteractive() {
         let app = makeIsolatedApp()
         launchWithDeterministicTimestampSetting(app)
 
@@ -61,18 +61,38 @@ final class CangJieSmokeUITests: XCTestCase {
 
         app.buttons["activity-bar-novels"].tap()
 
+        let leftPage = app.descendants(matching: .any)["novel-projects-page"]
         XCTAssertTrue(
-            app.descendants(matching: .any)["landscape-left-page-overlay"]
-                .waitForExistence(timeout: 5)
+            leftPage.waitForExistence(timeout: 5)
         )
-        assertEventually(composer, hasKeyboardFocus: false)
-        XCTAssertFalse(composer.isHittable)
-        XCTAssertFalse(resultButton.isHittable)
-        XCTAssertFalse(app.buttons["activity-bar-conversation"].isHittable)
+        XCTAssertTrue(
+            app.descendants(matching: .any)["landscape-left-region"].exists
+        )
         XCTAssertFalse(
-            app.descendants(matching: .any)["landscape-conversation-rail"].isHittable
+            app.descendants(matching: .any)["landscape-left-page-overlay"].exists
+        )
+        XCTAssertFalse(app.buttons["landscape-left-overlay-dismiss"].exists)
+        assertEventually(composer, hasKeyboardFocus: false)
+        XCTAssertEqual(composer.value as? String, "focus-contract")
+        XCTAssertTrue(
+            app.descendants(matching: .any)["landscape-conversation-region"].exists
+        )
+        XCTAssertTrue(composer.isHittable)
+        XCTAssertTrue(resultButton.isHittable)
+        XCTAssertTrue(app.buttons["activity-bar-conversation"].isHittable)
+        XCTAssertTrue(app.buttons["activity-bar-novels"].isHittable)
+        XCTAssertFalse(
+            app.descendants(matching: .any)["landscape-conversation-rail"].exists
         )
         XCTAssertTrue(app.buttons["novel-projects-back-button"].exists)
+
+        composer.tap()
+        assertEventually(composer, hasKeyboardFocus: true)
+        XCTAssertEqual(composer.value as? String, "focus-contract")
+
+        resultButton.tap()
+        XCTAssertTrue(app.staticTexts["results-empty-state"].waitForExistence(timeout: 5))
+        XCTAssertTrue(leftPage.exists)
     }
 
     func testPortraitNavigationOverlayIsModalAndUsesAccurateCloseLabels() {
@@ -152,11 +172,20 @@ final class CangJieSmokeUITests: XCTestCase {
 
         XCUIDevice.shared.orientation = .landscapeLeft
         XCTAssertTrue(
-            app.descendants(matching: .any)["landscape-left-page-overlay"]
+            app.descendants(matching: .any)["workspace-landscape-columns"]
                 .waitForExistence(timeout: 10)
         )
         XCTAssertTrue(app.descendants(matching: .any)["novel-projects-page"].exists)
-        XCTAssertFalse(composer.isHittable)
+        XCTAssertTrue(
+            app.descendants(matching: .any)["landscape-left-region"].exists
+        )
+        XCTAssertFalse(
+            app.descendants(matching: .any)["landscape-left-page-overlay"].exists
+        )
+        XCTAssertFalse(app.buttons["landscape-left-overlay-dismiss"].exists)
+        XCTAssertTrue(composer.isHittable)
+        XCTAssertTrue(app.buttons["result-drawer-toggle"].isHittable)
+        XCTAssertTrue(app.buttons["activity-bar-conversation"].isHittable)
 
         XCUIDevice.shared.orientation = .portrait
         XCTAssertTrue(
@@ -164,6 +193,7 @@ final class CangJieSmokeUITests: XCTestCase {
                 .waitForExistence(timeout: 10)
         )
         XCTAssertTrue(app.descendants(matching: .any)["novel-projects-page"].exists)
+        XCTAssertFalse(composer.isHittable)
 
         app.buttons["novel-projects-back-button"].tap()
         XCTAssertTrue(
@@ -321,7 +351,7 @@ final class CangJieSmokeUITests: XCTestCase {
         XCTAssertTrue(feedback.label.contains("书架已刷新 |"))
         XCTAssertEqual(feedback.label.filter { $0 == "|" }.count, 2)
         XCTAssertFalse(feedback.label.contains("?"))
-        XCTAssertFalse(businessStatus.isHittable)
+        XCTAssertTrue(businessStatus.exists)
 
         let backButton = app.buttons["novel-projects-back-button"]
         XCTAssertTrue(backButton.waitForExistence(timeout: 5))
@@ -350,7 +380,7 @@ final class CangJieSmokeUITests: XCTestCase {
         XCTAssertTrue(app.descendants(matching: .any)["novel-projects-page"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.staticTexts["novel-projects-empty-state"].exists)
         XCTAssertFalse(app.buttons["novel-project-row-0"].exists)
-        XCTAssertFalse(app.descendants(matching: .any)["welcome-page"].exists)
+        XCTAssertTrue(app.descendants(matching: .any)["welcome-page"].exists)
         XCTAssertFalse(app.buttons["conversation-row-0"].exists)
 
         let backButton = app.buttons["novel-projects-back-button"]
@@ -389,7 +419,7 @@ final class CangJieSmokeUITests: XCTestCase {
         XCTAssertTrue(projectRow.label.contains("雾城守夜人"))
         XCTAssertTrue(projectRow.label.contains("刚保存了故事念头，还没有开始正文"))
         XCTAssertFalse(projectRow.label.contains("封闭十年的山门在雨夜重新响起"))
-        XCTAssertFalse(app.staticTexts["你：\(fixtureMessage)"].exists)
+        XCTAssertTrue(app.staticTexts["你：\(fixtureMessage)"].exists)
 
         projectRow.tap()
 
@@ -406,7 +436,7 @@ final class CangJieSmokeUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["novel-project-detail-stage-note"].exists)
         XCTAssertFalse(app.descendants(matching: .any)["novel-project-detail-entry-continue"].exists)
         XCTAssertFalse(app.descendants(matching: .any)["novel-project-detail-entry-materials-tasks"].exists)
-        XCTAssertFalse(app.staticTexts["你：\(fixtureMessage)"].exists)
+        XCTAssertTrue(app.staticTexts["你：\(fixtureMessage)"].exists)
 
         let detailBackButton = app.buttons["novel-project-detail-back-button"]
         XCTAssertTrue(detailBackButton.waitForExistence(timeout: 5))
@@ -492,7 +522,7 @@ final class CangJieSmokeUITests: XCTestCase {
 
         XCTAssertTrue(app.descendants(matching: .any)["novel-projects-page"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.buttons["projects-refresh-button"].exists)
-        XCTAssertFalse(app.staticTexts["你：" + secondText].exists)
+        XCTAssertTrue(app.staticTexts["你：" + secondText].exists)
 
         let projectsBackButton = app.buttons["novel-projects-back-button"]
         XCTAssertTrue(projectsBackButton.waitForExistence(timeout: 5))
@@ -524,7 +554,7 @@ final class CangJieSmokeUITests: XCTestCase {
             tasksEmptyState.label,
             "当前没有需要处理的 AI 任务。你在对话里交给仓颉的真实工作会显示在这里。"
         )
-        XCTAssertFalse(app.staticTexts["你：\(fixtureMessage)"].exists)
+        XCTAssertTrue(app.staticTexts["你：\(fixtureMessage)"].exists)
         app.buttons["ai-tasks-back-button"].tap()
         XCTAssertEqual(app.buttons["activity-bar-conversation"].value as? String, "当前页面")
         XCTAssertEqual(conversationRow.value as? String, "当前对话")

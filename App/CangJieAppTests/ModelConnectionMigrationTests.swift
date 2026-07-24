@@ -239,6 +239,30 @@ final class ModelConnectionMigrationTests: XCTestCase {
         try withTemporaryDatabasePath { path in
             let legacy = try makePublishedV1ProviderRequestDatabase(at: path)
             let receiptID = UUID()
+            let responseHash = AppDatabase.payloadHash(
+                ProviderResponsePayload.emptyJSON
+            )
+            let sending = try ProviderRequestLifecycle.markSending(
+                legacy.request,
+                now: legacy.request.createdAt.addingTimeInterval(1)
+            )
+            let streaming = try ProviderRequestLifecycle.checkpointStream(
+                sending,
+                cursor: 1,
+                receivedUTF8Bytes: ProviderResponsePayload.emptyJSON.utf8.count,
+                responseHash: responseHash,
+                now: legacy.request.createdAt.addingTimeInterval(2)
+            )
+            let responseComplete = try ProviderRequestLifecycle.complete(
+                streaming,
+                responseHash: responseHash,
+                usage: ProviderUsage(
+                    inputTokens: 1,
+                    outputTokens: 1,
+                    totalTokens: 2
+                ),
+                now: legacy.request.createdAt.addingTimeInterval(3)
+            )
             do {
                 var configuration = Configuration()
                 configuration.foreignKeysEnabled = true
@@ -251,15 +275,31 @@ final class ModelConnectionMigrationTests: XCTestCase {
                     upTo: "s2-pending-model-intent-admission-v3"
                 )
                 try queue.write { db in
-                    for phase in ["sending", "streaming", "responseComplete"] {
+                    for request in [sending, streaming, responseComplete] {
+                        let payload = try encodeProviderRequest(request)
                         try db.execute(
-                            sql: "UPDATE providerRequest SET phase = ? WHERE id = ?",
+                            sql: """
+                                UPDATE providerRequest
+                                SET phase = ?, payloadJSON = ?, payloadHash = ?,
+                                    updatedAt = ?
+                                WHERE id = ?
+                                """,
                             arguments: [
-                                phase,
-                                legacy.request.identity.requestID.uuidString
+                                request.phase.rawValue,
+                                payload,
+                                AppDatabase.payloadHash(payload),
+                                request.updatedAt.timeIntervalSince1970,
+                                request.identity.requestID.uuidString
                             ]
                         )
                     }
+                    try db.execute(
+                        sql: "UPDATE providerResponseAsset SET updatedAt = ? WHERE id = ?",
+                        arguments: [
+                            responseComplete.updatedAt.timeIntervalSince1970,
+                            responseComplete.responseAssetID.uuidString
+                        ]
+                    )
                     try db.execute(
                         sql: """
                             INSERT INTO toolReceipt (

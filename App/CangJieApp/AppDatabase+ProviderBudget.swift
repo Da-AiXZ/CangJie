@@ -543,7 +543,7 @@ extension AppDatabase {
                 settled = try Self.transitionAgentTask(
                     id: stoppingSource.id,
                     expectedRevision: stoppingSource.revision,
-                    commandID: approvalID,
+                    commandID: UUID(),
                     to: .completed,
                     outcome: .kept,
                     hasAdoptedOutput: true,
@@ -567,7 +567,7 @@ extension AppDatabase {
                 settled = try Self.transitionAgentTask(
                     id: paused.id,
                     expectedRevision: paused.revision,
-                    commandID: approvalID,
+                    commandID: UUID(),
                     to: .discarded,
                     outcome: .discarded,
                     now: timestamp,

@@ -50,29 +50,30 @@ S2.
 
 | Area | Decision | Implementation | Automation | Device |
 |---|---|---|---|---|
-| S1 cockpit and workspace | Frozen | Main workspace, durable conversation, paging and queue UI exist; opening a left feature page still overlays and disables the center instead of preserving an independent left stack | Existing exact-SHA App and UI suites encode the current modal behavior and therefore do not prove the frozen boundary | Independent-left-stack repair plus Dynamic Type, VoiceOver, rotation/navigation and scroll retention pending |
+| S1 cockpit and workspace | Frozen | Main workspace, durable conversation, paging and queue UI exist; the pending change replaces only the landscape left region and keeps the center, Activity Bar, reader and results interactive, while portrait remains modal | Core layout contracts and revised XCUITest sources pass local validation; exact-SHA Apple execution is pending | Dynamic Type, VoiceOver, rotation/navigation, stream and scroll-retention device checks pending |
 | Provider/credential/discovery | Frozen | Credential binding and supported-provider gating are implemented | Exact-SHA Core, App and Keychain probe passed | Real connection setup pending |
 | Real Provider generation | Frozen boundary | Durable request/usage and strict finish semantics implemented; stream checkpointing is throttled but coordinator remains MainActor | Deterministic Provider App/UI contracts passed | Real Provider streaming pending |
 | Typed Tool and ToolReceipt | Frozen boundary | One tool batch plus no-tool final turn and exact receipts exist; admission still accepts only a small fixed phrase grammar, while switch/save remain unadvertised | Deterministic fixtures pass only the accepted phrases | Natural-language admission, remaining S2 tool actions and real Provider lifecycle pending |
 | Task control and recovery | Frozen boundary | Explicit retry, responseComplete local continuation, unknown-outcome non-retry and terminal turn limit are implemented | Exact-SHA App and UI lifecycle suites passed | Lock, force-quit and notification checks pending |
-| Budget governance | Frozen requirement | Persisted cumulative token/cost/time policy, exact request approval, atomic reservation/send, terminal settlement and conservative legacy backfill are implemented in the pending worktree | Local Core and static contracts pass; exact-SHA Apple tests pending | Device approval/recovery behavior pending |
+| Budget governance | Frozen requirement | Persisted cumulative token/cost/time policy, exact request approval, atomic reservation/send, terminal settlement and conservative legacy backfill are checked in; the pending change repairs duplicate prepared-request settlement and approval/rejection command collisions exposed by Apple XCTest | Core CI passed for `02db196`; iPadOS run `30119223859` exposed five App-test failures before XCUITest, and the causal repairs now pass local parse/Core gates | Device approval/recovery behavior pending |
 
 ## Pending worktree evidence
 
-- Core: 188 XCTest and 15 Swift Testing tests passed; line coverage is 91.80%.
+- Core: 189 XCTest and 15 Swift Testing tests passed; line coverage is 91.80%.
 - All App, App-test and UI-test Swift sources pass parser validation.
 - Nine Python import, build-identity, candidate and artifact contract scripts pass.
 - This is local evidence only. It does not replace exact-SHA iPadOS semantic
   compile, XCTest, XCUITest, Keychain isolation or physical-device evidence.
 
-## Current exact-SHA automation
+## Latest completed exact-SHA automation
 
-- Commit: `7c6b059b3841be6709fb760affed522ec387000f`
-- Core CI: `30093994570` passed.
-- iPadOS CI: `30093994501` passed.
-- App XCTest: 423 passed; XCUITest: 22 passed; Keychain isolation probe: 13 passed.
-- Local Core: 174 XCTest and 15 Swift Testing passed with 92.35% line coverage.
-- Python build/import/candidate contracts: 9 scripts passed.
+- Commit: `02db196c58ce0a95a57b59602e1f3c733793b47e`
+- Core CI: `30119223690` passed.
+- iPadOS CI: `30119223859` failed in App XCTest; XCUITest was skipped and the
+  Keychain isolation probe passed.
+- The five App-test failures proved two production transaction regressions and
+  one migration-fixture inconsistency. They are repaired in the pending change
+  without weakening Provider, budget or migration validation.
 
 This proves the checked-in contracts and deterministic fixtures. It does not prove
 a real paid Provider response, device VoiceOver focus, physical lifecycle behavior
@@ -101,19 +102,18 @@ device status.
 
 ## Active blocker
 
-S1 still violates the independent-left-stack boundary and needs Dynamic Type,
-VoiceOver, rotation/navigation and scroll-retention device checks. The S2 budget
-loop is implemented locally but lacks exact-SHA Apple evidence. S2 also still
-uses fixed-phrase Tool admission, does not advertise the required switch/save
-actions, and needs the complete real Provider / Typed Tool lifecycle on device.
+The S1 independent-left-stack and S2 budget transaction repairs still need
+exact-SHA Apple App/XCUITest evidence, followed by Dynamic Type, VoiceOver,
+rotation/navigation and scroll-retention device checks. S2 also still uses
+fixed-phrase Tool admission, does not advertise the required switch/save actions,
+and needs the complete real Provider / Typed Tool lifecycle on device.
 
 ## Immediate queue
 
-1. Commit the persisted budget boundary and rerun exact-SHA Core and iPadOS gates.
-2. Repair the independent left stack without recreating or disabling the center.
-3. Replace fixed-phrase Tool admission and close the remaining S2 switch/save and result-projection gaps.
-4. Rerun affected exact-SHA gates, then build a new candidate.
-5. Run the physical-device differential script, including real Provider, VoiceOver and lifecycle checks.
+1. Commit the budget transaction and independent-left-stack repairs, then rerun exact-SHA Core and iPadOS gates.
+2. Replace fixed-phrase Tool admission and close the remaining S2 switch/save and result-projection gaps.
+3. Rerun affected exact-SHA gates, then build a new candidate.
+4. Run the physical-device differential script, including real Provider, VoiceOver and lifecycle checks.
 
 ## Stable decision routing
 

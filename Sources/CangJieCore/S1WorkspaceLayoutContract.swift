@@ -88,7 +88,7 @@ public enum S1WorkspaceLayoutContract {
                 showsPersistentActivityBar: true,
                 showsPersistentConversationRail: true,
                 usesSinglePrimaryFocus: false,
-                opensIndependentPagesAsOverlay: true
+                opensIndependentPagesAsOverlay: false
             )
         case .portraitSingleFocus:
             return S1WorkspaceLayoutProjection(

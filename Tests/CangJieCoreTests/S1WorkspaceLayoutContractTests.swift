@@ -80,16 +80,19 @@ final class S1WorkspaceLayoutContractTests: XCTestCase {
         }
     }
 
-    func testLayoutProjectionKeepsIndependentPagesOverlayedWithoutCompressingThePrimaryArea() {
+    func testLayoutProjectionKeepsIndependentPagesInTheLeftRegionForLandscape() {
         XCTAssertEqual(
             S1WorkspaceLayoutContract.projection(for: .landscapeColumns),
             S1WorkspaceLayoutProjection(
                 showsPersistentActivityBar: true,
                 showsPersistentConversationRail: true,
                 usesSinglePrimaryFocus: false,
-                opensIndependentPagesAsOverlay: true
+                opensIndependentPagesAsOverlay: false
             )
         )
+    }
+
+    func testLayoutProjectionKeepsIndependentPagesAsOverlayForPortrait() {
         XCTAssertEqual(
             S1WorkspaceLayoutContract.projection(for: .portraitSingleFocus),
             S1WorkspaceLayoutProjection(
