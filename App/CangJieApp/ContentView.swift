@@ -820,9 +820,9 @@ struct ContentView: View {
                 .offset(y: topBarHeight)
                 .opacity(showingConversation && !showingNavigation ? 1 : 0)
                 .allowsHitTesting(showingConversation && !showingNavigation)
+                .accessibilityHidden(!showingConversation || showingNavigation)
                 .accessibilityElement(children: .contain)
                 .accessibilityIdentifier("portrait-conversation-region")
-                .accessibilityHidden(!showingConversation || showingNavigation)
 
             if model.hasReadableContent && showingReader && !showingNavigation {
                 VStack(spacing: 0) {

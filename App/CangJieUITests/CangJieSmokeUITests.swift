@@ -1474,9 +1474,9 @@ final class CangJieSmokeUITests: XCTestCase {
             file: file,
             line: line
         )
-        let hiddenContent = showingResults ? conversationContent : resultsContent
-        XCTAssertFalse(
-            hiddenContent.isHittable,
+        XCTAssertEqual(
+            app.textViews["agent-composer"].isHittable,
+            !showingResults,
             file: file,
             line: line
         )
@@ -1511,13 +1511,6 @@ final class CangJieSmokeUITests: XCTestCase {
                     file: file,
                     line: line
                 )
-            } else {
-                XCTAssertFalse(
-                    region.isHittable,
-                    "Expected portrait-\(focus)-region to be non-interactive",
-                    file: file,
-                    line: line
-                )
             }
             XCTAssertEqual(
                 app.buttons["portrait-focus-\(focus)"].value as? String,
@@ -1531,6 +1524,12 @@ final class CangJieSmokeUITests: XCTestCase {
             NSPredicate(format: "identifier BEGINSWITH %@ AND value == %@", "portrait-focus-", "当前页面")
         )
         XCTAssertEqual(selectedTabs.count, 1, file: file, line: line)
+        XCTAssertEqual(
+            app.textViews["agent-composer"].isHittable,
+            selectedFocus == "conversation",
+            file: file,
+            line: line
+        )
     }
 
     private func makeIsolatedApp(fixture: String? = nil) -> XCUIApplication {
