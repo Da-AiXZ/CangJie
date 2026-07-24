@@ -8,44 +8,117 @@ extension AppDatabase {
                 SELECT sql FROM sqlite_master
                 WHERE type = 'table' AND name = 'providerRequest'
                 """
-        ) else {
+        ), tableSQL.contains("'responseComplete', 'continuationCommitted',"),
+           !tableSQL.contains("'terminated'") else {
             throw AppDatabaseError.invalidProviderRequest
         }
-        let oldFragment = "'responseComplete', 'continuationCommitted',"
-        let newFragment =
-            "'responseComplete', 'continuationCommitted', 'terminated',"
-        let parts = tableSQL.components(separatedBy: oldFragment)
-        guard parts.count == 2,
-              !tableSQL.contains("'terminated'") else {
-            throw AppDatabaseError.invalidProviderRequest
-        }
-        let migratedSQL = parts[0] + newFragment + parts[1]
 
-        try db.execute(sql: "PRAGMA writable_schema = ON")
-        defer { try? db.execute(sql: "PRAGMA writable_schema = OFF") }
+        try db.execute(sql: """
+            CREATE TABLE providerRequest_v4 (
+                id TEXT PRIMARY KEY NOT NULL,
+                idempotencyKey TEXT NOT NULL UNIQUE,
+                intentID TEXT NOT NULL
+                    REFERENCES pendingModelIntent(id) ON DELETE RESTRICT,
+                conversationID TEXT NOT NULL
+                    REFERENCES agentConversation(id) ON DELETE RESTRICT,
+                projectID TEXT
+                    REFERENCES novelProject(id) ON DELETE RESTRICT,
+                runID TEXT NOT NULL
+                    REFERENCES agentRun(id) ON DELETE RESTRICT,
+                attemptNumber INTEGER NOT NULL CHECK (
+                    attemptNumber BETWEEN 1 AND 8
+                ),
+                turnSequence INTEGER NOT NULL CHECK (
+                    turnSequence BETWEEN 1 AND 8
+                ),
+                previousRequestID TEXT
+                    REFERENCES providerRequest_v4(id) ON DELETE RESTRICT,
+                connectionID TEXT NOT NULL
+                    REFERENCES modelConnection(id) ON DELETE RESTRICT,
+                responseAssetID TEXT NOT NULL UNIQUE
+                    REFERENCES providerResponseAsset(id) ON DELETE RESTRICT,
+                phase TEXT NOT NULL CHECK (
+                    phase IN (
+                        'prepared', 'sending', 'streaming',
+                        'responseComplete', 'continuationCommitted', 'terminated',
+                        'cancelled', 'failed', 'outcomeUnknown'
+                    )
+                ),
+                payloadVersion INTEGER NOT NULL CHECK (payloadVersion = 1),
+                payloadJSON TEXT NOT NULL,
+                payloadHash TEXT NOT NULL CHECK (
+                    length(payloadHash) = 64
+                    AND payloadHash NOT GLOB '*[^0-9a-f]*'
+                ),
+                createdAt DOUBLE NOT NULL,
+                updatedAt DOUBLE NOT NULL,
+                CHECK (
+                    (
+                        attemptNumber = 1
+                        AND turnSequence = 1
+                        AND previousRequestID IS NULL
+                    )
+                    OR (
+                        NOT (attemptNumber = 1 AND turnSequence = 1)
+                        AND previousRequestID IS NOT NULL
+                    )
+                )
+            )
+            """)
+        try db.execute(sql: """
+            INSERT INTO providerRequest_v4 (
+                id, idempotencyKey, intentID, conversationID, projectID,
+                runID, attemptNumber, turnSequence, previousRequestID,
+                connectionID, responseAssetID, phase, payloadVersion,
+                payloadJSON, payloadHash, createdAt, updatedAt
+            )
+            SELECT
+                id, idempotencyKey, intentID, conversationID, projectID,
+                runID, attemptNumber, turnSequence, previousRequestID,
+                connectionID, responseAssetID, phase, payloadVersion,
+                payloadJSON, payloadHash, createdAt, updatedAt
+            FROM providerRequest
+            """)
+        try db.execute(sql: "DROP TABLE providerRequest")
         try db.execute(
-            sql: """
-                UPDATE sqlite_master
-                SET sql = ?
-                WHERE type = 'table' AND name = 'providerRequest' AND sql = ?
-                """,
-            arguments: [migratedSQL, tableSQL]
+            sql: "ALTER TABLE providerRequest_v4 RENAME TO providerRequest"
         )
-        guard db.changesCount == 1 else {
-            throw AppDatabaseError.invalidProviderRequest
-        }
-        try db.execute(sql: "PRAGMA writable_schema = OFF")
 
-        let schemaVersion = try Int.fetchOne(
-            db,
-            sql: "PRAGMA schema_version"
-        ) ?? 0
-        guard schemaVersion < Int.max else {
-            throw AppDatabaseError.invalidProviderRequest
-        }
-        try db.execute(sql: "PRAGMA schema_version = \(schemaVersion + 1)")
-
-        try db.execute(sql: "DROP TRIGGER providerRequest_phase_transition_guard")
+        try db.execute(sql: """
+            CREATE INDEX providerRequest_conversation_updated
+            ON providerRequest (conversationID, updatedAt DESC)
+            """)
+        try db.execute(sql: """
+            CREATE UNIQUE INDEX providerRequest_intent_attempt_turn
+            ON providerRequest (intentID, attemptNumber, turnSequence)
+            """)
+        try db.execute(sql: """
+            CREATE UNIQUE INDEX providerRequest_previous_unique
+            ON providerRequest (previousRequestID)
+            WHERE previousRequestID IS NOT NULL
+            """)
+        try db.execute(sql: """
+            CREATE UNIQUE INDEX providerRequest_intent_active
+            ON providerRequest (intentID)
+            WHERE phase IN (
+                'prepared', 'sending', 'streaming', 'outcomeUnknown'
+            )
+            """)
+        try db.execute(sql: """
+            CREATE INDEX providerRequest_run_sequence
+            ON providerRequest (runID, attemptNumber, turnSequence)
+            """)
+        try db.execute(sql: """
+            CREATE TRIGGER providerRequest_identity_immutable
+            BEFORE UPDATE OF
+                id, idempotencyKey, intentID, conversationID, projectID,
+                runID, attemptNumber, turnSequence, previousRequestID,
+                connectionID, responseAssetID, createdAt
+            ON providerRequest
+            BEGIN
+                SELECT RAISE(ABORT, 'provider request identity is immutable');
+            END
+            """)
         try db.execute(sql: """
             CREATE TRIGGER providerRequest_phase_transition_guard
             BEFORE UPDATE OF phase ON providerRequest
