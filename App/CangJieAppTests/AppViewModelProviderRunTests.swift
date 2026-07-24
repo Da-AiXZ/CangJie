@@ -252,7 +252,7 @@ final class AppViewModelProviderRunTests: XCTestCase {
             try database.agentTask(intentID: intent.id)?.status,
             .failed
         )
-        let requestCount = try database.queue.read { db in
+        let requestCount = try await database.queue.read { db in
             try Int.fetchOne(
                 db,
                 sql: "SELECT COUNT(*) FROM providerRequest WHERE intentID = ?",
