@@ -66,10 +66,15 @@ final class CangJieSmokeUITests: XCTestCase {
                 .waitForExistence(timeout: 5)
         )
         assertEventually(composer, hasKeyboardFocus: false)
-        XCTAssertFalse(composer.exists)
-        XCTAssertFalse(resultButton.exists)
-        XCTAssertFalse(app.buttons["activity-bar-conversation"].exists)
-        XCTAssertFalse(app.descendants(matching: .any)["landscape-conversation-rail"].exists)
+        XCTAssertTrue(composer.waitForNonExistence(timeout: 5))
+        XCTAssertTrue(resultButton.waitForNonExistence(timeout: 5))
+        XCTAssertTrue(
+            app.buttons["activity-bar-conversation"].waitForNonExistence(timeout: 5)
+        )
+        XCTAssertTrue(
+            app.descendants(matching: .any)["landscape-conversation-rail"]
+                .waitForNonExistence(timeout: 5)
+        )
         XCTAssertTrue(app.buttons["novel-projects-back-button"].exists)
     }
 
@@ -97,10 +102,18 @@ final class CangJieSmokeUITests: XCTestCase {
         XCTAssertEqual(dismissButton.label, "关闭导航")
         XCTAssertEqual(closeButton.label, "关闭导航")
 
-        XCTAssertFalse(app.textViews["agent-composer"].exists)
-        XCTAssertFalse(app.buttons["portrait-navigation-open"].exists)
-        XCTAssertFalse(app.buttons["portrait-focus-conversation"].exists)
-        XCTAssertFalse(app.buttons["portrait-focus-results"].exists)
+        XCTAssertTrue(
+            app.textViews["agent-composer"].waitForNonExistence(timeout: 5)
+        )
+        XCTAssertTrue(
+            app.buttons["portrait-navigation-open"].waitForNonExistence(timeout: 5)
+        )
+        XCTAssertTrue(
+            app.buttons["portrait-focus-conversation"].waitForNonExistence(timeout: 5)
+        )
+        XCTAssertTrue(
+            app.buttons["portrait-focus-results"].waitForNonExistence(timeout: 5)
+        )
         XCTAssertTrue(app.buttons["portrait-activity-conversation"].exists)
     }
 
@@ -319,7 +332,7 @@ final class CangJieSmokeUITests: XCTestCase {
         XCTAssertTrue(feedback.label.contains("书架已刷新 |"))
         XCTAssertEqual(feedback.label.filter { $0 == "|" }.count, 2)
         XCTAssertFalse(feedback.label.contains("?"))
-        XCTAssertFalse(businessStatus.exists)
+        XCTAssertTrue(businessStatus.waitForNonExistence(timeout: 5))
 
         let backButton = app.buttons["novel-projects-back-button"]
         XCTAssertTrue(backButton.waitForExistence(timeout: 5))
@@ -736,7 +749,14 @@ final class CangJieSmokeUITests: XCTestCase {
         XCTAssertFalse(app.buttons["ai-task-resume-button"].exists)
         XCTAssertFalse(app.buttons["ai-task-discard-button"].exists)
         let keep = app.buttons["ai-task-keep-button"]
+        reveal(
+            keep,
+            in: app.descendants(matching: .any)["ai-tasks-page"],
+            swiping: .up,
+            maxSwipes: 4
+        )
         XCTAssertTrue(keep.waitForExistence(timeout: 5))
+        XCTAssertTrue(keep.isHittable)
         keep.tap()
 
         assertEventually(
@@ -781,7 +801,14 @@ final class CangJieSmokeUITests: XCTestCase {
             "结果未知：正在按原请求身份安全对账"
         )
         let keep = app.buttons["ai-task-keep-button"]
+        reveal(
+            keep,
+            in: app.descendants(matching: .any)["ai-tasks-page"],
+            swiping: .up,
+            maxSwipes: 4
+        )
         XCTAssertTrue(keep.waitForExistence(timeout: 5))
+        XCTAssertTrue(keep.isHittable)
         XCTAssertFalse(app.buttons["ai-task-resume-button"].exists)
         keep.tap()
 
@@ -1452,8 +1479,18 @@ final class CangJieSmokeUITests: XCTestCase {
         let conversationTab = app.buttons["reader-companion-conversation-tab"]
         let resultsTab = app.buttons["reader-companion-results-tab"]
 
-        XCTAssertEqual(conversationContent.exists, !showingResults, file: file, line: line)
-        XCTAssertEqual(resultsContent.exists, showingResults, file: file, line: line)
+        let visibleContent = showingResults ? resultsContent : conversationContent
+        let hiddenContent = showingResults ? conversationContent : resultsContent
+        XCTAssertTrue(
+            visibleContent.waitForExistence(timeout: 5),
+            file: file,
+            line: line
+        )
+        XCTAssertTrue(
+            hiddenContent.waitForNonExistence(timeout: 5),
+            file: file,
+            line: line
+        )
         XCTAssertEqual(
             conversationTab.value as? String,
             showingResults ? "未选择" : "当前页面",
@@ -1477,9 +1514,12 @@ final class CangJieSmokeUITests: XCTestCase {
         let focuses = ["reader", "conversation", "results"]
         for focus in focuses {
             let shouldBeVisible = focus == selectedFocus
-            XCTAssertEqual(
-                app.descendants(matching: .any)["portrait-\(focus)-region"].exists,
-                shouldBeVisible,
+            let region = app.descendants(matching: .any)["portrait-\(focus)-region"]
+            let reachedExpectedVisibility = shouldBeVisible
+                ? region.waitForExistence(timeout: 5)
+                : region.waitForNonExistence(timeout: 5)
+            XCTAssertTrue(
+                reachedExpectedVisibility,
                 "Expected portrait-\(focus)-region visibility to be \(shouldBeVisible)",
                 file: file,
                 line: line
