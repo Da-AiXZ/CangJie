@@ -34,7 +34,7 @@ Authority is scoped, not a single total ordering:
 
 ## Work method
 
-- Plan complex or cross-boundary work. Use TDD for behavior changes and target at least 80% executable coverage.
+- Plan complex or cross-boundary work. Use TDD for behavior changes; keep `CangJieCore` at or above 90% line coverage and target at least 80% across executable code.
 - Agents are optional sidecars, not a mandatory ceremony. Use them only for independent work with minimal context; the main task owns the critical path and never waits on redundant Agent work.
 - Preserve all existing uncommitted changes and generated evidence unless the user explicitly authorizes removal.
 - Before editing, inspect the current diff and the newest relevant CI evidence.

@@ -5,6 +5,139 @@ import XCTest
 
 @MainActor
 final class ProviderAgentRunCoordinatorTests: XCTestCase {
+    func testUnknownPricingPausesBeforeTransportAndKeepsExactPreparedRequest() async throws {
+        let fixture = try makeFixture(saveCredential: true)
+        let service = RecordingProviderGenerationService(events: [])
+        let coordinator = ProviderAgentRunCoordinator(
+            database: fixture.database,
+            credentials: fixture.credentials,
+            generation: service,
+            budgetEstimator: FailClosedProviderBudgetEstimator(),
+            now: { fixture.now }
+        )
+
+        do {
+            _ = try await coordinator.run(
+                intent: fixture.intent,
+                verifiedConnection: fixture.verifiedConnection
+            )
+            XCTFail("Expected budget approval")
+        } catch {
+            XCTAssertEqual(
+                error as? ProviderAgentRunError,
+                .budgetApprovalRequired
+            )
+        }
+
+        XCTAssertEqual(service.callCount, 0)
+        let request = try XCTUnwrap(
+            fixture.database.providerRequest(intentID: fixture.intent.id)
+        )
+        XCTAssertEqual(request.phase, .prepared)
+        let task = try XCTUnwrap(
+            fixture.database.agentTask(intentID: fixture.intent.id)
+        )
+        XCTAssertEqual(task.status, .paused)
+        let approval = try XCTUnwrap(
+            fixture.database.pendingProviderBudgetApproval(taskID: task.id)
+        )
+        XCTAssertEqual(approval.providerRequestID, request.identity.requestID)
+        XCTAssertEqual(approval.status, .pending)
+    }
+
+    func testExactBudgetApprovalResumesAndSendsTheSamePreparedRequest() async throws {
+        let fixture = try makeFixture(saveCredential: true)
+        let estimator = FailClosedProviderBudgetEstimator()
+        let pausedService = RecordingProviderGenerationService(events: [])
+        let pausedCoordinator = ProviderAgentRunCoordinator(
+            database: fixture.database,
+            credentials: fixture.credentials,
+            generation: pausedService,
+            budgetEstimator: estimator,
+            now: { fixture.now }
+        )
+        do {
+            _ = try await pausedCoordinator.run(
+                intent: fixture.intent,
+                verifiedConnection: fixture.verifiedConnection
+            )
+            XCTFail("Expected budget approval")
+        } catch {
+            XCTAssertEqual(
+                error as? ProviderAgentRunError,
+                .budgetApprovalRequired
+            )
+        }
+
+        let prepared = try XCTUnwrap(
+            fixture.database.providerRequest(intentID: fixture.intent.id)
+        )
+        let task = try XCTUnwrap(
+            fixture.database.agentTask(intentID: fixture.intent.id)
+        )
+        let approval = try XCTUnwrap(
+            fixture.database.pendingProviderBudgetApproval(taskID: task.id)
+        )
+        let prompt = ProviderGenerationPrompt.initial(
+            systemPrompt: ProviderAgentRunCoordinator.systemPrompt,
+            userPrompt: fixture.intent.userRequest
+        )
+        let estimate = try estimator.estimate(
+            taskScope: ProviderRequestBudgetTaskScope(
+                taskID: task.id,
+                intentID: task.intentID,
+                activeRunID: prepared.identity.runID
+            ),
+            request: prepared,
+            prompt: prompt
+        )
+        let approved = try fixture.database.approveProviderBudgetApproval(
+            approvalID: approval.id,
+            displayedBindingHash: approval.bindingHash,
+            estimate: estimate,
+            now: fixture.now.addingTimeInterval(1)
+        )
+        XCTAssertEqual(approved.status, .approved)
+        XCTAssertEqual(
+            try fixture.database.providerRequest(id: prepared.identity.requestID)?.phase,
+            .prepared
+        )
+
+        let service = RecordingProviderGenerationService(events: [
+            .textDelta("approved"),
+            .finished(reason: "stop"),
+            .usage(
+                ProviderUsage(
+                    inputTokens: 4,
+                    outputTokens: 2,
+                    totalTokens: 6
+                )
+            )
+        ])
+        let coordinator = ProviderAgentRunCoordinator(
+            database: fixture.database,
+            credentials: fixture.credentials,
+            generation: service,
+            budgetEstimator: estimator,
+            now: { fixture.now.addingTimeInterval(2) }
+        )
+        let completion = try await coordinator.run(
+            intent: fixture.intent,
+            verifiedConnection: fixture.verifiedConnection
+        )
+
+        XCTAssertEqual(service.callCount, 1)
+        XCTAssertEqual(
+            completion.request.identity.requestID,
+            prepared.identity.requestID
+        )
+        XCTAssertEqual(completion.request.phase, .responseComplete)
+        XCTAssertEqual(
+            try fixture.database.providerBudgetApproval(id: approval.id)?.status,
+            .consumed
+        )
+    }
+
     func testRequestIsDurableAndSendingBeforeTransportStarts() async throws {
         let fixture = try makeFixture(saveCredential: true)
         let service = RecordingProviderGenerationService(
@@ -39,6 +172,7 @@ final class ProviderAgentRunCoordinatorTests: XCTestCase {
             database: fixture.database,
             credentials: fixture.credentials,
             generation: service,
+            budgetEstimator: DeterministicTestProviderBudgetEstimator(),
             now: { fixture.now }
         )
         var projections: [ProviderRunProjection] = []
@@ -74,6 +208,7 @@ final class ProviderAgentRunCoordinatorTests: XCTestCase {
             database: fixture.database,
             credentials: fixture.credentials,
             generation: service,
+            budgetEstimator: DeterministicTestProviderBudgetEstimator(),
             now: { fixture.now }
         )
 
@@ -119,6 +254,7 @@ final class ProviderAgentRunCoordinatorTests: XCTestCase {
             database: fixture.database,
             credentials: fixture.credentials,
             generation: service,
+            budgetEstimator: DeterministicTestProviderBudgetEstimator(),
             now: { fixture.now }
         )
 
@@ -182,6 +318,7 @@ final class ProviderAgentRunCoordinatorTests: XCTestCase {
             database: fixture.database,
             credentials: fixture.credentials,
             generation: service,
+            budgetEstimator: DeterministicTestProviderBudgetEstimator(),
             now: { fixture.now }
         )
 
@@ -207,6 +344,7 @@ final class ProviderAgentRunCoordinatorTests: XCTestCase {
             database: fixture.database,
             credentials: fixture.credentials,
             generation: firstService,
+            budgetEstimator: DeterministicTestProviderBudgetEstimator(),
             now: { fixture.now }
         )
         do {
@@ -256,6 +394,7 @@ final class ProviderAgentRunCoordinatorTests: XCTestCase {
             database: fixture.database,
             credentials: fixture.credentials,
             generation: retryService,
+            budgetEstimator: DeterministicTestProviderBudgetEstimator(),
             now: { fixture.now }
         )
 
@@ -285,6 +424,7 @@ final class ProviderAgentRunCoordinatorTests: XCTestCase {
             database: fixture.database,
             credentials: fixture.credentials,
             generation: RecordingProviderGenerationService(events: []),
+            budgetEstimator: DeterministicTestProviderBudgetEstimator(),
             now: { fixture.now }
         )
         do {
@@ -329,6 +469,7 @@ final class ProviderAgentRunCoordinatorTests: XCTestCase {
             database: fixture.database,
             credentials: fixture.credentials,
             generation: RecordingProviderGenerationService(events: []),
+            budgetEstimator: DeterministicTestProviderBudgetEstimator(),
             now: { fixture.now }
         )
 

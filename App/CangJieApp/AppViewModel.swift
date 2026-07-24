@@ -156,6 +156,12 @@ final class AppViewModel: ObservableObject {
     var canRetryProviderRun: Bool {
         canRetryProviderRun(providerTaskProjection)
     }
+    var canApproveProviderBudget: Bool {
+        canApproveProviderBudget(providerTaskProjection)
+    }
+    var canRejectProviderBudget: Bool {
+        canRejectProviderBudget(providerTaskProjection)
+    }
     var canPauseProviderTask: Bool {
         canPauseProviderTask(providerTaskProjection)
     }
@@ -193,6 +199,12 @@ final class AppViewModel: ObservableObject {
     }
     var canRetryTaskSurfaceProviderRun: Bool {
         canRetryProviderRun(taskSurfaceProviderTaskProjection)
+    }
+    var canApproveTaskSurfaceProviderBudget: Bool {
+        canApproveProviderBudget(taskSurfaceProviderTaskProjection)
+    }
+    var canRejectTaskSurfaceProviderBudget: Bool {
+        canRejectProviderBudget(taskSurfaceProviderTaskProjection)
     }
     var chapterNeedsReview: Bool {
         chapter?.stage == .reviewingV1 || chapter?.stage == .reviewingV2
@@ -251,9 +263,13 @@ final class AppViewModel: ObservableObject {
     private func canResumeProviderTask(
         _ projection: S2ProviderTaskProjection?
     ) -> Bool {
-        guard let task = projection?.task,
-              task.status == .paused || task.status == .waitingUser,
+        guard let projection,
+              !projection.requiresBudgetApproval,
               providerRunTask == nil else {
+            return false
+        }
+        let task = projection.task
+        guard task.status == .paused || task.status == .waitingUser else {
             return false
         }
         return task.waitingReason != .networkConfirmation
@@ -263,7 +279,10 @@ final class AppViewModel: ObservableObject {
     private func canStopAndKeepProviderTask(
         _ projection: S2ProviderTaskProjection?
     ) -> Bool {
-        guard let status = projection?.task.status else { return false }
+        guard let projection, !projection.hasActiveBudgetApproval else {
+            return false
+        }
+        let status = projection.task.status
         return status == .running
             || status == .paused
             || status == .reconciling
@@ -272,9 +291,31 @@ final class AppViewModel: ObservableObject {
     private func canDiscardProviderTask(
         _ projection: S2ProviderTaskProjection?
     ) -> Bool {
-        guard let projection, projection.receipt == nil else { return false }
+        guard let projection,
+              !projection.hasActiveBudgetApproval,
+              projection.receipt == nil else { return false }
         return projection.task.status == .paused
             || projection.task.status == .failed
+    }
+
+    private func canApproveProviderBudget(
+        _ projection: S2ProviderTaskProjection?
+    ) -> Bool {
+        guard providerRunTask == nil,
+              let approval = projection?.budgetApproval else {
+            return false
+        }
+        return approval.status == .pending
+    }
+
+    private func canRejectProviderBudget(
+        _ projection: S2ProviderTaskProjection?
+    ) -> Bool {
+        guard providerRunTask == nil,
+              let status = projection?.budgetApproval?.status else {
+            return false
+        }
+        return status == .pending || status == .approved
     }
 
     private func canRetryProviderRun(
@@ -307,6 +348,14 @@ final class AppViewModel: ObservableObject {
             || request.phase == .responseComplete
     }
 
+    private func displayedTask(
+        _ identity: AgentTaskCommandIdentity,
+        in projection: S2ProviderTaskProjection?
+    ) -> AgentTaskSnapshot? {
+        guard projection?.commandIdentity == identity else { return nil }
+        return projection?.task
+    }
+
     init(
         database: AppDatabase? = nil,
         databaseFactory: () throws -> AppDatabase = { try AppDatabase.makeDefault() },
@@ -315,6 +364,8 @@ final class AppViewModel: ObservableObject {
         modelDiscoveryClient: any ModelDiscoveryServing = ModelDiscoveryNetworkClient(),
         providerGenerationService: any ProviderGenerationServing =
             ProviderGenerationNetworkClient(),
+        providerBudgetEstimator: any ProviderBudgetEstimating =
+            FailClosedProviderBudgetEstimator(),
         networkAvailabilityObserver: (any NetworkAvailabilityObserving)? = nil,
         agentTaskNotifications: (any AgentTaskNotificationScheduling)? = nil,
         notificationConsentStore: (any AgentTaskNotificationConsentStoring)? = nil,
@@ -463,7 +514,8 @@ final class AppViewModel: ObservableObject {
             ProviderAgentRunCoordinator(
                 database: $0,
                 credentials: resolvedModelCredentialRepository,
-                generation: providerGenerationService
+                generation: providerGenerationService,
+                budgetEstimator: providerBudgetEstimator
             )
         }
         self.modelConnectionSetup = ModelConnectionSetupController(
@@ -1207,7 +1259,9 @@ final class AppViewModel: ObservableObject {
         providerStreamText = ""
         canCancelProviderRun = false
         isAgentWorking = false
-        lastToolReceipt = completion.receipts.last
+        if let receipt = completion.receipts.last {
+            lastToolReceipt = receipt
+        }
         projects = completion.projects
         do {
             if let database {
@@ -1220,6 +1274,7 @@ final class AppViewModel: ObservableObject {
                     preservingCurrentDraft: true
                 )
             }
+            refreshProviderTaskProjection(publishFailure: true)
             clearErrors(in: .composer)
             setProviderBusinessStatus(
                 "这件事已经处理完成",
@@ -1259,12 +1314,28 @@ final class AppViewModel: ObservableObject {
         providerStreamText = ""
         canCancelProviderRun = false
         isAgentWorking = false
+        var providerExitAllowsDispatch = true
         if let database {
             _ = try? database.settleAgentTaskControlAfterProviderExit(
                 intentID: intentID,
                 preservePreparedIfUnsent:
                     error as? ProviderAgentRunError == .cancelled
             )
+            if let task = try? database.agentTask(intentID: intentID),
+               task.status == .running,
+               let request = try? database.providerRequest(intentID: intentID) {
+                if request.phase == .cancelled || request.phase == .failed {
+                    let transition = try? database.transitionAgentTask(
+                        id: task.id,
+                        expectedRevision: task.revision,
+                        commandID: UUID(),
+                        to: .failed
+                    )
+                    providerExitAllowsDispatch = transition?.task.status == .failed
+                } else if request.phase == .prepared {
+                    providerExitAllowsDispatch = false
+                }
+            }
         }
         if let database,
            let request = try? database.providerRequest(intentID: intentID) {
@@ -1290,6 +1361,10 @@ final class AppViewModel: ObservableObject {
                 status = "当前模型服务暂不支持真实生成，原请求仍然保留"
             case .toolTurnLimitReached:
                 status = "这次处理已达到安全轮次上限；已有结果已保留，没有结果的请求已释放"
+            case .budgetApprovalRequired:
+                status = "费用或用量需要你确认，原请求尚未发送"
+            case .budgetBlocked:
+                status = "预算记录无法安全核验，这次请求没有发送"
             default:
                 status = "这次模型处理没有完成，原请求仍然保留"
             }
@@ -1299,7 +1374,9 @@ final class AppViewModel: ObservableObject {
         if let conversationID {
             setProviderBusinessStatus(status, conversationID: conversationID)
         }
-        dispatchActiveProviderTaskIfPossible()
+        if providerExitAllowsDispatch {
+            dispatchActiveProviderTaskIfPossible()
+        }
     }
 
     private func dispatchActiveProviderTaskIfPossible(
@@ -1403,7 +1480,9 @@ final class AppViewModel: ObservableObject {
                 .commitDurableResponseIfPossible(intent: intent) else {
             return false
         }
-        lastToolReceipt = completion.receipts.last
+        if let receipt = completion.receipts.last {
+            lastToolReceipt = receipt
+        }
         projects = completion.projects
         latestAgentRun = try database.agentRun(
             id: completion.request.identity.runID,
@@ -1515,8 +1594,26 @@ final class AppViewModel: ObservableObject {
         pauseProviderTask(task)
     }
 
+    func pauseProviderTask(displayedIdentity: AgentTaskCommandIdentity) {
+        guard let task = displayedTask(
+            displayedIdentity,
+            in: providerTaskProjection
+        ) else { return }
+        pauseProviderTask(task)
+    }
+
     func pauseTaskSurfaceProviderTask() {
         guard let task = taskSurfaceProviderTaskProjection?.task else { return }
+        pauseProviderTask(task)
+    }
+
+    func pauseTaskSurfaceProviderTask(
+        displayedIdentity: AgentTaskCommandIdentity
+    ) {
+        guard let task = displayedTask(
+            displayedIdentity,
+            in: taskSurfaceProviderTaskProjection
+        ) else { return }
         pauseProviderTask(task)
     }
 
@@ -1559,8 +1656,26 @@ final class AppViewModel: ObservableObject {
         resumeProviderTask(task)
     }
 
+    func resumeProviderTask(displayedIdentity: AgentTaskCommandIdentity) {
+        guard let task = displayedTask(
+            displayedIdentity,
+            in: providerTaskProjection
+        ) else { return }
+        resumeProviderTask(task)
+    }
+
     func resumeTaskSurfaceProviderTask() {
         guard let task = taskSurfaceProviderTaskProjection?.task else { return }
+        resumeProviderTask(task)
+    }
+
+    func resumeTaskSurfaceProviderTask(
+        displayedIdentity: AgentTaskCommandIdentity
+    ) {
+        guard let task = displayedTask(
+            displayedIdentity,
+            in: taskSurfaceProviderTaskProjection
+        ) else { return }
         resumeProviderTask(task)
     }
 
@@ -1597,13 +1712,149 @@ final class AppViewModel: ObservableObject {
         }
     }
 
+    func approveProviderBudget(
+        approvalID: UUID,
+        displayedBindingHash: String
+    ) {
+        approveProviderBudget(
+            providerTaskProjection,
+            approvalID: approvalID,
+            displayedBindingHash: displayedBindingHash
+        )
+    }
+
+    func approveTaskSurfaceProviderBudget(
+        approvalID: UUID,
+        displayedBindingHash: String
+    ) {
+        approveProviderBudget(
+            taskSurfaceProviderTaskProjection,
+            approvalID: approvalID,
+            displayedBindingHash: displayedBindingHash
+        )
+    }
+
+    private func approveProviderBudget(
+        _ projection: S2ProviderTaskProjection?,
+        approvalID: UUID,
+        displayedBindingHash: String
+    ) {
+        guard requireActiveBuildForAgentMutation(),
+              providerRunTask == nil,
+              let database,
+              let providerRunCoordinator,
+              let projection,
+              let approval = projection.budgetApproval,
+              approval.status == .pending,
+              approval.id == approvalID,
+              approval.bindingHash == displayedBindingHash else {
+            return
+        }
+        do {
+            guard let intent = try database.pendingModelIntent(
+                id: projection.task.intentID
+            ) else {
+                throw AppDatabaseError.invalidProviderBudget
+            }
+            _ = try providerRunCoordinator.approveBudgetApproval(
+                approval,
+                intent: intent
+            )
+            setProviderBusinessStatus(
+                "预算已确认，准备发送同一个请求",
+                conversationID: projection.conversationID
+            )
+            refreshProviderTaskProjection(publishFailure: true)
+            dispatchActiveProviderTaskIfPossible()
+        } catch {
+            refreshProviderTaskProjection(publishFailure: false)
+            publishError("这次预算确认已失效，请查看最新请求（S2-BUDGET-APPROVAL）")
+        }
+    }
+
+    func rejectProviderBudget(
+        approvalID: UUID,
+        displayedBindingHash: String
+    ) {
+        rejectProviderBudget(
+            providerTaskProjection,
+            approvalID: approvalID,
+            displayedBindingHash: displayedBindingHash
+        )
+    }
+
+    func rejectTaskSurfaceProviderBudget(
+        approvalID: UUID,
+        displayedBindingHash: String
+    ) {
+        rejectProviderBudget(
+            taskSurfaceProviderTaskProjection,
+            approvalID: approvalID,
+            displayedBindingHash: displayedBindingHash
+        )
+    }
+
+    private func rejectProviderBudget(
+        _ projection: S2ProviderTaskProjection?,
+        approvalID: UUID,
+        displayedBindingHash: String
+    ) {
+        guard requireActiveBuildForAgentMutation(),
+              providerRunTask == nil,
+              let providerRunCoordinator,
+              let projection,
+              let approval = projection.budgetApproval,
+              approval.status == .pending || approval.status == .approved,
+              approval.id == approvalID,
+              approval.bindingHash == displayedBindingHash else {
+            return
+        }
+        do {
+            let settled = try providerRunCoordinator.rejectBudgetApproval(
+                approval
+            )
+            cancelPendingAgentTaskNotification(for: settled)
+            setProviderBusinessStatus(
+                settled.outcome == .kept
+                    ? "后续请求未发送，已有真实结果已经保留"
+                    : "这次请求没有发送，也不会产生新的模型费用",
+                conversationID: projection.conversationID
+            )
+            refreshProviderTaskProjection(publishFailure: true)
+            dispatchActiveProviderTaskIfPossible()
+        } catch {
+            refreshProviderTaskProjection(publishFailure: false)
+            publishError("这次预算决定已失效，请查看最新请求（S2-BUDGET-REJECT）")
+        }
+    }
+
     func stopAndKeepProviderTask() {
         guard let task = providerTaskProjection?.task else { return }
         stopAndKeepProviderTask(task)
     }
 
+    func stopAndKeepProviderTask(
+        displayedIdentity: AgentTaskCommandIdentity
+    ) {
+        guard let task = displayedTask(
+            displayedIdentity,
+            in: providerTaskProjection
+        ) else { return }
+        stopAndKeepProviderTask(task)
+    }
+
     func stopAndKeepTaskSurfaceProviderTask() {
         guard let task = taskSurfaceProviderTaskProjection?.task else { return }
+        stopAndKeepProviderTask(task)
+    }
+
+    func stopAndKeepTaskSurfaceProviderTask(
+        displayedIdentity: AgentTaskCommandIdentity
+    ) {
+        guard let task = displayedTask(
+            displayedIdentity,
+            in: taskSurfaceProviderTaskProjection
+        ) else { return }
         stopAndKeepProviderTask(task)
     }
 
@@ -1654,8 +1905,26 @@ final class AppViewModel: ObservableObject {
         discardProviderTask(task)
     }
 
+    func discardProviderTask(displayedIdentity: AgentTaskCommandIdentity) {
+        guard let task = displayedTask(
+            displayedIdentity,
+            in: providerTaskProjection
+        ) else { return }
+        discardProviderTask(task)
+    }
+
     func discardTaskSurfaceProviderTask() {
         guard let task = taskSurfaceProviderTaskProjection?.task else { return }
+        discardProviderTask(task)
+    }
+
+    func discardTaskSurfaceProviderTask(
+        displayedIdentity: AgentTaskCommandIdentity
+    ) {
+        guard let task = displayedTask(
+            displayedIdentity,
+            in: taskSurfaceProviderTaskProjection
+        ) else { return }
         discardProviderTask(task)
     }
 
@@ -1696,8 +1965,26 @@ final class AppViewModel: ObservableObject {
         retryProviderRun(task)
     }
 
+    func retryProviderRun(displayedIdentity: AgentTaskCommandIdentity) {
+        guard let task = displayedTask(
+            displayedIdentity,
+            in: providerTaskProjection
+        ) else { return }
+        retryProviderRun(task)
+    }
+
     func retryTaskSurfaceProviderRun() {
         guard let task = taskSurfaceProviderTaskProjection?.task else { return }
+        retryProviderRun(task)
+    }
+
+    func retryTaskSurfaceProviderRun(
+        displayedIdentity: AgentTaskCommandIdentity
+    ) {
+        guard let task = displayedTask(
+            displayedIdentity,
+            in: taskSurfaceProviderTaskProjection
+        ) else { return }
         retryProviderRun(task)
     }
 
@@ -1999,7 +2286,15 @@ final class AppViewModel: ObservableObject {
             return
         }
         let kind: AgentTaskNotificationKind?
-        switch task.status {
+        let budgetApproval = try? database.pendingProviderBudgetApproval(
+            taskID: task.id
+        )
+        if task.status == .waitingUser {
+            kind = .waitingUser
+        } else if budgetApproval?.status == .pending {
+            kind = .costLimit
+        } else {
+            switch task.status {
         case .completed:
             kind = .completed
         case .paused:
@@ -2010,6 +2305,7 @@ final class AppViewModel: ObservableObject {
             kind = .waitingUser
         case .queued, .running, .pauseRequested, .stopRequested, .discarded:
             kind = nil
+            }
         }
         guard let kind else {
             cancelPendingAgentTaskNotification(for: task)

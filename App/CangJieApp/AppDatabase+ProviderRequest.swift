@@ -634,6 +634,7 @@ extension AppDatabase {
         guard db.changesCount == 1 else {
             throw AppDatabaseError.idempotencyConflict
         }
+        try settleProviderBudgetUsageIfPresent(request, in: db)
     }
 
     static func updateProviderBackedRun(

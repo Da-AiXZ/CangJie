@@ -241,7 +241,7 @@ private struct NovelProjectBrowserReaderPage: View {
 private struct S1TasksPage: View {
     @ObservedObject var model: AppViewModel
     let onBack: () -> Void
-    @State private var confirmingDiscard = false
+    @State private var pendingDiscard: PendingTaskDiscard?
 
     var body: some View {
         NavigationStack {
@@ -274,45 +274,93 @@ private struct S1TasksPage: View {
                                 .accessibilityIdentifier("ai-task-recovery-state")
                         }
                     }
+                    if let detail = projection.budgetApprovalDetailText {
+                        Section(projection.budgetApprovalCardTitle) {
+                            Text(detail)
+                                .font(.callout)
+                                .textSelection(.enabled)
+                                .accessibilityIdentifier("ai-task-budget-approval-detail")
+                        }
+                    }
                     if model.canPauseTaskSurfaceProviderTask
                         || model.canResumeTaskSurfaceProviderTask
+                        || model.canApproveTaskSurfaceProviderBudget
+                        || model.canRejectTaskSurfaceProviderBudget
                         || model.canStopAndKeepTaskSurfaceProviderTask
                         || model.canDiscardTaskSurfaceProviderTask
                         || model.canRetryTaskSurfaceProviderRun {
                         Section("可用操作") {
+                            if model.canApproveTaskSurfaceProviderBudget,
+                               let approval = projection.budgetApproval {
+                                Button("同意这一次并继续") {
+                                    model.approveTaskSurfaceProviderBudget(
+                                        approvalID: approval.id,
+                                        displayedBindingHash: approval.bindingHash
+                                    )
+                                }
+                                .accessibilityIdentifier("ai-task-budget-approve-button")
+                            }
+                            if model.canRejectTaskSurfaceProviderBudget,
+                               let approval = projection.budgetApproval {
+                                Button("不发送这一次", role: .destructive) {
+                                    model.rejectTaskSurfaceProviderBudget(
+                                        approvalID: approval.id,
+                                        displayedBindingHash: approval.bindingHash
+                                    )
+                                }
+                                .accessibilityIdentifier("ai-task-budget-reject-button")
+                            }
                             if model.canPauseTaskSurfaceProviderTask {
                                 Button("现在暂停") {
-                                    model.pauseTaskSurfaceProviderTask()
+                                    model.pauseTaskSurfaceProviderTask(
+                                        displayedIdentity: projection.commandIdentity
+                                    )
                                 }
                                 .accessibilityIdentifier("ai-task-pause-button")
                             }
                             if model.canResumeTaskSurfaceProviderTask {
                                 Button(model.taskSurfaceProviderTaskResumeTitle) {
-                                    model.resumeTaskSurfaceProviderTask()
+                                    model.resumeTaskSurfaceProviderTask(
+                                        displayedIdentity: projection.commandIdentity
+                                    )
                                 }
                                 .accessibilityIdentifier("ai-task-resume-button")
                             }
                             if model.canStopAndKeepTaskSurfaceProviderTask {
                                 Button("到这里结束，保留已有内容") {
-                                    model.stopAndKeepTaskSurfaceProviderTask()
+                                    model.stopAndKeepTaskSurfaceProviderTask(
+                                        displayedIdentity: projection.commandIdentity
+                                    )
                                 }
                                 .accessibilityIdentifier("ai-task-keep-button")
                             }
                             if model.canDiscardTaskSurfaceProviderTask {
                                 Button("放弃未采用内容", role: .destructive) {
-                                    confirmingDiscard = true
+                                    pendingDiscard = PendingTaskDiscard(
+                                        identity: projection.commandIdentity,
+                                        conversationTitle: conversationTitle(
+                                            for: projection
+                                        ),
+                                        userRequest: projection.userRequest
+                                    )
                                 }
                                 .accessibilityIdentifier("ai-task-discard-button")
                             }
                             if model.canRetryTaskSurfaceProviderRun {
                                 Button("明确重试") {
-                                    model.retryTaskSurfaceProviderRun()
+                                    model.retryTaskSurfaceProviderRun(
+                                        displayedIdentity: projection.commandIdentity
+                                    )
                                 }
                                 .accessibilityIdentifier("ai-task-retry-button")
                             }
                         }
                     }
                     Section("真实记录") {
+                        if let budgetUsageText = projection.budgetUsageText {
+                            Text(budgetUsageText)
+                                .accessibilityIdentifier("ai-task-budget-usage")
+                        }
                         if let usageText = projection.usageText {
                             Text(usageText)
                                 .accessibilityIdentifier("ai-task-usage")
@@ -369,11 +417,19 @@ private struct S1TasksPage: View {
             .navigationBarBackButtonHidden(true)
             .confirmationDialog(
                 discardConfirmationTitle,
-                isPresented: $confirmingDiscard,
+                isPresented: Binding(
+                    get: { pendingDiscard != nil },
+                    set: { if !$0 { pendingDiscard = nil } }
+                ),
                 titleVisibility: .visible
             ) {
                 Button("确认放弃", role: .destructive) {
-                    model.discardTaskSurfaceProviderTask()
+                    if let pendingDiscard {
+                        model.discardTaskSurfaceProviderTask(
+                            displayedIdentity: pendingDiscard.identity
+                        )
+                    }
+                    pendingDiscard = nil
                 }
                 Button("取消", role: .cancel) {}
             }
@@ -399,11 +455,17 @@ private struct S1TasksPage: View {
     }
 
     private var discardConfirmationTitle: String {
-        guard let projection = model.taskSurfaceProviderTaskProjection else {
+        guard let pendingDiscard else {
             return "只放弃尚未采用的临时内容？真实工具回执和审计记录不会删除。"
         }
-        return "放弃“\(conversationTitle(for: projection))”中的“\(projection.userRequest.prefix(48))”？真实工具回执和审计记录不会删除。"
+        return "放弃“\(pendingDiscard.conversationTitle)”中的“\(pendingDiscard.userRequest.prefix(48))”？真实工具回执和审计记录不会删除。"
     }
+}
+
+private struct PendingTaskDiscard {
+    let identity: AgentTaskCommandIdentity
+    let conversationTitle: String
+    let userRequest: String
 }
 
 private struct S1SettingsPage: View {
@@ -1422,9 +1484,10 @@ struct ContentView: View {
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                     Spacer()
-                    if model.canPauseProviderTask {
+                    if model.canPauseProviderTask,
+                       let identity = model.providerTaskProjection?.commandIdentity {
                         Button {
-                            model.pauseProviderTask()
+                            model.pauseProviderTask(displayedIdentity: identity)
                         } label: {
                             Image(systemName: "pause.circle.fill")
                         }
@@ -1437,9 +1500,10 @@ struct ContentView: View {
                 .padding(.horizontal)
                 .padding(.vertical, 8)
             }
-            if model.canRetryProviderRun {
+            if model.canRetryProviderRun,
+               let identity = model.providerTaskProjection?.commandIdentity {
                 Button {
-                    model.retryProviderRun()
+                    model.retryProviderRun(displayedIdentity: identity)
                 } label: {
                     Label("重试这次处理", systemImage: "arrow.clockwise")
                 }
@@ -1448,9 +1512,60 @@ struct ContentView: View {
                 .padding(.bottom, 8)
                 .accessibilityIdentifier("provider-run-retry")
             }
-            if model.canResumeProviderTask {
+            if let projection = model.providerTaskProjection,
+               projection.hasActiveBudgetApproval {
+                VStack(alignment: .leading, spacing: 10) {
+                    Text(projection.budgetApprovalCardTitle)
+                        .font(.headline)
+                    Text(projection.budgetApprovalStateText)
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                    if let detail = projection.budgetApprovalDetailText {
+                        Text(detail)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .textSelection(.enabled)
+                            .accessibilityIdentifier("provider-budget-approval-detail")
+                    }
+                    if let budgetUsageText = projection.budgetUsageText {
+                        Text(budgetUsageText)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    HStack(spacing: 12) {
+                        if model.canApproveProviderBudget,
+                           let approval = projection.budgetApproval {
+                            Button("同意这一次并继续") {
+                                model.approveProviderBudget(
+                                    approvalID: approval.id,
+                                    displayedBindingHash: approval.bindingHash
+                                )
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .accessibilityIdentifier("provider-budget-approve")
+                        }
+                        if model.canRejectProviderBudget,
+                           let approval = projection.budgetApproval {
+                            Button("不发送") {
+                                model.rejectProviderBudget(
+                                    approvalID: approval.id,
+                                    displayedBindingHash: approval.bindingHash
+                                )
+                            }
+                            .buttonStyle(.bordered)
+                            .accessibilityIdentifier("provider-budget-reject")
+                        }
+                    }
+                }
+                .padding(.horizontal)
+                .padding(.bottom, 8)
+                .accessibilityElement(children: .contain)
+                .accessibilityIdentifier("provider-budget-approval-card")
+            }
+            if model.canResumeProviderTask,
+               let identity = model.providerTaskProjection?.commandIdentity {
                 Button {
-                    model.resumeProviderTask()
+                    model.resumeProviderTask(displayedIdentity: identity)
                 } label: {
                     Label(
                         model.providerTaskResumeTitle,

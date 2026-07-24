@@ -41,7 +41,7 @@ At execution and restore time, the app rebuilds the candidate from the current t
 
 ### Fail-closed validation
 
-Unknown, malformed, duplicate, empty, negative, over-budget, expired, cross-conversation, cross-project, stale-artifact, or hash-mismatched state fails closed. A pending request expires at its deadline. An already approved historical decision is not invalidated merely because wall-clock time later passes, but it is no longer accepted as executable authority when its artifact, target versions, current tool policy, budget, or exact receipt relationship changes.
+Unknown, malformed, duplicate, empty, negative, over-budget, expired, cross-conversation, cross-project, stale-artifact, or hash-mismatched state fails closed. A pending request expires at its deadline. Approval history remains an immutable record after approval, but executable authority expires at the bound deadline and must also be rejected when the artifact, target versions, current tool policy, budget, or exact receipt relationship changes. Historical status and current execution authority are separate facts.
 
 ### Transaction and receipt
 

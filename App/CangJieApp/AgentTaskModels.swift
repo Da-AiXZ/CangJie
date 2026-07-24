@@ -27,3 +27,10 @@ struct AgentTaskTransitionResult: Equatable {
     let task: AgentTaskSnapshot
     let promotedTask: AgentTaskSnapshot?
 }
+
+struct AgentTaskCommandIdentity: Equatable {
+    let taskID: UUID
+    let intentID: UUID
+    let taskRevision: Int
+    let providerRequestID: UUID
+}

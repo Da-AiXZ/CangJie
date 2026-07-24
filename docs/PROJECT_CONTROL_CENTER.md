@@ -42,18 +42,28 @@ no current connection
 -> force-quit reconciliation and continuation
 ```
 
-Formal prose generation is outside S2.
+This is the minimum Provider evidence loop, not a waiver of the remaining S2
+exit criteria in `IMPLEMENTATION_PLAN.md`. Formal prose generation is outside
+S2.
 
 ## Status summary
 
 | Area | Decision | Implementation | Automation | Device |
 |---|---|---|---|---|
-| S1 cockpit and workspace | Frozen | Main workspace, durable conversation, paging and queue UI exist; persistent-center interaction and accessibility repairs are implemented | Exact-SHA App and UI suites passed | Dynamic Type, VoiceOver, rotation/navigation and scroll retention pending |
+| S1 cockpit and workspace | Frozen | Main workspace, durable conversation, paging and queue UI exist; opening a left feature page still overlays and disables the center instead of preserving an independent left stack | Existing exact-SHA App and UI suites encode the current modal behavior and therefore do not prove the frozen boundary | Independent-left-stack repair plus Dynamic Type, VoiceOver, rotation/navigation and scroll retention pending |
 | Provider/credential/discovery | Frozen | Credential binding and supported-provider gating are implemented | Exact-SHA Core, App and Keychain probe passed | Real connection setup pending |
 | Real Provider generation | Frozen boundary | Durable request/usage and strict finish semantics implemented; stream checkpointing is throttled but coordinator remains MainActor | Deterministic Provider App/UI contracts passed | Real Provider streaming pending |
-| Typed Tool and ToolReceipt | Frozen boundary | One authorized tool batch plus no-tool final turn; create premise and read disclosure are host-gated; switch/save remain unadvertised | Exact-SHA App and UI contracts passed | Real Provider tool lifecycle pending |
+| Typed Tool and ToolReceipt | Frozen boundary | One tool batch plus no-tool final turn and exact receipts exist; admission still accepts only a small fixed phrase grammar, while switch/save remain unadvertised | Deterministic fixtures pass only the accepted phrases | Natural-language admission, remaining S2 tool actions and real Provider lifecycle pending |
 | Task control and recovery | Frozen boundary | Explicit retry, responseComplete local continuation, unknown-outcome non-retry and terminal turn limit are implemented | Exact-SHA App and UI lifecycle suites passed | Lock, force-quit and notification checks pending |
-| Budget governance | Frozen requirement | Per-request output cap and at-most-two automatic Provider turns only | No persisted token/cost/time approval loop | Incomplete |
+| Budget governance | Frozen requirement | Persisted cumulative token/cost/time policy, exact request approval, atomic reservation/send, terminal settlement and conservative legacy backfill are implemented in the pending worktree | Local Core and static contracts pass; exact-SHA Apple tests pending | Device approval/recovery behavior pending |
+
+## Pending worktree evidence
+
+- Core: 188 XCTest and 15 Swift Testing tests passed; line coverage is 91.80%.
+- All App, App-test and UI-test Swift sources pass parser validation.
+- Nine Python import, build-identity, candidate and artifact contract scripts pass.
+- This is local evidence only. It does not replace exact-SHA iPadOS semantic
+  compile, XCTest, XCUITest, Keychain isolation or physical-device evidence.
 
 ## Current exact-SHA automation
 
@@ -91,22 +101,26 @@ device status.
 
 ## Active blocker
 
-S1 still needs Dynamic Type, VoiceOver, rotation/navigation and scroll-retention
-device checks. S2 lacks a persisted cumulative token/cost/time budget approval
-loop and still needs the complete real Provider / Typed Tool lifecycle on device.
+S1 still violates the independent-left-stack boundary and needs Dynamic Type,
+VoiceOver, rotation/navigation and scroll-retention device checks. The S2 budget
+loop is implemented locally but lacks exact-SHA Apple evidence. S2 also still
+uses fixed-phrase Tool admission, does not advertise the required switch/save
+actions, and needs the complete real Provider / Typed Tool lifecycle on device.
 
 ## Immediate queue
 
-1. Add the persisted cumulative budget and approval loop before claiming S2 budget safety.
-2. Rerun the exact-SHA Core and iPadOS gates for that budget boundary.
-3. Build a new candidate only after those gates are green.
-4. Run the physical-device differential script, including real Provider, VoiceOver and lifecycle checks.
+1. Commit the persisted budget boundary and rerun exact-SHA Core and iPadOS gates.
+2. Repair the independent left stack without recreating or disabling the center.
+3. Replace fixed-phrase Tool admission and close the remaining S2 switch/save and result-projection gaps.
+4. Rerun affected exact-SHA gates, then build a new candidate.
+5. Run the physical-device differential script, including real Provider, VoiceOver and lifecycle checks.
 
 ## Stable decision routing
 
 Do not restate these contracts here. Read their canonical sources:
 
-- Agent-first product and S0-S6: `IMPLEMENTATION_PLAN.md` sections 2 and 8.
+- Agent-first host boundary: `IMPLEMENTATION_PLAN.md` sections 2.1 and 2.21.
+- Evidence-bound stages and current S2 contract: `IMPLEMENTATION_PLAN.md` sections 2.25 and 8 / S2.
 - No-key/deferred setup: `IMPLEMENTATION_PLAN.md` section 2.22.
 - Provider lifecycle: `IMPLEMENTATION_PLAN.md` section 7.2.
 - Quality and physical-device evidence: `IMPLEMENTATION_PLAN.md` section 9.

@@ -10,6 +10,8 @@ enum ProviderAgentRunError: Error, Equatable {
     case requiresReconciliation
     case terminalRequest
     case toolTurnLimitReached
+    case budgetApprovalRequired
+    case budgetBlocked(Set<BudgetBlockReason>)
     case outcomeUnknown(ProviderRequestInterruption)
     case persistenceFailed
 }

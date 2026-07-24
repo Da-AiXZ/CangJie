@@ -35,6 +35,7 @@ final class AppViewModelProviderRetryTests: XCTestCase {
             database: database,
             modelCredentialRepository: credentials,
             providerGenerationService: generation,
+            providerBudgetEstimator: DeterministicTestProviderBudgetEstimator(),
             networkAvailabilityObserver: TestNetworkAvailabilityObserver(
                 state: .available
             ),
@@ -132,6 +133,7 @@ final class AppViewModelProviderRetryTests: XCTestCase {
             database: database,
             modelCredentialRepository: credentials,
             providerGenerationService: generation,
+            providerBudgetEstimator: DeterministicTestProviderBudgetEstimator(),
             taskID: UUID(),
             draftAutosaveDelayNanoseconds: UInt64.max
         )
@@ -151,6 +153,7 @@ final class AppViewModelProviderRetryTests: XCTestCase {
             database: database,
             credentials: credentials,
             generation: generation,
+            budgetEstimator: DeterministicTestProviderBudgetEstimator(),
             now: { now.addingTimeInterval(2) }
         )
         XCTAssertThrowsError(
@@ -301,6 +304,7 @@ final class AppViewModelProviderRetryTests: XCTestCase {
             database: database,
             modelCredentialRepository: credentials,
             providerGenerationService: generation,
+            providerBudgetEstimator: DeterministicTestProviderBudgetEstimator(),
             taskID: UUID(),
             draftAutosaveDelayNanoseconds: UInt64.max
         )

@@ -1,6 +1,6 @@
 # CangJie Curated Compounding and Pitfalls
 
-- Updated: 2026-07-22
+- Updated: 2026-07-24
 - Scope: reusable cross-task safeguards only
 - Historical source: `docs/history/COMPOUNDING_AND_PITFALLS-through-P305.md`
 

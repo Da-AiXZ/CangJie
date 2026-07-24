@@ -2,6 +2,20 @@
 import Foundation
 @testable import CangJie
 
+struct ThrowingProviderBudgetEstimator: ProviderBudgetEstimating {
+    func initialPolicy(taskID: UUID) throws -> TaskBudgetPolicy {
+        try FailClosedProviderBudgetEstimator().initialPolicy(taskID: taskID)
+    }
+
+    func estimate(
+        taskScope: ProviderRequestBudgetTaskScope,
+        request: ProviderRequestSnapshot,
+        prompt: ProviderGenerationPrompt
+    ) throws -> NextRequestBudgetEstimate {
+        throw ProviderGenerationError.invalidPreparedRequest
+    }
+}
+
 final class AppViewModelProviderGenerationService:
     ProviderGenerationServing
 {
@@ -44,6 +58,63 @@ final class AppViewModelProviderGenerationService:
             continuation.onTermination = { _ in
                 task.cancel()
             }
+        }
+    }
+}
+
+final class SequencedAppViewModelProviderGenerationService:
+    ProviderGenerationServing
+{
+    private var batches: [[ProviderGenerationEvent]]
+    private(set) var callCount = 0
+
+    init(batches: [[ProviderGenerationEvent]]) {
+        self.batches = batches
+    }
+
+    func validate(
+        request: ProviderRequestSnapshot,
+        verifiedConnection: VerifiedModelConnection,
+        secret: String,
+        prompt: ProviderGenerationPrompt
+    ) throws {
+        try prompt.validate()
+    }
+
+    func stream(
+        request: ProviderRequestSnapshot,
+        verifiedConnection: VerifiedModelConnection,
+        secret: String,
+        systemPrompt: String,
+        userPrompt: String
+    ) -> AsyncThrowingStream<ProviderGenerationEvent, Error> {
+        stream(
+            request: request,
+            verifiedConnection: verifiedConnection,
+            secret: secret,
+            prompt: .initial(
+                systemPrompt: systemPrompt,
+                userPrompt: userPrompt
+            )
+        )
+    }
+
+    func stream(
+        request: ProviderRequestSnapshot,
+        verifiedConnection: VerifiedModelConnection,
+        secret: String,
+        prompt: ProviderGenerationPrompt
+    ) -> AsyncThrowingStream<ProviderGenerationEvent, Error> {
+        callCount += 1
+        guard !batches.isEmpty else {
+            return AsyncThrowingStream {
+                $0.finish(throwing: ProviderGenerationError.invalidPreparedRequest)
+            }
+        }
+        let events = batches.removeFirst()
+        return AsyncThrowingStream { continuation in
+            events.forEach { continuation.yield($0) }
+            continuation.finish()
         }
     }
 }

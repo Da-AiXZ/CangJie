@@ -573,6 +573,19 @@ final class AgentTaskNotificationTests: XCTestCase {
         XCTAssertEqual(pending.content.body, "这件事已经处理完成，结果已安全保存。")
     }
 
+    func testBudgetBoundaryNotificationDoesNotClaimOnlyCostWasExceeded() {
+        let task = notificationTask(revision: 1, status: .paused)
+        let request = AgentTaskNotificationRequest(
+            task: task,
+            kind: .costLimit
+        )
+
+        XCTAssertEqual(
+            request.body,
+            "这件事已在预算或用量边界前暂停，等待你确认。"
+        )
+    }
+
     private func notificationTask(
         id: UUID = UUID(),
         revision: Int,
@@ -647,6 +660,7 @@ final class AgentTaskNotificationTests: XCTestCase {
             database: database,
             modelCredentialRepository: credentials,
             providerGenerationService: generation,
+            providerBudgetEstimator: DeterministicTestProviderBudgetEstimator(),
             networkAvailabilityObserver: network,
             agentTaskNotifications: notifications,
             notificationConsentStore: consent,

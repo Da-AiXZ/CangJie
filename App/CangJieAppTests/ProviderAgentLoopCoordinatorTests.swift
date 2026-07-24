@@ -84,6 +84,7 @@ final class ProviderAgentLoopCoordinatorTests: XCTestCase {
             database: database,
             credentials: credentials,
             generation: generation,
+            budgetEstimator: DeterministicTestProviderBudgetEstimator(),
             now: { now }
         )
 
@@ -299,6 +300,7 @@ final class ProviderAgentLoopCoordinatorTests: XCTestCase {
             database: database,
             credentials: credentials,
             generation: generation,
+            budgetEstimator: DeterministicTestProviderBudgetEstimator(),
             now: { now }
         )
         var cancelledAtDurableResponse = false
@@ -728,6 +730,7 @@ final class ProviderAgentLoopCoordinatorTests: XCTestCase {
                 database: database,
                 credentials: credentials,
                 generation: generation,
+                budgetEstimator: DeterministicTestProviderBudgetEstimator(),
                 now: { now }
             ),
             intent,

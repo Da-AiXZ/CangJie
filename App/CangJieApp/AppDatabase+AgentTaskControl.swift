@@ -368,6 +368,26 @@ extension AppDatabase {
                     in: db
                 )
                 try Self.updateProviderBackedRun(cancelled, in: db)
+                if task.status == .pauseRequested {
+                    _ = try Self.transitionAgentTask(
+                        id: task.id,
+                        expectedRevision: task.revision,
+                        commandID: UUID(),
+                        to: .paused,
+                        now: timestamp,
+                        in: db
+                    )
+                } else if task.status == .stopRequested {
+                    _ = try Self.transitionAgentTask(
+                        id: task.id,
+                        expectedRevision: task.revision,
+                        commandID: UUID(),
+                        to: .completed,
+                        outcome: .kept,
+                        now: timestamp,
+                        in: db
+                    )
+                }
             case .sending, .streaming:
                 let unknown = try ProviderRequestLifecycle.markOutcomeUnknown(
                     request,
@@ -501,6 +521,22 @@ extension AppDatabase {
     ) throws -> AgentTaskTransitionResult {
         let timestamp = try Self.canonicalAgentTaskTimestamp(now)
         return try queue.write { db in
+            if status == .running {
+                let current = try Self.requiredAgentTask(id: id, in: db)
+                if current.status == .paused {
+                    let activeBudgetApprovalCount = try Int.fetchOne(
+                        db,
+                        sql: """
+                            SELECT COUNT(*) FROM providerBudgetApproval
+                            WHERE taskID = ? AND status IN ('pending', 'approved')
+                            """,
+                        arguments: [id.uuidString]
+                    ) ?? 0
+                    guard activeBudgetApprovalCount == 0 else {
+                        throw AppDatabaseError.providerBudgetRequiresApproval
+                    }
+                }
+            }
             try Self.transitionAgentTask(
                 id: id,
                 expectedRevision: expectedRevision,

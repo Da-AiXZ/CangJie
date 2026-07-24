@@ -811,6 +811,53 @@ final class CangJieSmokeUITests: XCTestCase {
         XCTAssertTrue(app.buttons["agent-send-button"].isEnabled)
     }
 
+    func testS2BudgetApprovalIsVisibleAndRequiredBeforeProviderSend() {
+        let app = makeIsolatedApp(fixture: "s2-budget-approval")
+        launchWithDeterministicTimestampSetting(app)
+
+        let composer = app.textViews["agent-composer"]
+        XCTAssertTrue(composer.waitForExistence(timeout: 10))
+        composer.tap()
+        composer.typeText("ui-budget-approval")
+        app.buttons["agent-send-button"].tap()
+
+        let approvalCard = app.descendants(matching: .any)[
+            "provider-budget-approval-card"
+        ]
+        XCTAssertTrue(approvalCard.waitForExistence(timeout: 10))
+        XCTAssertTrue(
+            app.staticTexts["provider-budget-approval-detail"].exists
+        )
+        XCTAssertTrue(app.buttons["provider-budget-approve"].exists)
+        XCTAssertTrue(app.buttons["provider-budget-reject"].exists)
+        XCTAssertFalse(app.buttons["provider-task-resume"].exists)
+
+        app.buttons["activity-bar-tasks"].tap()
+        XCTAssertTrue(
+            app.descendants(matching: .any)["ai-tasks-page"]
+                .waitForExistence(timeout: 5)
+        )
+        assertEventually(
+            app.staticTexts["ai-task-doing"],
+            hasLabel: "原请求已安全保存，正在等待这一次预算确认"
+        )
+        XCTAssertTrue(app.staticTexts["ai-task-budget-usage"].exists)
+        XCTAssertTrue(
+            app.staticTexts["ai-task-budget-approval-detail"].exists
+        )
+        let approve = app.buttons["ai-task-budget-approve-button"]
+        XCTAssertTrue(approve.waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["ai-task-budget-reject-button"].exists)
+        XCTAssertFalse(app.buttons["ai-task-resume-button"].exists)
+
+        approve.tap()
+        assertEventually(
+            app.staticTexts["ai-task-doing"],
+            hasLabel: "这件事已经处理完成"
+        )
+        XCTAssertTrue(app.staticTexts["ai-task-usage"].exists)
+    }
+
     func testScaleFixtureKeepsMidShelfBookVisibleAfterDetailPushAndBack() {
         let app = makeIsolatedApp(fixture: "persisted-scale-and-restore")
         launchWithDeterministicTimestampSetting(app)

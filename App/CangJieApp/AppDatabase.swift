@@ -164,6 +164,9 @@ enum AppDatabaseError: Error, Equatable {
     case approvalRequiresReapproval
     case approvalExpired
     case approvalBudgetExceeded
+    case invalidProviderBudget
+    case providerBudgetRequiresApproval
+    case providerBudgetApprovalExpired
     case invalidChapterVersion
     case invalidChapterCalibration
     case chapterBindingMismatch
@@ -1741,6 +1744,9 @@ final class AppDatabase {
         }
         migrator.registerMigration("s2-provider-request-termination-v4") { db in
             try Self.migrateProviderRequestTermination(db)
+        }
+        migrator.registerMigration("s2-provider-budget-v5") { db in
+            try Self.migrateProviderBudget(db)
         }
         return migrator
     }

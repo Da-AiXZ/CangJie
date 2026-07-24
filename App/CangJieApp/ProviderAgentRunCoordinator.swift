@@ -158,6 +158,7 @@ final class ProviderAgentRunCoordinator {
     private let database: AppDatabase
     private let credentials: any ModelCredentialRepository
     private let generation: any ProviderGenerationServing
+    private let budgetEstimator: any ProviderBudgetEstimating
     private let now: () -> Date
 
     init(
@@ -165,11 +166,13 @@ final class ProviderAgentRunCoordinator {
         credentials: any ModelCredentialRepository,
         generation: any ProviderGenerationServing =
             ProviderGenerationNetworkClient(),
+        budgetEstimator: any ProviderBudgetEstimating,
         now: @escaping () -> Date = Date.init
     ) {
         self.database = database
         self.credentials = credentials
         self.generation = generation
+        self.budgetEstimator = budgetEstimator
         self.now = now
     }
 
@@ -232,6 +235,47 @@ final class ProviderAgentRunCoordinator {
             message: committed.message,
             receipts: committed.receipt.map { [$0] } ?? [],
             projects: try database.listProjects()
+        )
+    }
+
+    func approveBudgetApproval(
+        _ approval: ProviderBudgetApprovalSnapshot,
+        intent: PendingModelIntent
+    ) throws -> ProviderBudgetApprovalSnapshot {
+        guard let request = try database.providerRequest(intentID: intent.id),
+              request.phase == .prepared,
+              approval.providerRequestID == request.identity.requestID,
+              let task = try database.agentTask(intentID: intent.id),
+              task.id == approval.taskID,
+              task.activeRunID == request.identity.runID else {
+            throw ProviderAgentRunError.persistenceFailed
+        }
+        try Self.validateIntentScope(request, intent: intent)
+        let prompt = try generationPrompt(for: request, intent: intent)
+        let estimate = try budgetEstimator.estimate(
+            taskScope: ProviderRequestBudgetTaskScope(
+                taskID: task.id,
+                intentID: task.intentID,
+                activeRunID: request.identity.runID
+            ),
+            request: request,
+            prompt: prompt
+        )
+        return try database.approveProviderBudgetApproval(
+            approvalID: approval.id,
+            displayedBindingHash: approval.bindingHash,
+            estimate: estimate,
+            now: now()
+        )
+    }
+
+    func rejectBudgetApproval(
+        _ approval: ProviderBudgetApprovalSnapshot
+    ) throws -> AgentTaskSnapshot {
+        try database.rejectProviderBudgetApproval(
+            approvalID: approval.id,
+            displayedBindingHash: approval.bindingHash,
+            now: now()
         )
     }
 
@@ -419,11 +463,39 @@ final class ProviderAgentRunCoordinator {
             throw ProviderAgentRunError.cancelled
         }
 
-        request = try ProviderRequestLifecycle.markSending(
-            request,
-            now: now()
+        guard let task = try database.agentTask(
+                intentID: request.identity.intentID
+            ), task.status == .running,
+              task.activeRunID == request.identity.runID else {
+            throw ProviderAgentRunError.persistenceFailed
+        }
+        let policy = try budgetEstimator.initialPolicy(taskID: task.id)
+        let taskScope = ProviderRequestBudgetTaskScope(
+            taskID: task.id,
+            intentID: task.intentID,
+            activeRunID: request.identity.runID
         )
-        try database.updateProviderRequest(request)
+        let estimate = try budgetEstimator.estimate(
+            taskScope: taskScope,
+            request: request,
+            prompt: prompt
+        )
+        switch try database.authorizeAndMarkProviderRequestSending(
+            request,
+            initialPolicy: policy,
+            estimate: estimate,
+            now: now()
+        ) {
+        case let .authorized(authorization):
+            guard !authorization.isReplay else {
+                throw ProviderAgentRunError.requiresReconciliation
+            }
+            request = authorization.request
+        case .requiresApproval:
+            throw ProviderAgentRunError.budgetApprovalRequired
+        case let .blocked(reasons):
+            throw ProviderAgentRunError.budgetBlocked(reasons)
+        }
         onUpdate(Self.projection(request: request, response: .empty, usage: nil))
 
         var response = ProviderResponsePayload.empty

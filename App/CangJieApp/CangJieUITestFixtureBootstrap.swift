@@ -12,6 +12,7 @@ enum CangJieUITestFixtureBootstrap {
     private static let persistedScaleAndRestoreFixture = "persisted-scale-and-restore"
     private static let modelConnectionSetupFixture = "model-connection-setup"
     private static let s2TaskLifecycleFixture = "s2-task-lifecycle"
+    private static let s2BudgetApprovalFixture = "s2-budget-approval"
 
     private enum FixtureBootstrapError: Error {
         case seedFailed
@@ -66,6 +67,18 @@ enum CangJieUITestFixtureBootstrap {
                     )
                 notificationConsent =
                     CangJieUITestNotificationConsentStore()
+            case s2BudgetApprovalFixture:
+                try seedS2TaskLifecycle(
+                    in: database,
+                    credentials: modelCredentials
+                )
+                providerGeneration = CangJieUITestProviderGenerationService()
+                networkAvailability =
+                    CangJieUITestNetworkAvailabilityObserver(
+                        state: .available
+                    )
+                notificationConsent =
+                    CangJieUITestNotificationConsentStore()
             default:
                 throw FixtureBootstrapError.seedFailed
             }
@@ -83,6 +96,10 @@ enum CangJieUITestFixtureBootstrap {
                 modelCredentialRepository: modelCredentials,
                 modelDiscoveryClient: discoveryClient,
                 providerGenerationService: providerGeneration,
+                providerBudgetEstimator:
+                    fixture == s2TaskLifecycleFixture
+                        ? DeterministicTestProviderBudgetEstimator()
+                        : FailClosedProviderBudgetEstimator(),
                 networkAvailabilityObserver: networkAvailability,
                 notificationConsentStore: notificationConsent,
                 bundleIdentityLoader: identityLoader

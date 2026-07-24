@@ -1,14 +1,14 @@
 # 仓颉（CangJie）网络小说 AI Agent 权威实施方案
 
-- 状态：`ACTIVE AND AUTHORITATIVE`
+- 权威范围：稳定产品合同与 S0–S6 定义；当前实现、验证、阻塞和队列只看 `PROJECT_CONTROL_CENTER.md`
 - 新基线：2026-07-18
 - 仓库：`F:\project\CangJie`
 - 产品口号：**你只管有念头，仓颉负责把它写成小说。**
 - 本文取代 2026-07-16 版本中所有“专业写作工作台优先”“固定表单访谈”“用户先解释专业原因”的产品解释。
-- 旧版中已经验证的运行时治理、持久化、版本、审批、恢复、安全和 CI 能力继续保留，但降到后台，不再决定普通用户的默认体验。
+- 旧版运行时治理、持久化、版本、审批、恢复、安全和 CI 能力只有在当前代码与证据仍能证明时才视为保留；这些能力降到后台，不再决定普通用户的默认体验。
 - 宿主控制与模型信任边界：`docs/adr/0004-host-control-and-model-trust-boundary.md`；`docs/AGENT_HARNESS_ARCHITECTURE.md` 仅为 Context、Prompt、Loop、Typed Tools、任务恢复、多 Agent、治理和可观测性的非权威设计参考。
 - 架构来源登记：`docs/ARCHITECTURE_SOURCE_REGISTER.md`；实现只依据官方公开来源、仓颉原创需求和独立 ADR。
-- 状态边界：**工程架构基线已建立，具体 Swift 接口随 TDD 细化；H0–H5 未验收前不得写成已实现。**
+- 状态边界：本文不声明任何 Swift 接口或 Harness 关卡已经实现；具体实现与 H0–H5 验证状态只由 `PROJECT_CONTROL_CENTER.md` 记录。
 
 ---
 
@@ -710,6 +710,8 @@ Every stage report identifies candidate nature, included and excluded scope, aut
 意图挖掘状态必须独立持久化和版本化：用户否定一个方向时，相关 `IntentHypothesis` 进入已否定状态并保留反对证据；尚未确认的理解不能升级为 `CreativeDecision.confirmed`；`CreativeUnknown` 记录已问问题和答案来源，防止换词重复；短试写产生的是新证据，不会偷偷改成用户决定。
 
 ### 6.3 状态模型
+
+以下名称描述目标产品语义，不是当前 Swift 枚举或数据库 schema 的声明。阶段实现可以使用经迁移保护的等价内部状态，但必须保持这里的用户语义；实际已实现状态以代码和 `PROJECT_CONTROL_CENTER.md` 为准。
 
 ```text
 FactStatus:

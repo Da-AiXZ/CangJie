@@ -109,7 +109,7 @@ struct AgentTaskNotificationRequest: Equatable, Sendable {
         case .failed:
             body = "这件事没有完成，原请求仍然保留。"
         case .costLimit:
-            body = "这件事已在费用上限前暂停，等待你确认。"
+            body = "这件事已在预算或用量边界前暂停，等待你确认。"
         case .majorStoryGate:
             body = "故事推进到了需要你决定的位置。"
         }

@@ -11,12 +11,25 @@ struct S2ProviderTaskProjection: Equatable {
     let request: ProviderRequestSnapshot
     let userRequest: String
     let usage: ProviderUsage?
+    let budget: ProviderBudgetTaskSnapshot?
     let receipt: ToolReceipt?
     let projectTitle: String?
     let artifactTitle: String?
     let lastSafeSaveAt: Date
 
+    var commandIdentity: AgentTaskCommandIdentity {
+        AgentTaskCommandIdentity(
+            taskID: task.id,
+            intentID: task.intentID,
+            taskRevision: task.revision,
+            providerRequestID: request.identity.requestID
+        )
+    }
+
     var conversationStatus: String {
+        if requiresBudgetApproval {
+            return "费用或用量需要你确认，原请求尚未发送"
+        }
         if let taskStatusText {
             return taskStatusText
         }
@@ -43,6 +56,9 @@ struct S2ProviderTaskProjection: Equatable {
     }
 
     var doingText: String {
+        if requiresBudgetApproval {
+            return "原请求已安全保存，正在等待这一次预算确认"
+        }
         switch task.status {
         case .queued:
             return "这件事正在排队，前一件主要任务结束后再继续"
@@ -90,6 +106,9 @@ struct S2ProviderTaskProjection: Equatable {
     }
 
     var nextText: String {
+        if requiresBudgetApproval {
+            return "你确认后才会发送同一个请求；拒绝不会产生新的模型费用"
+        }
         switch task.status {
         case .queued:
             return "等待当前主要任务释放后开始"
@@ -128,6 +147,9 @@ struct S2ProviderTaskProjection: Equatable {
     }
 
     var needsUserText: String {
+        if requiresBudgetApproval {
+            return budgetApprovalReasonText
+        }
         switch task.status {
         case .queued:
             return "目前不需要你操作"
@@ -168,6 +190,116 @@ struct S2ProviderTaskProjection: Equatable {
             return value + "；最终账单待服务商确认"
         }
         return value
+    }
+
+    var budgetApproval: ProviderBudgetApprovalSnapshot? {
+        budget?.approval
+    }
+
+    var requiresBudgetApproval: Bool {
+        budgetApproval?.status == .pending
+    }
+
+    var hasActiveBudgetApproval: Bool {
+        guard let status = budgetApproval?.status else { return false }
+        return status == .pending || status == .approved
+    }
+
+    var budgetUsageText: String? {
+        guard let usage = budget?.usage else { return nil }
+        let elapsedSeconds = usage.cumulativeElapsedMilliseconds / 1_000
+        let costText: String
+        switch usage.cumulativeCost {
+        case let .known(microUnits, basis, _, currencyCode, scale):
+            let amount = Double(microUnits) / Double(scale)
+            let basisText = basis == .actual ? "实际" : "估算"
+            costText = "\(basisText)费用 \(amount.formatted(.number.precision(.fractionLength(0...6)))) \(currencyCode)"
+        case let .unknown(reason, _, currencyCode, _):
+            let reasonText: String
+            switch reason {
+            case .pricingUnavailable:
+                reasonText = "价格未知"
+            case .providerChargeUnavailable:
+                reasonText = "最终账单未知"
+            case .outcomeUnknown:
+                reasonText = "请求结果与账单待核对"
+            }
+            costText = "\(reasonText)（\(currencyCode)）"
+        }
+        return "预算 v\(budget?.policy.version ?? usage.budgetVersion)：输入 \(usage.cumulativeInputTokens) · 输出 \(usage.cumulativeOutputTokens) tokens · 用时 \(elapsedSeconds) 秒 · \(costText)"
+    }
+
+    var budgetApprovalReasonText: String {
+        guard let reasons = budgetApproval?.reasons else {
+            return "需要你确认是否允许发送这一次请求"
+        }
+        var values: [String] = []
+        if reasons.contains(.pricingUnavailable) {
+            values.append("服务商价格无法可靠核实")
+        }
+        if reasons.contains(.cumulativeCostUnavailable) {
+            values.append("之前请求的最终费用仍未知")
+        }
+        if reasons.contains(.inputTokens) {
+            values.append("累计输入将超过上限")
+        }
+        if reasons.contains(.outputTokens) {
+            values.append("累计输出将超过上限")
+        }
+        if reasons.contains(.cost) {
+            values.append("预计费用将超过上限")
+        }
+        if reasons.contains(.elapsedTime) {
+            values.append("累计用时将超过上限")
+        }
+        return values.isEmpty
+            ? "需要你确认是否允许发送这一次请求"
+            : values.joined(separator: "；")
+    }
+
+    var budgetApprovalCardTitle: String {
+        budgetApproval?.status == .approved
+            ? "预算已同意，尚未发送"
+            : "发送前预算确认"
+    }
+
+    var budgetApprovalStateText: String {
+        guard budgetApproval?.status == .approved else {
+            return budgetApprovalReasonText
+        }
+        switch task.waitingReason {
+        case .networkConfirmation:
+            return "预算已同意；网络恢复后仍需你确认发送"
+        case .connectionInvalid:
+            return "预算已同意；请先恢复原模型连接或拒绝这次请求"
+        case nil:
+            return "预算已同意，系统将只发送绑定的同一个请求"
+        }
+    }
+
+    var budgetApprovalDetailText: String? {
+        guard let approval = budgetApproval,
+              let policy = budget?.policy else {
+            return nil
+        }
+        let estimate = approval.estimate
+        let identity = estimate.requestIdentity.identity
+        let requestSeconds = estimate.reservedElapsedMilliseconds / 1_000
+        let limitSeconds = policy.maximumElapsedMilliseconds / 1_000
+        let requestCost: String
+        switch estimate.reservedCost {
+        case let .known(microUnits, _, _, currencyCode, scale):
+            let amount = Double(microUnits) / Double(scale)
+            requestCost = "预计 \(amount.formatted(.number.precision(.fractionLength(0...6)))) \(currencyCode)"
+        case .unknown:
+            requestCost = "费用未知（不会按 0 计算）"
+        }
+        let ceiling = Double(policy.maximumCostMicroUnits)
+            / Double(policy.costScale)
+        return "服务：\(identity.provider.rawValue) · 模型：\(identity.modelID)\n"
+            + "本次上界：输入 \(estimate.reservedInputTokens) · 输出 \(estimate.reservedOutputTokens) tokens · \(requestSeconds) 秒 · \(requestCost)\n"
+            + "任务上限：输入 \(policy.maximumInputTokens) · 输出 \(policy.maximumOutputTokens) tokens · \(limitSeconds) 秒 · \(ceiling.formatted(.number.precision(.fractionLength(0...6)))) \(policy.currencyCode)\n"
+            + "请求：\(approval.providerRequestID.uuidString) · 绑定：\(approval.bindingHash) · 有效至 \(approval.expiresAt.formatted(date: .abbreviated, time: .shortened))"
     }
 
     var resultTitle: String? {
@@ -486,6 +618,10 @@ extension AppDatabase {
                 throw AppDatabaseError.invalidProviderRequest
             }
             let usage = try Self.aggregateProviderUsage(requests)
+            let budget = try Self.providerBudgetTaskSnapshot(
+                taskID: task.id,
+                in: db
+            )
 
             let receiptRow = try Row.fetchOne(
                 db,
@@ -580,6 +716,7 @@ extension AppDatabase {
                 request: request,
                 userRequest: intent.userRequest,
                 usage: usage,
+                budget: budget,
                 receipt: receipt,
                 projectTitle: projectTitle,
                 artifactTitle: artifactTitle,

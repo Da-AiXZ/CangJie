@@ -1,10 +1,267 @@
 @_spi(ModelCredentialVerification) import CangJieCore
 import Foundation
+import GRDB
 import XCTest
 @testable import CangJie
 
 @MainActor
 final class AppViewModelProviderRunTests: XCTestCase {
+    func testBudgetApprovalPausesBeforeSendThenResumesTheExactRequest() async throws {
+        let database = try AppDatabase(path: temporaryDatabasePath())
+        let credentials = RecordingCredentialRepository()
+        let connection = try ModelConnectionTestFixture.makeConnection(
+            provider: .openAI,
+            baseURL: URL(string: "https://api.openai.com/v1")!,
+            credentialID: UUID(),
+            selectedModel: "fixture-model",
+            secret: "fixture-secret"
+        )
+        _ = try database.storeModelConnection(
+            connection,
+            makeCurrent: true
+        )
+        credentials.credentialPayloadHash = hash("b")
+        try credentials.save(
+            "fixture-secret",
+            versionProof: hash("a"),
+            setupAuthorizationHash: nil,
+            for: connection
+        )
+        let generation = AppViewModelProviderGenerationService(events: [
+            .textDelta("budget approved"),
+            .finished(reason: "stop"),
+            .usage(
+                ProviderUsage(
+                    inputTokens: 7,
+                    outputTokens: 3,
+                    totalTokens: 10
+                )
+            )
+        ])
+        let network = TestNetworkAvailabilityObserver(state: .available)
+        let viewModel = AppViewModel(
+            database: database,
+            modelCredentialRepository: credentials,
+            providerGenerationService: generation,
+            networkAvailabilityObserver: network,
+            taskID: UUID(),
+            draftAutosaveDelayNanoseconds: UInt64.max
+        )
+        viewModel.draft = "Please continue this request"
+
+        viewModel.sendModelDependentMessage()
+        let intent = try XCTUnwrap(viewModel.modelConnectionSetup.pendingIntent)
+        await viewModel.waitForProviderRunToSettle()
+
+        XCTAssertEqual(generation.callCount, 0)
+        let prepared = try XCTUnwrap(
+            database.providerRequest(intentID: intent.id)
+        )
+        XCTAssertEqual(prepared.phase, .prepared)
+        XCTAssertEqual(viewModel.providerTaskProjection?.task.status, .paused)
+        XCTAssertTrue(viewModel.canApproveProviderBudget)
+        XCTAssertFalse(viewModel.canResumeProviderTask)
+
+        let displayedApproval = try XCTUnwrap(
+            viewModel.providerTaskProjection?.budgetApproval
+        )
+        network.updateWithoutNotifying(.unavailable)
+        viewModel.approveProviderBudget(
+            approvalID: displayedApproval.id,
+            displayedBindingHash: displayedApproval.bindingHash
+        )
+        XCTAssertEqual(generation.callCount, 0)
+        XCTAssertEqual(
+            viewModel.providerTaskProjection?.task.waitingReason,
+            .networkConfirmation
+        )
+        XCTAssertEqual(
+            viewModel.providerTaskProjection?.budgetApproval?.status,
+            .approved
+        )
+        XCTAssertFalse(viewModel.canResumeProviderTask)
+
+        network.update(.available)
+        let resumeIdentity = try XCTUnwrap(
+            viewModel.providerTaskProjection?.commandIdentity
+        )
+        XCTAssertTrue(viewModel.canResumeProviderTask)
+        viewModel.resumeProviderTask(displayedIdentity: resumeIdentity)
+        await viewModel.waitForProviderRunToSettle()
+
+        XCTAssertEqual(generation.callCount, 1)
+        let completed = try XCTUnwrap(
+            database.providerRequest(intentID: intent.id)
+        )
+        XCTAssertEqual(
+            completed.identity.requestID,
+            prepared.identity.requestID
+        )
+        XCTAssertEqual(completed.phase, .continuationCommitted)
+        XCTAssertEqual(viewModel.providerTaskProjection?.budgetApproval, nil)
+        let usage = try database.providerBudgetUsageSnapshot(
+            taskID: try XCTUnwrap(viewModel.providerTaskProjection?.task.id)
+        )
+        XCTAssertEqual(usage.cumulativeInputTokens, 7)
+        XCTAssertEqual(usage.cumulativeOutputTokens, 3)
+    }
+
+    func testBudgetApprovalAcrossToolTurnKeepsDurableReceiptVisible() async throws {
+        let database = try AppDatabase(path: temporaryDatabasePath())
+        let credentials = RecordingCredentialRepository()
+        let connection = try ModelConnectionTestFixture.makeConnection(
+            provider: .openAI,
+            baseURL: URL(string: "https://api.openai.com/v1")!,
+            credentialID: UUID(),
+            selectedModel: "fixture-model",
+            secret: "fixture-secret"
+        )
+        _ = try database.storeModelConnection(connection, makeCurrent: true)
+        credentials.credentialPayloadHash = hash("b")
+        try credentials.save(
+            "fixture-secret",
+            versionProof: hash("a"),
+            setupAuthorizationHash: nil,
+            for: connection
+        )
+        let generation = SequencedAppViewModelProviderGenerationService(
+            batches: [
+                [
+                    .toolCallDelta(
+                        index: 0,
+                        id: "call-budget-create",
+                        name: "project_create",
+                        argumentsFragment:
+                            #"{"title":"星河","premise":"悬疑小说"}"#
+                    ),
+                    .finished(reason: "tool_calls"),
+                    .usage(
+                        ProviderUsage(
+                            inputTokens: 12,
+                            outputTokens: 8,
+                            totalTokens: 20
+                        )
+                    )
+                ],
+                [
+                    .textDelta("我已经建立《星河》。"),
+                    .finished(reason: "stop"),
+                    .usage(
+                        ProviderUsage(
+                            inputTokens: 24,
+                            outputTokens: 10,
+                            totalTokens: 34
+                        )
+                    )
+                ]
+            ]
+        )
+        let viewModel = AppViewModel(
+            database: database,
+            modelCredentialRepository: credentials,
+            providerGenerationService: generation,
+            networkAvailabilityObserver: TestNetworkAvailabilityObserver(
+                state: .available
+            ),
+            taskID: UUID(),
+            draftAutosaveDelayNanoseconds: UInt64.max
+        )
+        viewModel.draft = "创建一本叫星河的悬疑小说"
+
+        viewModel.sendModelDependentMessage()
+        await viewModel.waitForProviderRunToSettle()
+        let firstApproval = try XCTUnwrap(
+            viewModel.providerTaskProjection?.budgetApproval
+        )
+        viewModel.approveProviderBudget(
+            approvalID: firstApproval.id,
+            displayedBindingHash: firstApproval.bindingHash
+        )
+        await viewModel.waitForProviderRunToSettle()
+
+        XCTAssertEqual(generation.callCount, 1)
+        let durableReceipt = try XCTUnwrap(
+            viewModel.providerTaskProjection?.receipt
+        )
+        XCTAssertEqual(durableReceipt.toolID, "project.create")
+        let secondApproval = try XCTUnwrap(
+            viewModel.providerTaskProjection?.budgetApproval
+        )
+        XCTAssertEqual(
+            viewModel.providerTaskProjection?.request.identity.turnSequence,
+            2
+        )
+
+        viewModel.approveProviderBudget(
+            approvalID: secondApproval.id,
+            displayedBindingHash: secondApproval.bindingHash
+        )
+        await viewModel.waitForProviderRunToSettle()
+
+        XCTAssertEqual(generation.callCount, 2)
+        XCTAssertEqual(
+            viewModel.providerTaskProjection?.request.phase,
+            .continuationCommitted
+        )
+        XCTAssertEqual(viewModel.lastToolReceipt?.id, durableReceipt.id)
+        XCTAssertEqual(
+            viewModel.providerTaskProjection?.receipt?.id,
+            durableReceipt.id
+        )
+    }
+
+    func testBudgetPreflightFailureStopsWithoutAutomaticRetryLoop() async throws {
+        let database = try AppDatabase(path: temporaryDatabasePath())
+        let credentials = RecordingCredentialRepository()
+        let connection = try ModelConnectionTestFixture.makeConnection(
+            provider: .openAI,
+            baseURL: URL(string: "https://api.openai.com/v1")!,
+            credentialID: UUID(),
+            selectedModel: "fixture-model",
+            secret: "fixture-secret"
+        )
+        _ = try database.storeModelConnection(connection, makeCurrent: true)
+        credentials.credentialPayloadHash = hash("b")
+        try credentials.save(
+            "fixture-secret",
+            versionProof: hash("a"),
+            setupAuthorizationHash: nil,
+            for: connection
+        )
+        let generation = AppViewModelProviderGenerationService(events: [])
+        let viewModel = AppViewModel(
+            database: database,
+            modelCredentialRepository: credentials,
+            providerGenerationService: generation,
+            providerBudgetEstimator: ThrowingProviderBudgetEstimator(),
+            taskID: UUID(),
+            draftAutosaveDelayNanoseconds: UInt64.max
+        )
+        viewModel.draft = "budget preflight must fail once"
+
+        viewModel.sendModelDependentMessage()
+        let intent = try XCTUnwrap(viewModel.modelConnectionSetup.pendingIntent)
+        await viewModel.waitForProviderRunToSettle()
+
+        XCTAssertEqual(generation.callCount, 0)
+        XCTAssertEqual(
+            try database.providerRequest(intentID: intent.id)?.phase,
+            .cancelled
+        )
+        XCTAssertEqual(
+            try database.agentTask(intentID: intent.id)?.status,
+            .failed
+        )
+        let requestCount = try database.queue.read { db in
+            try Int.fetchOne(
+                db,
+                sql: "SELECT COUNT(*) FROM providerRequest WHERE intentID = ?",
+                arguments: [intent.id.uuidString]
+            ) ?? 0
+        }
+        XCTAssertEqual(requestCount, 1)
+    }
+
     func testVerifiedCurrentConnectionRunsPendingIntentOnceAndCommitsResponse() async throws {
         let database = try AppDatabase(path: temporaryDatabasePath())
         let credentials = RecordingCredentialRepository()
@@ -45,6 +302,7 @@ final class AppViewModelProviderRunTests: XCTestCase {
             database: database,
             modelCredentialRepository: credentials,
             providerGenerationService: generation,
+            providerBudgetEstimator: DeterministicTestProviderBudgetEstimator(),
             taskID: UUID(),
             draftAutosaveDelayNanoseconds: UInt64.max
         )
@@ -123,6 +381,7 @@ final class AppViewModelProviderRunTests: XCTestCase {
             database: database,
             modelCredentialRepository: credentials,
             providerGenerationService: generation,
+            providerBudgetEstimator: DeterministicTestProviderBudgetEstimator(),
             networkAvailabilityObserver: network,
             taskID: UUID(),
             draftAutosaveDelayNanoseconds: UInt64.max
@@ -178,6 +437,7 @@ final class AppViewModelProviderRunTests: XCTestCase {
             database: database,
             modelCredentialRepository: credentials,
             providerGenerationService: generation,
+            providerBudgetEstimator: DeterministicTestProviderBudgetEstimator(),
             networkAvailabilityObserver: TestNetworkAvailabilityObserver(
                 state: .available
             ),
@@ -233,6 +493,7 @@ final class AppViewModelProviderRunTests: XCTestCase {
             database: database,
             modelCredentialRepository: credentials,
             providerGenerationService: generation,
+            providerBudgetEstimator: DeterministicTestProviderBudgetEstimator(),
             networkAvailabilityObserver: TestNetworkAvailabilityObserver(
                 state: .available
             ),
@@ -297,6 +558,7 @@ final class AppViewModelProviderRunTests: XCTestCase {
             database: database,
             modelCredentialRepository: credentials,
             providerGenerationService: generation,
+            providerBudgetEstimator: DeterministicTestProviderBudgetEstimator(),
             networkAvailabilityObserver: network,
             taskID: UUID(),
             draftAutosaveDelayNanoseconds: 50_000_000
@@ -407,6 +669,7 @@ final class AppViewModelProviderRunTests: XCTestCase {
             database: database,
             modelCredentialRepository: credentials,
             providerGenerationService: generation,
+            providerBudgetEstimator: DeterministicTestProviderBudgetEstimator(),
             networkAvailabilityObserver: network,
             taskID: UUID(),
             draftAutosaveDelayNanoseconds: UInt64.max
@@ -547,6 +810,7 @@ final class AppViewModelProviderRunTests: XCTestCase {
             database: database,
             modelCredentialRepository: credentials,
             providerGenerationService: generation,
+            providerBudgetEstimator: DeterministicTestProviderBudgetEstimator(),
             taskID: UUID(),
             draftAutosaveDelayNanoseconds: UInt64.max
         )
@@ -684,6 +948,7 @@ final class AppViewModelProviderRunTests: XCTestCase {
             database: database,
             modelCredentialRepository: credentials,
             providerGenerationService: generation,
+            providerBudgetEstimator: DeterministicTestProviderBudgetEstimator(),
             taskID: UUID(),
             draftAutosaveDelayNanoseconds: UInt64.max
         )
@@ -806,6 +1071,7 @@ final class AppViewModelProviderRunTests: XCTestCase {
             database: database,
             modelCredentialRepository: credentials,
             providerGenerationService: generation,
+            providerBudgetEstimator: DeterministicTestProviderBudgetEstimator(),
             taskID: UUID(),
             draftAutosaveDelayNanoseconds: UInt64.max
         )
@@ -875,6 +1141,7 @@ final class AppViewModelProviderRunTests: XCTestCase {
             database: database,
             modelCredentialRepository: credentials,
             providerGenerationService: generation,
+            providerBudgetEstimator: DeterministicTestProviderBudgetEstimator(),
             taskID: UUID(),
             draftAutosaveDelayNanoseconds: UInt64.max
         )
@@ -986,6 +1253,7 @@ final class AppViewModelProviderRunTests: XCTestCase {
             database: database,
             modelCredentialRepository: credentials,
             providerGenerationService: generation,
+            providerBudgetEstimator: DeterministicTestProviderBudgetEstimator(),
             networkAvailabilityObserver: network,
             taskID: UUID(),
             draftAutosaveDelayNanoseconds: UInt64.max
